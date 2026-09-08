@@ -115,3 +115,36 @@ ON timestamp_jobs(object_id);
 
 CREATE INDEX IF NOT EXISTS idx_timestamp_jobs_trust
 ON timestamp_jobs(trust_id);
+
+CREATE TABLE IF NOT EXISTS blockchain_anchors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  anchor_id TEXT NOT NULL UNIQUE,
+  trust_id TEXT NOT NULL,
+  job_id TEXT NOT NULL,
+  object_id TEXT NOT NULL,
+  version_id TEXT,
+  blockchain TEXT NOT NULL DEFAULT 'bitcoin',
+  status TEXT NOT NULL DEFAULT 'pending',
+  block_height INTEGER,
+  block_hash TEXT,
+  transaction_id TEXT,
+  attestation_time TEXT,
+  verified_at TEXT,
+  confirmations INTEGER NOT NULL DEFAULT 0,
+  proof_data TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_blockchain_anchors_trust
+ON blockchain_anchors(trust_id);
+
+CREATE INDEX IF NOT EXISTS idx_blockchain_anchors_job
+ON blockchain_anchors(job_id);
+
+CREATE INDEX IF NOT EXISTS idx_blockchain_anchors_object
+ON blockchain_anchors(object_id);
+
+CREATE INDEX IF NOT EXISTS idx_blockchain_anchors_status
+ON blockchain_anchors(status);
