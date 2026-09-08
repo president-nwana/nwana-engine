@@ -1,3 +1,5 @@
+import { ensurePendingBitcoinAnchor } from "./trust";
+
 interface Env {
 	nwana_engine_db: D1Database;
 }
@@ -417,6 +419,13 @@ async function processTimestampJob(
 		submitted_at: now,
 	});
 
+	await ensurePendingBitcoinAnchor(db, {
+		trustId: job.trust_id,
+		jobId: job.job_id,
+		objectId: job.object_id,
+		versionId: job.version_id,
+		proofData: proofPayload,
+	});
 	await db.batch([
 		db
 			.prepare(`
