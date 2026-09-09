@@ -1,4 +1,4 @@
-import { buildDetachedOtsProof, upgradeDetachedOtsProof } from "./ots-proof";
+import { buildDetachedOtsProof, upgradeDetachedOtsProof, verifyDetachedOtsProof } from "./ots-proof";
 import { ensurePendingBitcoinAnchor } from "./trust";
 
 interface Env {
@@ -731,6 +731,281 @@ async function upgradeTimestampJob(
                                 ok: false,
                                 job_id: row.job_id,
                                 status: row.status,
+                                error: errorText,
+                        },
+                        502,
+                );
+        }
+}
+async function verifyTimestampJob(
+        jobId: string,
+        env: Env,
+): Promise<Response> {
+        const db = env.nwana_engine_db;
+
+        const row = await db
+                .prepare(`
+                        SELECT
+                                j.job_id,
+                                j.trust_id,
+                                j.object_id,
+                                j.version_id,
+                                j.hash,
+                                j.status,
+                                t.timestamp_request
+                        FROM timestamp_jobs j
+                        JOIN trust_records t
+                                ON t.trust_id = j.trust_id
+                        WHERE j.job_id = ?
+                        LIMIT 1
+                `)
+                .bind(jobId)
+                .first<{
+                        job_id: string;
+                        trust_id: string;
+                        object_id: string;
+                        version_id: string | null;
+                        hash: string;
+                        status: string;
+                        timestamp_request: string | null;
+                }>();
+
+        if (!row) {
+                return json(
+                        {
+                                ok: false,
+                                error: "Timestamp job not found",
+                        },
+                        404,
+                );
+        }
+
+        if (!row.timestamp_request) {
+                return json(
+                        {
+                                ok: false,
+                                job_id: row.job_id,
+                                error: "No OpenTimestamps proof stored for this job",
+                        },
+                        409,
+                );
+        }
+
+        let payload: {
+                format?: string;
+                proof_base64?: string;
+                bitcoin_attestation?: boolean;
+                [key: string]: unknown;
+        };
+
+        try {
+                payload = JSON.parse(row.timestamp_request);
+        } catch {
+                return json(
+                        {
+                                ok: false,
+                                job_id: row.job_id,
+                                error: "Stored timestamp proof metadata is invalid JSON",
+                        },
+                        500,
+                );
+        }
+
+        if (
+                payload.format !== "opentimestamps-detached-proof" ||
+                typeof payload.proof_base64 !== "string"
+        ) {
+                return json(
+                        {
+                                ok: false,
+                                job_id: row.job_id,
+                                error: "Stored detached OpenTimestamps proof is missing",
+                        },
+                        409,
+                );
+        }
+
+        if (payload.bitcoin_attestation !== true) {
+                return json(
+                        {
+                                ok: false,
+                                job_id: row.job_id,
+                                status: row.status,
+                                error: "Bitcoin attestation has not been found yet. Upgrade the proof first.",
+                        },
+                        409,
+                );
+        }
+
+        try {
+                const verified =
+                        await verifyDetachedOtsProof(
+                                payload.proof_base64,
+                        );
+
+                const now = new Date().toISOString();
+
+                const attestationTime =
+                        new Date(
+                                verified.blockTime * 1000,
+                        ).toISOString();
+
+                const updatedPayload = JSON.stringify({
+                        ...payload,
+                        bitcoin_verified: true,
+                        block_height:
+                                verified.blockHeight,
+                        block_hash:
+                                verified.blockHash,
+                        attestation_time:
+                                attestationTime,
+                        confirmations:
+                                verified.confirmations,
+                        verified_at: now,
+                });
+
+                await db.batch([
+                        db
+                                .prepare(`
+                                        UPDATE trust_records
+                                        SET
+                                                timestamp_request = ?,
+                                                timestamp_verified = 1,
+                                                blockchain_anchor = ?,
+                                                verification_status = 'verified',
+                                                updated_at = CURRENT_TIMESTAMP
+                                        WHERE trust_id = ?
+                                `)
+                                .bind(
+                                        updatedPayload,
+                                        verified.blockHash,
+                                        row.trust_id,
+                                ),
+
+                        db
+                                .prepare(`
+                                        UPDATE timestamp_jobs
+                                        SET
+                                                status = 'confirmed',
+                                                last_error = NULL,
+                                                updated_at = CURRENT_TIMESTAMP
+                                        WHERE job_id = ?
+                                `)
+                                .bind(
+                                        row.job_id,
+                                ),
+
+                        db
+                                .prepare(`
+                                        UPDATE blockchain_anchors
+                                        SET
+                                                status = 'confirmed',
+                                                block_height = ?,
+                                                block_hash = ?,
+                                                attestation_time = ?,
+                                                verified_at = ?,
+                                                confirmations = ?,
+                                                proof_data = ?,
+                                                last_error = NULL,
+                                                updated_at = CURRENT_TIMESTAMP
+                                        WHERE job_id = ?
+                                        AND blockchain = 'bitcoin'
+                                `)
+                                .bind(
+                                        verified.blockHeight,
+                                        verified.blockHash,
+                                        attestationTime,
+                                        now,
+                                        verified.confirmations,
+                                        updatedPayload,
+                                        row.job_id,
+                                ),
+
+                        db
+                                .prepare(`
+                                        INSERT INTO audit_events (
+                                                audit_id,
+                                                object_id,
+                                                action,
+                                                module,
+                                                status,
+                                                details
+                                        )
+                                        VALUES (
+                                                ?,
+                                                ?,
+                                                'bitcoin_verified',
+                                                'trust',
+                                                'success',
+                                                ?
+                                        )
+                                `)
+                                .bind(
+                                        `NWANA-AUDIT-${crypto.randomUUID()}`,
+                                        row.object_id,
+                                        JSON.stringify({
+                                                job_id:
+                                                        row.job_id,
+                                                trust_id:
+                                                        row.trust_id,
+                                                block_height:
+                                                        verified.blockHeight,
+                                                block_hash:
+                                                        verified.blockHash,
+                                                attestation_time:
+                                                        attestationTime,
+                                                confirmations:
+                                                        verified.confirmations,
+                                        }),
+                                ),
+                ]);
+
+                return json({
+                        ok: true,
+                        job_id: row.job_id,
+                        object_id: row.object_id,
+                        status: "confirmed",
+                        verification_status: "verified",
+                        bitcoin_verified: true,
+                        block_height:
+                                verified.blockHeight,
+                        block_hash:
+                                verified.blockHash,
+                        attestation_time:
+                                attestationTime,
+                        confirmations:
+                                verified.confirmations,
+                        verified_at: now,
+                        message:
+                                "OpenTimestamps proof was cryptographically verified against the Bitcoin blockchain.",
+                });
+        } catch (error) {
+                const errorText =
+                        error instanceof Error
+                                ? `${error.name}: ${error.message}`
+                                : String(error);
+
+                await db
+                        .prepare(`
+                                UPDATE blockchain_anchors
+                                SET
+                                        last_error = ?,
+                                        updated_at = CURRENT_TIMESTAMP
+                                WHERE job_id = ?
+                                AND blockchain = 'bitcoin'
+                        `)
+                        .bind(
+                                errorText,
+                                row.job_id,
+                        )
+                        .run();
+
+                return json(
+                        {
+                                ok: false,
+                                job_id: row.job_id,
+                                status: row.status,
+                                verification_status: "failed",
                                 error: errorText,
                         },
                         502,
@@ -1622,6 +1897,33 @@ export default {
 		const parts = url.pathname
 			.split("/")
 			.filter(Boolean);
+                if (
+                        parts.length === 4 &&
+                        parts[0] === "trust" &&
+                        parts[1] === "jobs" &&
+                        parts[3] === "verify" &&
+                        request.method === "POST"
+                ) {
+                        try {
+                                return await verifyTimestampJob(
+                                        decodeURIComponent(parts[2]),
+                                        env,
+                                );
+                        } catch (error) {
+                                console.error(error);
+
+                                return json(
+                                        {
+                                                ok: false,
+                                                error:
+                                                        error instanceof Error
+                                                                ? error.message
+                                                                : "Unknown error",
+                                        },
+                                        500,
+                                );
+                        }
+                }
                 if (
                         parts.length === 4 &&
                         parts[0] === "trust" &&
