@@ -1,3 +1,4 @@
+import { buildDetachedOtsProof } from "./ots-proof";
 import { ensurePendingBitcoinAnchor } from "./trust";
 
 interface Env {
@@ -218,6 +219,7 @@ async function submitHashToOpenTimestamps(
 		ok: boolean;
 		calendar?: string;
 		proofBase64?: string;
+                calendarResponseBytes?: Uint8Array;
 		attempts: Array<{
 			url: string;
 			ok: boolean;
@@ -279,6 +281,7 @@ async function submitHashToOpenTimestamps(
 				ok: true,
 				calendar: url,
 				proofBase64: bytesToBase64(proofBytes),
+                                calendarResponseBytes: proofBytes,
 				attempts,
 			};
 		} catch (error) {
@@ -362,7 +365,7 @@ async function processTimestampJob(
 
 	const result = await submitHashToOpenTimestamps(job.hash);
 
-	if (!result.ok || !result.calendar || !result.proofBase64) {
+	if (!result.ok || !result.calendar || !result.calendarResponseBytes) {
 		const errorText = JSON.stringify(result.attempts);
 
 		await db.batch([
@@ -410,14 +413,23 @@ async function processTimestampJob(
 		);
 	}
 
-	const proofPayload = JSON.stringify({
-		format: "opentimestamps-calendar-response",
-		calendar: result.calendar,
-		hash_algorithm: "SHA-256",
-		hash: job.hash,
-		response_base64: result.proofBase64,
-		submitted_at: now,
-	});
+	const detachedProof = buildDetachedOtsProof(
+                job.hash,
+                result.calendarResponseBytes,
+        );
+
+        const proofPayload = JSON.stringify({
+                format: "opentimestamps-detached-proof",
+                encoding: "base64",
+                hash_algorithm: "SHA-256",
+                hash: job.hash,
+                calendar: result.calendar,
+                proof_base64: detachedProof.proofBase64,
+                proof_bytes: detachedProof.proofSize,
+                bitcoin_attestation:
+                        detachedProof.hasBitcoinAttestation,
+                submitted_at: now,
+        });
 
 	await ensurePendingBitcoinAnchor(db, {
 		trustId: job.trust_id,
