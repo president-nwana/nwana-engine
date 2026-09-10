@@ -1,6 +1,6 @@
 import { buildDetachedOtsProof } from "./ots-proof";
 import { ensurePendingProofAnchor } from "./trust";
-import { OpenTimestampsBitcoinProvider } from "./opentimestamps-bitcoin-provider";
+import { getDefaultProofProvider } from "./proof-providers";
 
 interface Env {
 	nwana_engine_db: D1Database;
@@ -413,7 +413,7 @@ async function processTimestampJob(
 		`)
 		.bind(now, job.job_id)
 		.run();
-        const proofProvider = new OpenTimestampsBitcoinProvider();
+        const proofProvider = getDefaultProofProvider();
 
         let providerResult;
 
@@ -739,7 +739,7 @@ async function upgradeTimestampJob(
 
         try {
                 const proofProvider =
-                        new OpenTimestampsBitcoinProvider();
+                        getDefaultProofProvider();
 
                 if (!proofProvider.upgradeProof) {
                         throw new Error(
@@ -1002,7 +1002,7 @@ async function verifyTimestampJob(
 
         try {
                 const proofProvider =
-                        new OpenTimestampsBitcoinProvider();
+                        getDefaultProofProvider();
 
                 const verified =
                         await proofProvider.verifyProof({
