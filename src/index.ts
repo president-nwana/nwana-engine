@@ -1049,27 +1049,34 @@ async function verifyTimestampJob(
 
                         db
                                 .prepare(`
-                                        UPDATE blockchain_anchors
+                                        UPDATE proof_anchors
                                         SET
                                                 status = 'confirmed',
-                                                block_height = ?,
-                                                block_hash = ?,
-                                                attestation_time = ?,
+                                                external_anchor_id = ?,
+                                                anchored_at = ?,
                                                 verified_at = ?,
-                                                confirmations = ?,
                                                 proof_data = ?,
+                                                provider_metadata = ?,
                                                 last_error = NULL,
                                                 updated_at = CURRENT_TIMESTAMP
                                         WHERE job_id = ?
-                                        AND blockchain = 'bitcoin'
+                                        AND provider = 'opentimestamps-bitcoin'
                                 `)
                                 .bind(
-                                        verified.blockHeight,
                                         verified.blockHash,
                                         attestationTime,
                                         now,
-                                        verified.confirmations,
                                         updatedPayload,
+                                        JSON.stringify({
+                                                blockHeight:
+                                                        verified.blockHeight,
+                                                blockHash:
+                                                        verified.blockHash,
+                                                blockTime:
+                                                        verified.blockTime,
+                                                confirmations:
+                                                        verified.confirmations,
+                                        }),
                                         row.job_id,
                                 ),
 
@@ -1139,12 +1146,12 @@ async function verifyTimestampJob(
 
                 await db
                         .prepare(`
-                                UPDATE blockchain_anchors
+                                UPDATE proof_anchors
                                 SET
                                         last_error = ?,
                                         updated_at = CURRENT_TIMESTAMP
                                 WHERE job_id = ?
-                                AND blockchain = 'bitcoin'
+                                AND provider = 'opentimestamps-bitcoin'
                         `)
                         .bind(
                                 errorText,
