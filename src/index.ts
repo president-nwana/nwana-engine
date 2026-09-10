@@ -1,5 +1,6 @@
 import { buildDetachedOtsProof, upgradeDetachedOtsProof, verifyDetachedOtsProof } from "./ots-proof";
 import { ensurePendingBitcoinAnchor } from "./trust";
+import { OpenTimestampsBitcoinProvider } from "./opentimestamps-bitcoin-provider";
 
 interface Env {
 	nwana_engine_db: D1Database;
@@ -412,74 +413,102 @@ async function processTimestampJob(
 		`)
 		.bind(now, job.job_id)
 		.run();
+        const proofProvider = new OpenTimestampsBitcoinProvider();
 
-	const result = await submitHashToOpenTimestamps(job.hash);
+        let providerResult;
 
-	if (!result.ok || !result.calendar || !result.calendarResponseBytes) {
-		const errorText = JSON.stringify(result.attempts);
+        try {
+                providerResult = await proofProvider.createProof({
+                        subject: {
+                                subjectId: job.object_id,
+                                versionId: job.version_id,
+                                hash: job.hash,
+                        },
+                });
+        } catch (error) {
+                const errorText =
+                        error instanceof Error
+                                ? error.message
+                                : "Unknown proof provider error";
 
-		await db.batch([
-			db
-				.prepare(`
-					UPDATE timestamp_jobs
-					SET
-						status = 'failed',
-						last_error = ?,
-						updated_at = CURRENT_TIMESTAMP
-					WHERE job_id = ?
-				`)
-				.bind(errorText, job.job_id),
+                await db.batch([
+                        db
+                                .prepare(`
+                                        UPDATE timestamp_jobs
+                                        SET
+                                                status = 'failed',
+                                                last_error = ?,
+                                                updated_at = CURRENT_TIMESTAMP
+                                        WHERE job_id = ?
+                                `)
+                                .bind(errorText, job.job_id),
 
-			db
-				.prepare(`
-					INSERT INTO audit_events (
-						audit_id,
-						object_id,
-						action,
-						module,
-						status,
-						details
-					)
-					VALUES (?, ?, 'timestamp_submission_failed', 'trust', 'failed', ?)
-				`)
-				.bind(
-					`NWANA-AUDIT-${crypto.randomUUID()}`,
-					job.object_id,
-					JSON.stringify({
-						job_id: job.job_id,
-						attempts: result.attempts,
-					}),
-				),
-		]);
+                        db
+                                .prepare(`
+                                        INSERT INTO audit_events (
+                                                audit_id,
+                                                object_id,
+                                                action,
+                                                module,
+                                                status,
+                                                details
+                                        )
+                                        VALUES (?, ?, 'timestamp_submission_failed', 'trust', 'failed', ?)
+                                `)
+                                .bind(
+                                        `NWANA-AUDIT-${crypto.randomUUID()}`,
+                                        job.object_id,
+                                        JSON.stringify({
+                                                job_id: job.job_id,
+                                                provider: proofProvider.id,
+                                                error: errorText,
+                                        }),
+                                ),
+                ]);
 
-		return json(
-			{
-				ok: false,
-				job_id: job.job_id,
-				status: "failed",
-				attempts: result.attempts,
-			},
-			502,
-		);
-	}
+                return json(
+                        {
+                                ok: false,
+                                job_id: job.job_id,
+                                status: "failed",
+                                provider: proofProvider.id,
+                                error: errorText,
+                        },
+                        502,
+                );
+        }
 
-	const detachedProof = buildDetachedOtsProof(
-                job.hash,
-                result.calendarResponseBytes,
-        );
+        const providerMetadata =
+                providerResult.providerMetadata ?? {};
+
+        const calendar =
+                typeof providerMetadata.calendar === "string"
+                        ? providerMetadata.calendar
+                        : null;
+
+        const proofSize =
+                typeof providerMetadata.proofSize === "number"
+                        ? providerMetadata.proofSize
+                        : null;
+
+        const hasBitcoinAttestation =
+                providerMetadata.hasBitcoinAttestation === true;
 
         const proofPayload = JSON.stringify({
-                format: "opentimestamps-detached-proof",
+                format: providerResult.proofType,
                 encoding: "base64",
                 hash_algorithm: "SHA-256",
                 hash: job.hash,
-                calendar: result.calendar,
-                proof_base64: detachedProof.proofBase64,
-                proof_bytes: detachedProof.proofSize,
-                bitcoin_attestation:
-                        detachedProof.hasBitcoinAttestation,
+                provider: providerResult.provider,
+                network: providerResult.network ?? null,
+                calendar,
+                proof_base64: providerResult.proofPayload ?? null,
+                proof_bytes: proofSize,
+                bitcoin_attestation: hasBitcoinAttestation,
                 submitted_at: now,
+                provider_metadata: providerMetadata,
         });
+
 
 	await ensurePendingBitcoinAnchor(db, {
 		trustId: job.trust_id,
@@ -534,8 +563,8 @@ async function processTimestampJob(
 				JSON.stringify({
 					job_id: job.job_id,
 					trust_id: job.trust_id,
-					calendar: result.calendar,
-					attempts: result.attempts,
+					calendar: calendar,
+					attempts: providerMetadata.attempts,
 					verification_status: "pending",
 				}),
 			),
@@ -549,7 +578,7 @@ async function processTimestampJob(
 		hash: job.hash,
 		status: "submitted",
 		trust_status: "pending",
-		calendar: result.calendar,
+		calendar: calendar,
 		message:
 			"Hash accepted by OpenTimestamps calendar. Bitcoin anchoring is still pending.",
 	});
@@ -2709,3 +2738,4 @@ export default {
                 }
         },
 };
+
