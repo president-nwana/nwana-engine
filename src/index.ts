@@ -213,6 +213,56 @@ function createTimestampJobStatement(
 	};
 }
 
+
+function createGenericProofJobStatement(
+        db: D1Database,
+        params: {
+                timestampJobId: string;
+                objectId: string;
+                versionId: string;
+        },
+) {
+        const jobId =
+                `JOB-${crypto.randomUUID()}`;
+
+        return {
+                jobId,
+                statement: db
+                        .prepare(`
+                                INSERT INTO jobs (
+                                        job_id,
+                                        job_type,
+                                        module,
+                                        object_id,
+                                        version_id,
+                                        status,
+                                        priority,
+                                        payload,
+                                        next_run_at
+                                )
+                                VALUES (
+                                        ?,
+                                        'PROOF_PROCESS',
+                                        'proof',
+                                        ?,
+                                        ?,
+                                        'pending',
+                                        100,
+                                        ?,
+                                        CURRENT_TIMESTAMP
+                                )
+                        `)
+                        .bind(
+                                jobId,
+                                params.objectId,
+                                params.versionId,
+                                JSON.stringify({
+                                        timestamp_job_id:
+                                                params.timestampJobId,
+                                }),
+                        ),
+        };
+}
 async function submitHashToOpenTimestamps(
 	hash: string,
 ): Promise<{
@@ -1146,6 +1196,427 @@ async function processNextTimestampJob(
         );
 }
 
+
+function proofRetryDelayMinutes(attempts: number): number {
+        if (attempts <= 1) return 15;
+        if (attempts === 2) return 30;
+        if (attempts === 3) return 60;
+        return 180;
+}
+
+async function processProofGenericJob(
+        genericJobId: string,
+        timestampJobId: string,
+        attempts: number,
+        env: Env,
+): Promise<{
+        status: "completed" | "retry" | "failed";
+        nextRunAt?: string;
+        detail?: unknown;
+}> {
+        const timestampJob = await env.nwana_engine_db
+                .prepare(`
+                        SELECT
+                                job_id,
+                                status
+                        FROM timestamp_jobs
+                        WHERE job_id = ?
+                        LIMIT 1
+                `)
+                .bind(timestampJobId)
+                .first<{
+                        job_id: string;
+                        status: string;
+                }>();
+
+        if (!timestampJob) {
+                return {
+                        status: "failed",
+                        detail: "Proof job target was not found",
+                };
+        }
+
+        let response: Response;
+
+        if (
+                timestampJob.status === "pending" ||
+                timestampJob.status === "failed"
+        ) {
+                response = await processTimestampJob(
+                        timestampJobId,
+                        env,
+                );
+        } else if (
+                timestampJob.status === "submitted"
+        ) {
+                response = await upgradeTimestampJob(
+                        timestampJobId,
+                        env,
+                );
+        } else if (
+                timestampJob.status === "anchored"
+        ) {
+                response = await verifyTimestampJob(
+                        timestampJobId,
+                        env,
+                );
+        } else if (
+                timestampJob.status === "confirmed"
+        ) {
+                return {
+                        status: "completed",
+                        detail: {
+                                timestamp_job_id:
+                                        timestampJobId,
+                                timestamp_status:
+                                        "confirmed",
+                        },
+                };
+        } else {
+                return {
+                        status: "failed",
+                        detail: {
+                                timestamp_job_id:
+                                        timestampJobId,
+                                timestamp_status:
+                                        timestampJob.status,
+                        },
+                };
+        }
+
+        let result: {
+                ok?: boolean;
+                status?: string;
+                error?: string;
+                [key: string]: unknown;
+        };
+
+        try {
+                result = await response
+                        .clone()
+                        .json<typeof result>();
+        } catch {
+                result = {
+                        ok: response.ok,
+                        status: timestampJob.status,
+                };
+        }
+
+        if (
+                response.ok &&
+                (
+                        result.status === "confirmed" ||
+                        result.verification_status === "verified"
+                )
+        ) {
+                return {
+                        status: "completed",
+                        detail: result,
+                };
+        }
+
+        if (
+                response.ok &&
+                result.status === "anchored"
+        ) {
+                return {
+                        status: "retry",
+                        nextRunAt:
+                                new Date(
+                                        Date.now() + 60 * 1000,
+                                ).toISOString(),
+                        detail: result,
+                };
+        }
+
+        if (
+                response.ok &&
+                result.status === "submitted"
+        ) {
+                const delayMinutes =
+                        proofRetryDelayMinutes(
+                                attempts,
+                        );
+
+                return {
+                        status: "retry",
+                        nextRunAt:
+                                new Date(
+                                        Date.now() +
+                                                delayMinutes *
+                                                        60 *
+                                                        1000,
+                                ).toISOString(),
+                        detail: result,
+                };
+        }
+
+        return {
+                status: "retry",
+                nextRunAt:
+                        new Date(
+                                Date.now() +
+                                        proofRetryDelayMinutes(
+                                                attempts,
+                                        ) *
+                                                60 *
+                                                1000,
+                        ).toISOString(),
+                detail: result,
+        };
+}
+
+async function processNextGenericJob(
+        env: Env,
+): Promise<Response> {
+        const db = env.nwana_engine_db;
+
+        const job = await db
+                .prepare(`
+                        SELECT
+                                job_id,
+                                job_type,
+                                module,
+                                payload,
+                                attempts,
+                                max_attempts
+                        FROM jobs
+                        WHERE status IN (
+                                'pending',
+                                'retry'
+                        )
+                        AND attempts < max_attempts
+                        AND (
+                                next_run_at IS NULL
+                                OR next_run_at <= CURRENT_TIMESTAMP
+                        )
+                        ORDER BY
+                                priority ASC,
+                                id ASC
+                        LIMIT 1
+                `)
+                .first<{
+                        job_id: string;
+                        job_type: string;
+                        module: string;
+                        payload: string | null;
+                        attempts: number;
+                        max_attempts: number;
+                }>();
+
+        if (!job) {
+                return json({
+                        ok: true,
+                        status: "idle",
+                        message:
+                                "No due generic jobs",
+                });
+        }
+
+        const attempts =
+                job.attempts + 1;
+
+        await db
+                .prepare(`
+                        UPDATE jobs
+                        SET
+                                status = 'running',
+                                attempts = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                        WHERE job_id = ?
+                `)
+                .bind(
+                        attempts,
+                        job.job_id,
+                )
+                .run();
+
+        try {
+                let payload: {
+                        timestamp_job_id?: string;
+                        [key: string]: unknown;
+                } = {};
+
+                if (job.payload) {
+                        payload =
+                                JSON.parse(
+                                        job.payload,
+                                );
+                }
+
+                let outcome: {
+                        status:
+                                | "completed"
+                                | "retry"
+                                | "failed";
+                        nextRunAt?: string;
+                        detail?: unknown;
+                };
+
+                if (
+                        job.job_type ===
+                                "PROOF_PROCESS" &&
+                        job.module === "proof"
+                ) {
+                        if (
+                                typeof payload.timestamp_job_id !==
+                                "string"
+                        ) {
+                                outcome = {
+                                        status: "failed",
+                                        detail:
+                                                "PROOF_PROCESS payload is missing timestamp_job_id",
+                                };
+                        } else {
+                                outcome =
+                                        await processProofGenericJob(
+                                                job.job_id,
+                                                payload.timestamp_job_id,
+                                                attempts,
+                                                env,
+                                        );
+                        }
+                } else {
+                        outcome = {
+                                status: "failed",
+                                detail:
+                                        `Unsupported job type: ${job.job_type}`,
+                        };
+                }
+
+                if (
+                        outcome.status === "completed"
+                ) {
+                        await db
+                                .prepare(`
+                                        UPDATE jobs
+                                        SET
+                                                status = 'completed',
+                                                next_run_at = NULL,
+                                                last_error = NULL,
+                                                completed_at = CURRENT_TIMESTAMP,
+                                                updated_at = CURRENT_TIMESTAMP
+                                        WHERE job_id = ?
+                                `)
+                                .bind(job.job_id)
+                                .run();
+                } else if (
+                        outcome.status === "retry"
+                ) {
+                        await db
+                                .prepare(`
+                                        UPDATE jobs
+                                        SET
+                                                status = 'retry',
+                                                next_run_at = ?,
+                                                last_error = NULL,
+                                                updated_at = CURRENT_TIMESTAMP
+                                        WHERE job_id = ?
+                                `)
+                                .bind(
+                                        outcome.nextRunAt ??
+                                                new Date(
+                                                        Date.now() +
+                                                                60 *
+                                                                        60 *
+                                                                        1000,
+                                                ).toISOString(),
+                                        job.job_id,
+                                )
+                                .run();
+                } else {
+                        await db
+                                .prepare(`
+                                        UPDATE jobs
+                                        SET
+                                                status = 'failed',
+                                                next_run_at = NULL,
+                                                last_error = ?,
+                                                updated_at = CURRENT_TIMESTAMP
+                                        WHERE job_id = ?
+                                `)
+                                .bind(
+                                        JSON.stringify(
+                                                outcome.detail ??
+                                                        "Job failed",
+                                        ),
+                                        job.job_id,
+                                )
+                                .run();
+                }
+
+                return json({
+                        ok:
+                                outcome.status !==
+                                "failed",
+                        job_id: job.job_id,
+                        job_type: job.job_type,
+                        module: job.module,
+                        status: outcome.status,
+                        next_run_at:
+                                outcome.nextRunAt ??
+                                null,
+                        detail:
+                                outcome.detail ??
+                                null,
+                });
+        } catch (error) {
+                const errorText =
+                        error instanceof Error
+                                ? `${error.name}: ${error.message}`
+                                : String(error);
+
+                const exhausted =
+                        attempts >=
+                        job.max_attempts;
+
+                await db
+                        .prepare(`
+                                UPDATE jobs
+                                SET
+                                        status = ?,
+                                        next_run_at = ?,
+                                        last_error = ?,
+                                        updated_at = CURRENT_TIMESTAMP
+                                WHERE job_id = ?
+                        `)
+                        .bind(
+                                exhausted
+                                        ? "failed"
+                                        : "retry",
+                                exhausted
+                                        ? null
+                                        : new Date(
+                                                Date.now() +
+                                                        proofRetryDelayMinutes(
+                                                                attempts,
+                                                        ) *
+                                                                60 *
+                                                                1000,
+                                        ).toISOString(),
+                                errorText,
+                                job.job_id,
+                        )
+                        .run();
+
+                return json(
+                        {
+                                ok: false,
+                                job_id:
+                                        job.job_id,
+                                status:
+                                        exhausted
+                                                ? "failed"
+                                                : "retry",
+                                error:
+                                        errorText,
+                        },
+                        exhausted
+                                ? 500
+                                : 202,
+                );
+        }
+}
 async function createObject(
 	request: Request,
 	env: Env,
@@ -1225,6 +1696,27 @@ async function createObject(
 		hash,
 	});
 
+
+	const genericProofJob =
+
+	        createGenericProofJobStatement(
+
+	                db,
+
+	                {
+
+	                        timestampJobId:
+
+	                                timestampJob.jobId,
+
+	                        objectId,
+
+	                        versionId,
+
+	                },
+
+	        );
+
 	await db.batch([
 		db
 			.prepare(`
@@ -1295,6 +1787,7 @@ async function createObject(
 
 		timestampJob.statement,
 
+		genericProofJob.statement,
 		db
 			.prepare(`
 				INSERT INTO audit_events (
@@ -1469,6 +1962,27 @@ async function createVersion(
 		hash,
 	});
 
+
+	const genericProofJob =
+
+	        createGenericProofJobStatement(
+
+	                db,
+
+	                {
+
+	                        timestampJobId:
+
+	                                timestampJob.jobId,
+
+	                        objectId,
+
+	                        versionId,
+
+	                },
+
+	        );
+
 	await db.batch([
 		db
 			.prepare(`
@@ -1516,6 +2030,7 @@ async function createVersion(
 
 		timestampJob.statement,
 
+		genericProofJob.statement,
 		db
 			.prepare(`
 				UPDATE objects
@@ -1982,6 +2497,28 @@ export default {
 			}
 		}
 
+                if (
+                        request.method === "POST" &&
+                        url.pathname === "/jobs/process-next"
+                ) {
+                        try {
+                                return await processNextGenericJob(env);
+                        } catch (error) {
+                                console.error(error);
+
+                                return json(
+                                        {
+                                                ok: false,
+                                                error:
+                                                        error instanceof Error
+                                                                ? error.message
+                                                                : "Unknown error",
+                                        },
+                                        500,
+                                );
+                        }
+                }
+
 		if (
 			request.method === "POST" &&
 			url.pathname === "/trust/process-next"
@@ -2154,19 +2691,19 @@ export default {
         ): Promise<void> {
                 try {
                         const response =
-                                await processNextTimestampJob(env);
+                                await processNextGenericJob(env);
 
                         const result =
                                 await response.clone().text();
 
                         console.log(
-                                "Scheduled Trust Engine run:",
+                                "Scheduled NWANA Engine job run:",
                                 response.status,
                                 result,
                         );
                 } catch (error) {
                         console.error(
-                                "Scheduled Trust Engine run failed:",
+                                "Scheduled NWANA Engine job run failed:",
                                 error,
                         );
                 }
