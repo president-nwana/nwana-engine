@@ -184,3 +184,42 @@ ON blockchain_anchors(object_id);
 
 CREATE INDEX IF NOT EXISTS idx_blockchain_anchors_status
 ON blockchain_anchors(status);
+
+-- Universal proof / anchoring records.
+-- Provider-specific blockchain details belong in provider_metadata,
+-- not in Registry Core columns.
+CREATE TABLE IF NOT EXISTS proof_anchors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  anchor_id TEXT NOT NULL UNIQUE,
+  trust_id TEXT NOT NULL,
+  job_id TEXT,
+  object_id TEXT NOT NULL,
+  version_id TEXT,
+  provider TEXT NOT NULL,
+  network TEXT,
+  anchor_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  external_anchor_id TEXT,
+  anchored_at TEXT,
+  verified_at TEXT,
+  proof_data TEXT,
+  provider_metadata TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_proof_anchors_trust
+ON proof_anchors(trust_id);
+
+CREATE INDEX IF NOT EXISTS idx_proof_anchors_job
+ON proof_anchors(job_id);
+
+CREATE INDEX IF NOT EXISTS idx_proof_anchors_object
+ON proof_anchors(object_id);
+
+CREATE INDEX IF NOT EXISTS idx_proof_anchors_provider
+ON proof_anchors(provider, network);
+
+CREATE INDEX IF NOT EXISTS idx_proof_anchors_status
+ON proof_anchors(status);
