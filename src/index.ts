@@ -1,5 +1,5 @@
-import { buildDetachedOtsProof, upgradeDetachedOtsProof, verifyDetachedOtsProof } from "./ots-proof";
-import { ensurePendingBitcoinAnchor, ensurePendingProofAnchor } from "./trust";
+import { buildDetachedOtsProof } from "./ots-proof";
+import { ensurePendingProofAnchor } from "./trust";
 import { OpenTimestampsBitcoinProvider } from "./opentimestamps-bitcoin-provider";
 
 interface Env {
