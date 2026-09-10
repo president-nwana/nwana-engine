@@ -1001,32 +1001,80 @@ async function verifyTimestampJob(
         }
 
         try {
+                const proofProvider =
+                        new OpenTimestampsBitcoinProvider();
+
                 const verified =
-                        await verifyDetachedOtsProof(
-                                payload.proof_base64,
+                        await proofProvider.verifyProof({
+                                proofPayload:
+                                        payload.proof_base64,
+                                providerMetadata:
+                                        typeof payload.provider_metadata === "object" &&
+                                        payload.provider_metadata !== null &&
+                                        !Array.isArray(payload.provider_metadata)
+                                                ? payload.provider_metadata as Record<string, unknown>
+                                                : undefined,
+                        });
+
+                if (!verified.verified) {
+                        throw new Error(
+                                "Proof provider did not verify the proof",
+                        );
+                }
+
+                const providerMetadata =
+                        verified.providerMetadata ?? {};
+
+                const blockHeight =
+                        Number(providerMetadata.blockHeight ?? 0);
+
+                const blockHash =
+                        String(
+                                verified.externalAnchorId ??
+                                        providerMetadata.blockHash ??
+                                        "",
                         );
 
-                const now = new Date().toISOString();
+                const blockTime =
+                        Number(providerMetadata.blockTime ?? 0);
+
+                const confirmations =
+                        Number(providerMetadata.confirmations ?? 0);
+
+                if (!blockHash || blockHeight <= 0 || blockTime <= 0) {
+                        throw new Error(
+                                "Verified proof is missing required anchor metadata",
+                        );
+                }
+
+                const now = verified.verifiedAt;
 
                 const attestationTime =
                         new Date(
-                                verified.blockTime * 1000,
+                                blockTime * 1000,
                         ).toISOString();
 
                 const updatedPayload = JSON.stringify({
                         ...payload,
-                        bitcoin_verified: true,
+                        provider:
+                                verified.provider,
+                        network:
+                                verified.network,
+                        bitcoin_verified:
+                                verified.verified,
                         block_height:
-                                verified.blockHeight,
+                                blockHeight,
                         block_hash:
-                                verified.blockHash,
+                                blockHash,
                         attestation_time:
                                 attestationTime,
                         confirmations:
-                                verified.confirmations,
-                        verified_at: now,
+                                confirmations,
+                        provider_metadata:
+                                providerMetadata,
+                        verified_at:
+                                now,
                 });
-
                 await db.batch([
                         db
                                 .prepare(`
@@ -1041,7 +1089,7 @@ async function verifyTimestampJob(
                                 `)
                                 .bind(
                                         updatedPayload,
-                                        verified.blockHash,
+                                        blockHash,
                                         row.trust_id,
                                 ),
 
@@ -1074,20 +1122,13 @@ async function verifyTimestampJob(
                                         AND provider = 'opentimestamps-bitcoin'
                                 `)
                                 .bind(
-                                        verified.blockHash,
+                                        blockHash,
                                         attestationTime,
                                         now,
                                         updatedPayload,
-                                        JSON.stringify({
-                                                blockHeight:
-                                                        verified.blockHeight,
-                                                blockHash:
-                                                        verified.blockHash,
-                                                blockTime:
-                                                        verified.blockTime,
-                                                confirmations:
-                                                        verified.confirmations,
-                                        }),
+                                        JSON.stringify(
+                                                providerMetadata,
+                                        ),
                                         row.job_id,
                                 ),
 
@@ -1119,13 +1160,13 @@ async function verifyTimestampJob(
                                                 trust_id:
                                                         row.trust_id,
                                                 block_height:
-                                                        verified.blockHeight,
+                                                        blockHeight,
                                                 block_hash:
-                                                        verified.blockHash,
+                                                        blockHash,
                                                 attestation_time:
                                                         attestationTime,
                                                 confirmations:
-                                                        verified.confirmations,
+                                                        confirmations,
                                         }),
                                 ),
                 ]);
@@ -1138,13 +1179,13 @@ async function verifyTimestampJob(
                         verification_status: "verified",
                         bitcoin_verified: true,
                         block_height:
-                                verified.blockHeight,
+                                blockHeight,
                         block_hash:
-                                verified.blockHash,
+                                blockHash,
                         attestation_time:
                                 attestationTime,
                         confirmations:
-                                verified.confirmations,
+                                confirmations,
                         verified_at: now,
                         message:
                                 "OpenTimestamps proof was cryptographically verified against the Bitcoin blockchain.",
