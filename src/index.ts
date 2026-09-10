@@ -1,5 +1,5 @@
 import { buildDetachedOtsProof, upgradeDetachedOtsProof, verifyDetachedOtsProof } from "./ots-proof";
-import { ensurePendingBitcoinAnchor } from "./trust";
+import { ensurePendingBitcoinAnchor, ensurePendingProofAnchor } from "./trust";
 import { OpenTimestampsBitcoinProvider } from "./opentimestamps-bitcoin-provider";
 
 interface Env {
@@ -510,13 +510,17 @@ async function processTimestampJob(
         });
 
 
-	await ensurePendingBitcoinAnchor(db, {
-		trustId: job.trust_id,
-		jobId: job.job_id,
-		objectId: job.object_id,
-		versionId: job.version_id,
-		proofData: proofPayload,
-	});
+	await ensurePendingProofAnchor(db, {
+                trustId: job.trust_id,
+                jobId: job.job_id,
+                objectId: job.object_id,
+                versionId: job.version_id,
+                provider: providerResult.provider,
+                network: providerResult.network ?? null,
+                anchorType: "timestamp-anchor",
+                proofData: proofPayload,
+                providerMetadata,
+        });
 	await db.batch([
 		db
 			.prepare(`
