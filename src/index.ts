@@ -798,17 +798,26 @@ async function upgradeTimestampJob(
 
                         db
                                 .prepare(`
-                                        UPDATE blockchain_anchors
+                                        UPDATE proof_anchors
                                         SET
                                                 status = ?,
                                                 proof_data = ?,
+                                                provider_metadata = ?,
                                                 updated_at = CURRENT_TIMESTAMP
                                         WHERE job_id = ?
-                                        AND blockchain = 'bitcoin'
+                                        AND provider = 'opentimestamps-bitcoin'
                                 `)
                                 .bind(
                                         anchorStatus,
                                         updatedPayload,
+                                        JSON.stringify({
+                                                calendarsChecked:
+                                                        upgraded.calendarsChecked,
+                                                upgraded:
+                                                        upgraded.upgraded,
+                                                hasBitcoinAttestation:
+                                                        upgraded.hasBitcoinAttestation,
+                                        }),
                                         row.job_id,
                                 ),
 
