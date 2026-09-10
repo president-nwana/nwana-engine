@@ -738,34 +738,50 @@ async function upgradeTimestampJob(
         }
 
         try {
-                const upgraded =
-                        await upgradeDetachedOtsProof(
-                                payload.proof_base64,
+                const proofProvider =
+                        new OpenTimestampsBitcoinProvider();
+
+                if (!proofProvider.upgradeProof) {
+                        throw new Error(
+                                "Proof provider does not support proof upgrade",
                         );
+                }
+
+                const upgraded =
+                        await proofProvider.upgradeProof({
+                                proofPayload:
+                                        payload.proof_base64,
+                        });
 
                 const now = new Date().toISOString();
 
                 const anchorStatus =
-                        upgraded.hasBitcoinAttestation
+                        upgraded.status === "anchored"
                                 ? "anchored"
                                 : "pending";
 
                 const jobStatus =
-                        upgraded.hasBitcoinAttestation
-                                ? "anchored"
-                                : "submitted";
+                        upgraded.status;
 
                 const updatedPayload = JSON.stringify({
                         ...payload,
+                        provider:
+                                upgraded.provider,
+                        network:
+                                upgraded.network,
                         proof_base64:
-                                upgraded.proofBase64,
+                                upgraded.proofPayload,
                         proof_bytes:
-                                upgraded.proofSize,
+                                Number(
+                                        upgraded.providerMetadata
+                                                ?.proofSize ?? 0,
+                                ),
                         bitcoin_attestation:
-                                upgraded.hasBitcoinAttestation,
+                                upgraded.status === "anchored",
+                        provider_metadata:
+                                upgraded.providerMetadata ?? {},
                         upgraded_at: now,
                 });
-
                 await db.batch([
                         db
                                 .prepare(`
@@ -810,14 +826,9 @@ async function upgradeTimestampJob(
                                 .bind(
                                         anchorStatus,
                                         updatedPayload,
-                                        JSON.stringify({
-                                                calendarsChecked:
-                                                        upgraded.calendarsChecked,
-                                                upgraded:
-                                                        upgraded.upgraded,
-                                                hasBitcoinAttestation:
-                                                        upgraded.hasBitcoinAttestation,
-                                        }),
+                                        JSON.stringify(
+                                                upgraded.providerMetadata ?? {},
+                                        ),
                                         row.job_id,
                                 ),
 
@@ -846,11 +857,11 @@ async function upgradeTimestampJob(
                                         JSON.stringify({
                                                 job_id: row.job_id,
                                                 upgraded:
-                                                        upgraded.upgraded,
+                                                        Boolean(upgraded.providerMetadata?.upgraded),
                                                 bitcoin_attestation:
-                                                        upgraded.hasBitcoinAttestation,
+                                                        upgraded.status === "anchored",
                                                 calendars_checked:
-                                                        upgraded.calendarsChecked,
+                                                        upgraded.providerMetadata?.calendarsChecked ?? [],
                                         }),
                                 ),
                 ]);
@@ -860,15 +871,15 @@ async function upgradeTimestampJob(
                         job_id: row.job_id,
                         object_id: row.object_id,
                         status: jobStatus,
-                        upgraded: upgraded.upgraded,
+                        upgraded: Boolean(upgraded.providerMetadata?.upgraded),
                         bitcoin_attestation:
-                                upgraded.hasBitcoinAttestation,
+                                upgraded.status === "anchored",
                         proof_bytes:
-                                upgraded.proofSize,
+                                Number(upgraded.providerMetadata?.proofSize ?? 0),
                         calendars_checked:
-                                upgraded.calendarsChecked,
+                                upgraded.providerMetadata?.calendarsChecked ?? [],
                         message:
-                                upgraded.hasBitcoinAttestation
+                                upgraded.status === "anchored"
                                         ? "Bitcoin attestation found. Cryptographic verification is still required."
                                         : "Proof checked. Bitcoin attestation is still pending.",
                 });
