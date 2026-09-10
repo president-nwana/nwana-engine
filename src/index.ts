@@ -2148,4 +2148,27 @@ export default {
 			404,
 		);
 	},
+        async scheduled(
+                _controller: ScheduledController,
+                env: Env,
+        ): Promise<void> {
+                try {
+                        const response =
+                                await processNextTimestampJob(env);
+
+                        const result =
+                                await response.clone().text();
+
+                        console.log(
+                                "Scheduled Trust Engine run:",
+                                response.status,
+                                result,
+                        );
+                } catch (error) {
+                        console.error(
+                                "Scheduled Trust Engine run failed:",
+                                error,
+                        );
+                }
+        },
 };
