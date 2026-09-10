@@ -581,6 +581,66 @@ async function upgradeTimestampJob(
         }
 
         if (
+                payload.format === "opentimestamps-calendar-response" &&
+                typeof payload.response_base64 === "string" &&
+                typeof payload.hash === "string"
+        ) {
+                try {
+                        const binary = atob(
+                                payload.response_base64,
+                        );
+
+                        const calendarBytes =
+                                new Uint8Array(
+                                        binary.length,
+                                );
+
+                        for (
+                                let i = 0;
+                                i < binary.length;
+                                i++
+                        ) {
+                                calendarBytes[i] =
+                                        binary.charCodeAt(i);
+                        }
+
+                        const detached =
+                                buildDetachedOtsProof(
+                                        payload.hash,
+                                        calendarBytes,
+                                );
+
+                        payload = {
+                                ...payload,
+                                format:
+                                        "opentimestamps-detached-proof",
+                                proof_base64:
+                                        detached.proofBase64,
+                                proof_bytes:
+                                        detached.proofSize,
+                                bitcoin_attestation:
+                                        detached.hasBitcoinAttestation,
+                                migrated_from:
+                                        "opentimestamps-calendar-response",
+                                migrated_at:
+                                        new Date().toISOString(),
+                        };
+                } catch (error) {
+                        return json(
+                                {
+                                        ok: false,
+                                        job_id: row.job_id,
+                                        error:
+                                                error instanceof Error
+                                                        ? `Legacy OpenTimestamps migration failed: ${error.message}`
+                                                        : "Legacy OpenTimestamps migration failed",
+                                },
+                                500,
+                        );
+                }
+        }
+
+        if (
                 payload.format !== "opentimestamps-detached-proof" ||
                 typeof payload.proof_base64 !== "string"
         ) {
@@ -1013,27 +1073,77 @@ async function verifyTimestampJob(
         }
 }
 async function processNextTimestampJob(
-	env: Env,
+        env: Env,
 ): Promise<Response> {
-	const job = await env.nwana_engine_db
-		.prepare(`
-			SELECT job_id
-			FROM timestamp_jobs
-			WHERE status IN ('pending', 'failed')
-			ORDER BY id ASC
-			LIMIT 1
-		`)
-		.first<{ job_id: string }>();
+        const job = await env.nwana_engine_db
+                .prepare(`
+                        SELECT
+                                job_id,
+                                status
+                        FROM timestamp_jobs
+                        WHERE status IN (
+                                'pending',
+                                'failed',
+                                'submitted',
+                                'anchored'
+                        )
+                        ORDER BY
+                                CASE status
+                                        WHEN 'anchored' THEN 1
+                                        WHEN 'submitted' THEN 2
+                                        WHEN 'pending' THEN 3
+                                        WHEN 'failed' THEN 4
+                                        ELSE 5
+                                END,
+                                id ASC
+                        LIMIT 1
+                `)
+                .first<{
+                        job_id: string;
+                        status: string;
+                }>();
 
-	if (!job) {
-		return json({
-			ok: true,
-			status: "idle",
-			message: "No pending timestamp jobs",
-		});
-	}
+        if (!job) {
+                return json({
+                        ok: true,
+                        status: "idle",
+                        message: "No timestamp jobs require processing",
+                });
+        }
 
-	return processTimestampJob(job.job_id, env);
+        if (
+                job.status === "pending" ||
+                job.status === "failed"
+        ) {
+                return processTimestampJob(
+                        job.job_id,
+                        env,
+                );
+        }
+
+        if (job.status === "submitted") {
+                return upgradeTimestampJob(
+                        job.job_id,
+                        env,
+                );
+        }
+
+        if (job.status === "anchored") {
+                return verifyTimestampJob(
+                        job.job_id,
+                        env,
+                );
+        }
+
+        return json(
+                {
+                        ok: false,
+                        job_id: job.job_id,
+                        status: job.status,
+                        error: "Unsupported timestamp job state",
+                },
+                409,
+        );
 }
 
 async function createObject(
