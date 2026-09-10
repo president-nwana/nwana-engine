@@ -90,6 +90,38 @@ ON trust_records(object_id);
 CREATE INDEX IF NOT EXISTS idx_audit_object
 ON audit_events(object_id);
 
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL UNIQUE,
+  job_type TEXT NOT NULL,
+  module TEXT NOT NULL,
+  object_id TEXT,
+  version_id TEXT,
+  source_event_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  priority INTEGER NOT NULL DEFAULT 100,
+  payload TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 10,
+  next_run_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_due
+ON jobs(status, next_run_at, priority, id);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_type
+ON jobs(job_type);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_object
+ON jobs(object_id);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_source_event
+ON jobs(source_event_id);
 CREATE TABLE IF NOT EXISTS timestamp_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id TEXT NOT NULL UNIQUE,
@@ -103,12 +135,16 @@ CREATE TABLE IF NOT EXISTS timestamp_jobs (
   last_error TEXT,
   requested_at TEXT,
   completed_at TEXT,
+  next_run_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_timestamp_jobs_status
 ON timestamp_jobs(status);
+
+CREATE INDEX IF NOT EXISTS idx_timestamp_jobs_due
+ON timestamp_jobs(status, next_run_at);
 
 CREATE INDEX IF NOT EXISTS idx_timestamp_jobs_object
 ON timestamp_jobs(object_id);
