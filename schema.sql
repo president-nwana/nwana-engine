@@ -74,6 +74,9 @@ ON objects(object_type);
 
 CREATE INDEX IF NOT EXISTS idx_objects_source
 ON objects(source, source_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_source_unique
+ON objects(source, source_id)
+WHERE source_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_versions_object
 ON object_versions(object_id);
