@@ -17,7 +17,14 @@ const proofProviders = new Map<ProofProviderId, ProofProvider>([
 export function getProofProvider(
         providerId: ProofProviderId,
 ): ProofProvider {
-        const provider = proofProviders.get(providerId);
+        const normalizedProviderId =
+                providerId === "opentimestamps"
+                        ? "opentimestamps-bitcoin"
+                        : providerId;
+
+        const provider = proofProviders.get(
+                normalizedProviderId,
+        );
 
         if (!provider) {
                 throw new Error(

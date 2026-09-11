@@ -1,6 +1,6 @@
 import { buildDetachedOtsProof } from "./ots-proof";
 import { ensurePendingProofAnchor } from "./trust";
-import { getDefaultProofProvider } from "./proof-providers";
+import { getDefaultProofProvider, getProofProvider } from "./proof-providers";
 
 interface Env {
 	nwana_engine_db: D1Database;
@@ -202,7 +202,7 @@ function createTimestampJobStatement(
 					provider,
 					status
 				)
-				VALUES (?, ?, ?, ?, ?, 'opentimestamps', 'pending')
+				VALUES (?, ?, ?, ?, ?, 'opentimestamps-bitcoin', 'pending')
 			`)
 			.bind(
 				jobId,
@@ -602,6 +602,7 @@ async function upgradeTimestampJob(
                                 j.object_id,
                                 j.version_id,
                                 j.hash,
+                                j.provider,
                                 j.status,
                                 t.timestamp_request
                         FROM timestamp_jobs j
@@ -617,6 +618,7 @@ async function upgradeTimestampJob(
                         object_id: string;
                         version_id: string | null;
                         hash: string;
+                        provider: string;
                         status: string;
                         timestamp_request: string | null;
                 }>();
@@ -739,7 +741,7 @@ async function upgradeTimestampJob(
 
         try {
                 const proofProvider =
-                        getDefaultProofProvider();
+                        getProofProvider(row.provider);
 
                 if (!proofProvider.upgradeProof) {
                         throw new Error(
@@ -821,7 +823,7 @@ async function upgradeTimestampJob(
                                                 provider_metadata = ?,
                                                 updated_at = CURRENT_TIMESTAMP
                                         WHERE job_id = ?
-                                        AND provider = 'opentimestamps-bitcoin'
+                                        AND provider = ?
                                 `)
                                 .bind(
                                         anchorStatus,
@@ -830,6 +832,7 @@ async function upgradeTimestampJob(
                                                 upgraded.providerMetadata ?? {},
                                         ),
                                         row.job_id,
+                                        proofProvider.id,
                                 ),
 
                         db
@@ -914,6 +917,7 @@ async function verifyTimestampJob(
                                 j.object_id,
                                 j.version_id,
                                 j.hash,
+                                j.provider,
                                 j.status,
                                 t.timestamp_request
                         FROM timestamp_jobs j
@@ -929,6 +933,7 @@ async function verifyTimestampJob(
                         object_id: string;
                         version_id: string | null;
                         hash: string;
+                        provider: string;
                         status: string;
                         timestamp_request: string | null;
                 }>();
@@ -1000,10 +1005,10 @@ async function verifyTimestampJob(
                 );
         }
 
-        try {
-                const proofProvider =
-                        getDefaultProofProvider();
+        const proofProvider =
+                getProofProvider(row.provider);
 
+        try {
                 const verified =
                         await proofProvider.verifyProof({
                                 proofPayload:
@@ -1119,7 +1124,7 @@ async function verifyTimestampJob(
                                                 last_error = NULL,
                                                 updated_at = CURRENT_TIMESTAMP
                                         WHERE job_id = ?
-                                        AND provider = 'opentimestamps-bitcoin'
+                                        AND provider = ?
                                 `)
                                 .bind(
                                         blockHash,
@@ -1130,6 +1135,7 @@ async function verifyTimestampJob(
                                                 providerMetadata,
                                         ),
                                         row.job_id,
+                                        proofProvider.id,
                                 ),
 
                         db
@@ -1203,11 +1209,12 @@ async function verifyTimestampJob(
                                         last_error = ?,
                                         updated_at = CURRENT_TIMESTAMP
                                 WHERE job_id = ?
-                                AND provider = 'opentimestamps-bitcoin'
+                                AND provider = ?
                         `)
                         .bind(
                                 errorText,
                                 row.job_id,
+                                proofProvider.id,
                         )
                         .run();
 
