@@ -1743,7 +1743,14 @@ async function createObject(
 		);
 	}
 
-	if (!body.object_type || typeof body.object_type !== "string") {
+  return registerObject(body, env);
+}
+
+async function registerObject(
+  body: CreateObjectRequest,
+  env: Env,
+): Promise<Response> {
+  if (!body.object_type || typeof body.object_type !== "string") {
 		return json(
 			{
 				ok: false,
