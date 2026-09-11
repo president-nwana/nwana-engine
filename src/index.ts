@@ -1746,6 +1746,60 @@ async function createObject(
   return registerObject(body, env);
 }
 
+async function ingestSourceObject(
+        body: CreateObjectRequest,
+        env: Env,
+): Promise<Response> {
+        const source =
+                body.source?.trim() ?? "";
+
+        const sourceId =
+                body.source_id?.trim() ?? "";
+
+        if (!source || !sourceId) {
+                return registerObject(body, env);
+        }
+
+        const existing =
+                await env.nwana_engine_db
+                        .prepare(`
+                                SELECT
+                                        object_id,
+                                        object_type,
+                                        title,
+                                        source,
+                                        source_id,
+                                        status,
+                                        current_version
+                                FROM objects
+                                WHERE source = ?
+                                AND source_id = ?
+                                LIMIT 1
+                        `)
+                        .bind(
+                                source,
+                                sourceId,
+                        )
+                        .first<{
+                                object_id: string;
+                                object_type: string;
+                                title: string | null;
+                                source: string | null;
+                                source_id: string | null;
+                                status: string;
+                                current_version: string;
+                        }>();
+
+        if (existing) {
+                return json({
+                        ok: true,
+                        created: false,
+                        object: existing,
+                });
+        }
+
+        return registerObject(body, env);
+}
 async function registerObject(
   body: CreateObjectRequest,
   env: Env,
