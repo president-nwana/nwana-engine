@@ -3,7 +3,9 @@ import { ensurePendingProofAnchor } from "./trust";
 import { getDefaultProofProvider, getProofProvider } from "./proof-providers";
 
 interface Env {
-	nwana_engine_db: D1Database;
+        nwana_engine_db: D1Database;
+        RUNSIGNUP_API_KEY: string;
+        RUNSIGNUP_API_SECRET: string;
 }
 
 interface CreateObjectRequest {
