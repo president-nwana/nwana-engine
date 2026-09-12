@@ -1811,6 +1811,33 @@ async function ingestSourceObject(
                 return registerObject(body, env);
         }
 
+        const incomingObjectType =
+                normalizeObjectType(body.object_type);
+
+        if (
+                incomingObjectType &&
+                existing.object_type !== incomingObjectType
+        ) {
+                return json(
+                        {
+                                ok: false,
+                                conflict: true,
+                                requires_object_type_migration: true,
+                                source,
+                                source_type: sourceType,
+                                source_id: sourceId,
+                                object_id: existing.object_id,
+                                existing_object_type:
+                                        existing.object_type,
+                                incoming_object_type:
+                                        incomingObjectType,
+                                message:
+                                        "Existing Registry object has a different semantic object type.",
+                        },
+                        409,
+                );
+        }
+
         const incomingTitle =
                 body.title ?? null;
 
@@ -2239,6 +2266,163 @@ async function discoverRunSignup(
                         discovery.nextCursor ?? null,
         });
 }
+async function ingestRunSignupDiscovery(
+        env: Env,
+): Promise<Response> {
+        const source = new RunSignupSource({
+                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+        });
+
+        const discovery =
+                await source.fetchChanges(null);
+
+        const results: Array<Record<string, unknown>> = [];
+
+        let processed = 0;
+        let created = 0;
+        let updated = 0;
+        let unchanged = 0;
+        let skipped = 0;
+        let conflicts = 0;
+        let failed = 0;
+
+        for (const item of discovery.items) {
+                const raw =
+                        item.raw &&
+                        typeof item.raw === "object"
+                                ? item.raw as Record<string, unknown>
+                                : {};
+
+                const events =
+                        Array.isArray(raw.events)
+                                ? raw.events
+                                : [];
+
+                const classification =
+                        classifyRunSignupContainer(
+                                item.title,
+                                events,
+                        );
+
+                if (
+                        classification ===
+                        "GENERIC_CONTAINER"
+                ) {
+                        skipped += 1;
+
+                        results.push({
+                                source: item.source,
+                                source_type: item.sourceType,
+                                source_id: item.sourceId,
+                                title: item.title ?? null,
+                                classification,
+                                status: "skipped",
+                                reason:
+                                        "Container is not yet semantically classified.",
+                        });
+
+                        continue;
+                }
+
+                processed += 1;
+
+                const response =
+                        await ingestSourceObject(
+                                {
+                                        object_type:
+                                                classification,
+                                        title:
+                                                item.title ??
+                                                undefined,
+                                        source:
+                                                item.source,
+                                        source_type:
+                                                item.sourceType,
+                                        source_id:
+                                                item.sourceId,
+                                        status:
+                                                item.status ??
+                                                "active",
+                                        metadata: {
+                                                ...(
+                                                        item.metadata ??
+                                                        {}
+                                                ),
+                                                classification,
+                                                registry_ingest:
+                                                        "runsignup-discovery",
+                                        },
+                                        content:
+                                                item.raw ??
+                                                item.metadata ??
+                                                null,
+                                        created_by:
+                                                "RunSignup Discovery Ingest",
+                                },
+                                env,
+                        );
+
+                let result: Record<string, unknown>;
+
+                try {
+                        result =
+                                await response.json() as Record<
+                                        string,
+                                        unknown
+                                >;
+                } catch {
+                        result = {
+                                ok: false,
+                                error:
+                                        "Registry ingest returned invalid JSON.",
+                        };
+                }
+
+                if (response.status === 409) {
+                        conflicts += 1;
+                } else if (!response.ok) {
+                        failed += 1;
+                } else if (result.created === true) {
+                        created += 1;
+                } else if (result.changed === true) {
+                        updated += 1;
+                } else {
+                        unchanged += 1;
+                }
+
+                results.push({
+                        source: item.source,
+                        source_type: item.sourceType,
+                        source_id: item.sourceId,
+                        title: item.title ?? null,
+                        classification,
+                        http_status: response.status,
+                        result,
+                });
+        }
+
+        return json({
+                ok: failed === 0,
+                source: source.id,
+                mode: "registry-ingest",
+                writes_to_registry: true,
+                writes_events: false,
+                writes_relationships: false,
+                discovered:
+                        discovery.items.length,
+                processed,
+                created,
+                updated,
+                unchanged,
+                skipped,
+                conflicts,
+                failed,
+                results,
+                next_cursor:
+                        discovery.nextCursor ?? null,
+        });
+}
+
 async function syncRunSignup(
         env: Env,
 ): Promise<Response> {
@@ -2461,6 +2645,7 @@ async function registerObject(
 	return json(
 		{
 			ok: true,
+                    created: true,
 			object: {
 				object_id: objectId,
 				object_type: objectType,
@@ -3138,6 +3323,30 @@ export default {
                                 );
                         }
                 }
+                if (
+                        request.method === "POST" &&
+                        url.pathname === "/sources/runsignup/ingest"
+                ) {
+                        try {
+                                return await ingestRunSignupDiscovery(
+                                        env,
+                                );
+                        } catch (error) {
+                                console.error(error);
+
+                                return json(
+                                        {
+                                                ok: false,
+                                                error:
+                                                        error instanceof Error
+                                                                ? error.message
+                                                                : "Unknown RunSignup Registry ingest error",
+                                        },
+                                        500,
+                                );
+                        }
+                }
+
 if (
                     request.method === "POST" &&
                     url.pathname === "/sources/runsignup/sync"
