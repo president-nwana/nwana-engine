@@ -1944,6 +1944,25 @@ async function ingestSourceObject(
                         versionResult.version ?? null,
         });
 }
+function extractRunSignupSeason(
+        title: string | null | undefined,
+): number | null {
+        const match =
+                (title ?? "").match(
+                        /\b(20\d{2})\b/,
+                );
+
+        if (!match) {
+                return null;
+        }
+
+        const season =
+                Number(match[1]);
+
+        return Number.isInteger(season)
+                ? season
+                : null;
+}
 function classifyRunSignupContainer(
         title: string | null | undefined,
         events: unknown[],
@@ -1978,9 +1997,13 @@ function classifyRunSignupContainer(
                 return "COMPETITION_DISTANCE_SERIES";
         }
 
+        const season =
+                extractRunSignupSeason(title);
+
         if (
+                season !== null &&
                 normalizedTitle ===
-                "2026 nwana open nordic walking series"
+                        `${season} nwana open nordic walking series`
         ) {
                 return "COMPETITION_SERIES_HUB";
         }
@@ -2042,45 +2065,7 @@ async function discoverRunSignup(
         const discovery =
                 await source.fetchChanges(null);
 
-        const discoveryRelationships =
-                discovery.items.map((candidate) => {
-                        const candidateRaw =
-                                candidate.raw &&
-                                typeof candidate.raw === "object"
-                                        ? candidate.raw as Record<string, unknown>
-                                        : {};
-
-                        const candidateEvents =
-                                Array.isArray(candidateRaw.events)
-                                        ? candidateRaw.events
-                                        : [];
-
-                        return {
-                                item: candidate,
-                                events: candidateEvents,
-                                classification:
-                                        classifyRunSignupContainer(
-                                                candidate.title,
-                                                candidateEvents,
-                                        ),
-                        };
-                });
-
-        const seriesHub =
-                discoveryRelationships.find(
-                        (candidate) =>
-                                candidate.classification ===
-                                "COMPETITION_SERIES_HUB",
-                );
-
-        const distanceSeries =
-                discoveryRelationships.filter(
-                        (candidate) =>
-                                candidate.classification ===
-                                "COMPETITION_DISTANCE_SERIES",
-                );
-
-        const containers =
+        const candidates =
                 discovery.items.map((item) => {
                         const raw =
                                 item.raw &&
@@ -2093,11 +2078,76 @@ async function discoverRunSignup(
                                         ? raw.events
                                         : [];
 
-                        const classification =
-                                classifyRunSignupContainer(
-                                        item.title,
-                                        events,
-                                );
+                        return {
+                                item,
+                                events,
+                                classification:
+                                        classifyRunSignupContainer(
+                                                item.title,
+                                                events,
+                                        ),
+                                season:
+                                        extractRunSignupSeason(
+                                                item.title,
+                                        ),
+                        };
+                });
+
+        const seriesHubsBySeason =
+                new Map<
+                        number,
+                        (typeof candidates)[number]
+                >();
+
+        for (const candidate of candidates) {
+                if (
+                        candidate.classification ===
+                                "COMPETITION_SERIES_HUB" &&
+                        candidate.season !== null
+                ) {
+                        seriesHubsBySeason.set(
+                                candidate.season,
+                                candidate,
+                        );
+                }
+        }
+
+        const distanceSeriesBySeason =
+                new Map<
+                        number,
+                        Array<(typeof candidates)[number]>
+                >();
+
+        for (const candidate of candidates) {
+                if (
+                        candidate.classification !==
+                                "COMPETITION_DISTANCE_SERIES" ||
+                        candidate.season === null
+                ) {
+                        continue;
+                }
+
+                const existing =
+                        distanceSeriesBySeason.get(
+                                candidate.season,
+                        ) ?? [];
+
+                existing.push(candidate);
+
+                distanceSeriesBySeason.set(
+                        candidate.season,
+                        existing,
+                );
+        }
+
+        const containers =
+                candidates.map((candidate) => {
+                        const {
+                                item,
+                                events,
+                                classification,
+                                season,
+                        } = candidate;
 
                         const relationships: Array<
                                 Record<string, unknown>
@@ -2105,39 +2155,54 @@ async function discoverRunSignup(
 
                         if (
                                 classification ===
-                                "COMPETITION_SERIES_HUB"
+                                        "COMPETITION_SERIES_HUB" &&
+                                season !== null
                         ) {
-                                for (
-                                        const child of
-                                        distanceSeries
-                                ) {
+                                const children =
+                                        distanceSeriesBySeason.get(
+                                                season,
+                                        ) ?? [];
+
+                                for (const child of children) {
                                         relationships.push({
                                                 relationship:
                                                         "CONTAINS_DISTANCE_SERIES",
                                                 target_source:
                                                         child.item.source,
+                                                target_source_type:
+                                                        child.item.sourceType,
                                                 target_source_id:
                                                         child.item.sourceId,
                                                 target_classification:
                                                         child.classification,
+                                                season,
                                         });
                                 }
                         }
 
                         if (
                                 classification ===
-                                "COMPETITION_DISTANCE_SERIES"
+                                        "COMPETITION_DISTANCE_SERIES" &&
+                                season !== null
                         ) {
+                                const seriesHub =
+                                        seriesHubsBySeason.get(
+                                                season,
+                                        );
+
                                 if (seriesHub) {
                                         relationships.push({
                                                 relationship:
                                                         "BELONGS_TO_SERIES_HUB",
                                                 target_source:
                                                         seriesHub.item.source,
+                                                target_source_type:
+                                                        seriesHub.item.sourceType,
                                                 target_source_id:
                                                         seriesHub.item.sourceId,
                                                 target_classification:
                                                         seriesHub.classification,
+                                                season,
                                         });
                                 }
 
@@ -2176,29 +2241,40 @@ async function discoverRunSignup(
                                                         null,
                                                 target_classification:
                                                         "COMPETITION_EVENT",
+                                                season,
                                         });
                                 }
                         }
 
                         return {
-                                source: item.source,
-                                source_type: item.sourceType,
-                                source_id: item.sourceId,
-                                title: item.title ?? null,
-                                status: item.status ?? null,
+                                source:
+                                        item.source,
+                                source_type:
+                                        item.sourceType,
+                                source_id:
+                                        item.sourceId,
+                                title:
+                                        item.title ?? null,
+                                status:
+                                        item.status ?? null,
                                 last_modified:
-                                        item.metadata?.lastModified ?? null,
+                                        item.metadata?.lastModified ??
+                                        null,
                                 classification,
+                                season,
                                 relationships,
-                                event_count: events.length,
+                                event_count:
+                                        events.length,
                                 events:
                                         events.map((event) => {
                                                 if (
                                                         !event ||
-                                                        typeof event !== "object"
+                                                        typeof event !==
+                                                                "object"
                                                 ) {
                                                         return {
-                                                                raw: event,
+                                                                raw:
+                                                                        event,
                                                         };
                                                 }
 
@@ -2216,6 +2292,7 @@ async function discoverRunSignup(
                                                 return {
                                                         classification:
                                                                 eventClassification,
+                                                        season,
                                                         relationships:
                                                                 eventClassification ===
                                                                 "COMPETITION_EVENT"
@@ -2225,10 +2302,13 @@ async function discoverRunSignup(
                                                                                                 "BELONGS_TO_DISTANCE_SERIES",
                                                                                         target_source:
                                                                                                 item.source,
+                                                                                        target_source_type:
+                                                                                                item.sourceType,
                                                                                         target_source_id:
                                                                                                 item.sourceId,
                                                                                         target_classification:
                                                                                                 classification,
+                                                                                        season,
                                                                                 },
                                                                         ]
                                                                         : [],
@@ -2260,7 +2340,13 @@ async function discoverRunSignup(
                 source: source.id,
                 mode: "discovery",
                 writes_to_registry: false,
-                container_count: containers.length,
+                season_scoped: true,
+                seasons:
+                        Array.from(
+                                seriesHubsBySeason.keys(),
+                        ).sort(),
+                container_count:
+                        containers.length,
                 containers,
                 next_cursor:
                         discovery.nextCursor ?? null,
@@ -3269,29 +3355,31 @@ async function ingestRunSignupRelationships(
                                                 item.title,
                                                 events,
                                         ),
+                                season:
+                                        extractRunSignupSeason(
+                                                item.title,
+                                        ),
                         };
                 });
 
-        const seriesHub =
-                candidates.find(
+        const hubs =
+                candidates.filter(
                         (candidate) =>
                                 candidate.classification ===
                                         "COMPETITION_SERIES_HUB" &&
-                                (candidate.item.title ?? "")
-                                        .trim()
-                                        .toLowerCase() ===
-                                        "2026 nwana open nordic walking series",
+                                candidate.season !== null,
                 );
 
-        if (!seriesHub) {
-                return json(
-                        {
-                                ok: false,
-                                mode: "relationship-registry-ingest",
-                                error:
-                                        "2026 RunSignup competition series hub was not found.",
-                        },
-                        409,
+        const hubBySeason =
+                new Map<
+                        number,
+                        (typeof candidates)[number]
+                >();
+
+        for (const hub of hubs) {
+                hubBySeason.set(
+                        hub.season as number,
+                        hub,
                 );
         }
 
@@ -3300,12 +3388,11 @@ async function ingestRunSignupRelationships(
                         (candidate) =>
                                 candidate.classification ===
                                         "COMPETITION_DISTANCE_SERIES" &&
-                                (candidate.item.title ?? "")
-                                        .trim()
-                                        .startsWith("2026 "),
+                                candidate.season !== null,
                 );
 
-        const db = env.nwana_engine_db;
+        const db =
+                env.nwana_engine_db;
 
         const resolveObjectId =
                 async (
@@ -3342,35 +3429,76 @@ async function ingestRunSignupRelationships(
                 metadata: Record<string, unknown>;
         }> = [];
 
-        const skippedItems: Array<Record<string, unknown>> = [];
+        const skippedItems: Array<
+                Record<string, unknown>
+        > = [];
 
-        const hubObjectId =
-                await resolveObjectId(
-                        seriesHub.item.source,
-                        seriesHub.item.sourceType,
-                        String(seriesHub.item.sourceId),
-                );
-
-        if (!hubObjectId) {
-                return json(
+        const seasonSummaries =
+                new Map<
+                        number,
                         {
-                                ok: false,
-                                mode: "relationship-registry-ingest",
-                                error:
-                                        "2026 series hub exists in RunSignup discovery but is missing from the Object Registry.",
-                                source_id:
-                                        seriesHub.item.sourceId,
-                        },
-                        409,
-                );
-        }
+                                hub_source_id: string;
+                                distance_series: number;
+                                competition_events: number;
+                                desired_relationships: number;
+                        }
+                >();
 
         for (const distance of distanceSeries) {
+                const season =
+                        distance.season as number;
+
+                const seriesHub =
+                        hubBySeason.get(season);
+
+                if (!seriesHub) {
+                        skippedItems.push({
+                                source:
+                                        distance.item.source,
+                                source_type:
+                                        distance.item.sourceType,
+                                source_id:
+                                        distance.item.sourceId,
+                                season,
+                                reason:
+                                        "No competition series hub exists for this season.",
+                        });
+
+                        continue;
+                }
+
+                const hubObjectId =
+                        await resolveObjectId(
+                                seriesHub.item.source,
+                                seriesHub.item.sourceType,
+                                String(
+                                        seriesHub.item.sourceId,
+                                ),
+                        );
+
+                if (!hubObjectId) {
+                        skippedItems.push({
+                                source:
+                                        seriesHub.item.source,
+                                source_type:
+                                        seriesHub.item.sourceType,
+                                source_id:
+                                        seriesHub.item.sourceId,
+                                season,
+                                reason:
+                                        "Season series hub is missing from the Object Registry.",
+                        });
+
+                        continue;
+                }
+
                 const distanceObjectId =
                         await resolveObjectId(
                                 distance.item.source,
                                 distance.item.sourceType,
-                                String(distance.item.sourceId),
+                                String(
+                                        distance.item.sourceId,
+                                ),
                         );
 
                 if (!distanceObjectId) {
@@ -3381,12 +3509,28 @@ async function ingestRunSignupRelationships(
                                         distance.item.sourceType,
                                 source_id:
                                         distance.item.sourceId,
+                                season,
                                 reason:
                                         "Distance series is missing from the Object Registry.",
                         });
 
                         continue;
                 }
+
+                const summary =
+                        seasonSummaries.get(
+                                season,
+                        ) ?? {
+                                hub_source_id:
+                                        String(
+                                                seriesHub.item.sourceId,
+                                        ),
+                                distance_series: 0,
+                                competition_events: 0,
+                                desired_relationships: 0,
+                        };
+
+                summary.distance_series += 1;
 
                 relationships.push({
                         subject_object_id:
@@ -3396,10 +3540,11 @@ async function ingestRunSignupRelationships(
                         target_object_id:
                                 distanceObjectId,
                         metadata: {
-                                source: "runsignup",
+                                source:
+                                        "runsignup",
                                 ingest:
                                         "runsignup-relationship-ingest",
-                                season: 2026,
+                                season,
                         },
                 });
 
@@ -3411,21 +3556,27 @@ async function ingestRunSignupRelationships(
                         target_object_id:
                                 hubObjectId,
                         metadata: {
-                                source: "runsignup",
+                                source:
+                                        "runsignup",
                                 ingest:
                                         "runsignup-relationship-ingest",
-                                season: 2026,
+                                season,
                         },
                 });
+
+                summary.desired_relationships +=
+                        2;
 
                 for (const rawEvent of distance.events) {
                         if (
                                 !rawEvent ||
-                                typeof rawEvent !== "object"
+                                typeof rawEvent !==
+                                        "object"
                         ) {
                                 skippedItems.push({
                                         parent_source_id:
                                                 distance.item.sourceId,
+                                        season,
                                         reason:
                                                 "RunSignup event is not an object.",
                                 });
@@ -3434,10 +3585,15 @@ async function ingestRunSignupRelationships(
                         }
 
                         const event =
-                                rawEvent as Record<string, unknown>;
+                                rawEvent as Record<
+                                        string,
+                                        unknown
+                                >;
 
                         if (
-                                classifyRunSignupEvent(event) !==
+                                classifyRunSignupEvent(
+                                        event,
+                                ) !==
                                 "COMPETITION_EVENT"
                         ) {
                                 continue;
@@ -3453,6 +3609,7 @@ async function ingestRunSignupRelationships(
                                 skippedItems.push({
                                         parent_source_id:
                                                 distance.item.sourceId,
+                                        season,
                                         reason:
                                                 "Competition event has no event_id.",
                                 });
@@ -3477,6 +3634,7 @@ async function ingestRunSignupRelationships(
                                                 String(eventId),
                                         parent_source_id:
                                                 distance.item.sourceId,
+                                        season,
                                         reason:
                                                 "Competition event is missing from the Object Registry.",
                                 });
@@ -3496,7 +3654,7 @@ async function ingestRunSignupRelationships(
                                                 "runsignup",
                                         ingest:
                                                 "runsignup-relationship-ingest",
-                                        season: 2026,
+                                        season,
                                 },
                         });
 
@@ -3512,24 +3670,38 @@ async function ingestRunSignupRelationships(
                                                 "runsignup",
                                         ingest:
                                                 "runsignup-relationship-ingest",
-                                        season: 2026,
+                                        season,
                                 },
                         });
+
+                        summary.competition_events +=
+                                1;
+
+                        summary.desired_relationships +=
+                                2;
                 }
+
+                seasonSummaries.set(
+                        season,
+                        summary,
+                );
         }
 
         let created = 0;
         let unchanged = 0;
         let failed = 0;
 
-        const results: Array<Record<string, unknown>> = [];
+        const results: Array<
+                Record<string, unknown>
+        > = [];
 
         for (const relationship of relationships) {
                 const relationshipRequest =
                         new Request(
                                 "http://internal/relationships",
                                 {
-                                        method: "POST",
+                                        method:
+                                                "POST",
                                         headers: {
                                                 "content-type":
                                                         "application/json",
@@ -3547,7 +3719,10 @@ async function ingestRunSignupRelationships(
                                 env,
                         );
 
-                let result: Record<string, unknown>;
+                let result: Record<
+                        string,
+                        unknown
+                >;
 
                 try {
                         result =
@@ -3567,7 +3742,8 @@ async function ingestRunSignupRelationships(
                         failed += 1;
 
                         results.push({
-                                status: "failed",
+                                status:
+                                        "failed",
                                 relationship:
                                         relationship.relationship_type,
                                 subject_object_id:
@@ -3601,16 +3777,31 @@ async function ingestRunSignupRelationships(
         }
 
         return json({
-                ok: failed === 0,
-                source: source.id,
-                mode: "relationship-registry-ingest",
-                scope: {
-                        season: 2026,
-                        hub_source_id:
-                                seriesHub.item.sourceId,
-                },
-                distance_series:
-                        distanceSeries.length,
+                ok:
+                        failed === 0,
+                source:
+                        source.id,
+                mode:
+                        "relationship-registry-ingest",
+                season_scoped:
+                        true,
+                seasons:
+                        Array.from(
+                                seasonSummaries.entries(),
+                        )
+                                .sort(
+                                        ([a], [b]) =>
+                                                a - b,
+                                )
+                                .map(
+                                        ([
+                                                season,
+                                                summary,
+                                        ]) => ({
+                                                season,
+                                                ...summary,
+                                        }),
+                                ),
                 desired_relationships:
                         relationships.length,
                 processed:
