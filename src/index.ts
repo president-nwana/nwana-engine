@@ -1,11 +1,11 @@
 import { buildDetachedOtsProof } from "./ots-proof";
 import { ensurePendingProofAnchor } from "./trust";
 import { getDefaultProofProvider, getProofProvider } from "./proof-providers";
+import { RunSignupSource } from "./sources/runsignup-source";
 
 interface Env {
         nwana_engine_db: D1Database;
-        RUNSIGNUP_API_KEY: string;
-        RUNSIGNUP_API_SECRET: string;
+        RUNSIGNUP_ACCESS_TOKEN: string;
 }
 
 interface CreateObjectRequest {
@@ -1802,6 +1802,39 @@ async function ingestSourceObject(
 
         return registerObject(body, env);
 }
+async function syncRunSignup(
+        env: Env,
+): Promise<Response> {
+        const source = new RunSignupSource({
+                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+        });
+
+        const item = await source.fetchRace(209464);
+
+        const response = await ingestSourceObject(
+                {
+                        object_type: item.sourceType,
+                        title: item.title ?? undefined,
+                        source: item.source,
+                        source_id: item.sourceId,
+                        status: item.status ?? "active",
+                        metadata: item.metadata ?? undefined,
+                        content: item.raw ?? item.metadata ?? null,
+                        created_by: "RunSignup Source Adapter",
+                },
+                env,
+        );
+
+        const result = await response.json();
+
+        return json({
+                ok: true,
+                source: source.id,
+                fetched: 1,
+                processed: 1,
+                results: [result],
+        });
+}
 async function registerObject(
   body: CreateObjectRequest,
   env: Env,
@@ -2644,6 +2677,27 @@ export default {
 		}
 
 		if (
+                    request.method === "POST" &&
+                    url.pathname === "/sources/runsignup/sync"
+            ) {
+                    try {
+                            return await syncRunSignup(env);
+                    } catch (error) {
+                            console.error(error);
+
+                            return json(
+                                    {
+                                            ok: false,
+                                            error:
+                                                    error instanceof Error
+                                                            ? error.message
+                                                            : "Unknown RunSignup sync error",
+                                    },
+                                    500,
+                            );
+                    }
+            }
+                if (
 			request.method === "POST" &&
 			url.pathname === "/relationships"
 		) {
