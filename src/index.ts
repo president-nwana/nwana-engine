@@ -3319,6 +3319,43 @@ async function createRelationship(
 		);
 	}
 
+	const existingRelationship =
+		await db
+			.prepare(`
+				SELECT
+					relationship_id,
+					subject_object_id,
+					relationship_type,
+					target_object_id,
+					metadata,
+					created_at
+				FROM relationships
+				WHERE subject_object_id = ?
+				AND relationship_type = ?
+				AND target_object_id = ?
+				LIMIT 1
+			`)
+			.bind(
+				body.subject_object_id,
+				relationshipType,
+				body.target_object_id,
+			)
+			.first<{
+				relationship_id: string;
+				subject_object_id: string;
+				relationship_type: string;
+				target_object_id: string;
+				metadata: string | null;
+				created_at: string;
+			}>();
+
+	if (existingRelationship) {
+		return json({
+			ok: true,
+			created: false,
+			relationship: existingRelationship,
+		});
+	}
 	const relationshipId =
 		`NWANA-REL-${crypto.randomUUID()}`;
 
@@ -3372,6 +3409,7 @@ async function createRelationship(
 	return json(
 		{
 			ok: true,
+			created: true,
 			relationship: {
 				relationship_id: relationshipId,
 				subject_object_id:
