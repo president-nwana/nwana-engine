@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS idx_relationships_unique ON relationships(subject_object_id, relationship_type, target_object_id);

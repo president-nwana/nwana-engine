@@ -1,4 +1,4 @@
-import { buildDetachedOtsProof } from "./ots-proof";
+﻿import { buildDetachedOtsProof } from "./ots-proof";
 import { ensurePendingProofAnchor } from "./trust";
 import { getDefaultProofProvider, getProofProvider } from "./proof-providers";
 import { RunSignupSource } from "./sources/runsignup-source";
@@ -3238,6 +3238,393 @@ async function createVersion(
 	);
 }
 
+async function ingestRunSignupRelationships(
+        env: Env,
+): Promise<Response> {
+        const source = new RunSignupSource({
+                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+        });
+
+        const discovery =
+                await source.fetchChanges(null);
+
+        const candidates =
+                discovery.items.map((item) => {
+                        const raw =
+                                item.raw &&
+                                typeof item.raw === "object"
+                                        ? item.raw as Record<string, unknown>
+                                        : {};
+
+                        const events =
+                                Array.isArray(raw.events)
+                                        ? raw.events
+                                        : [];
+
+                        return {
+                                item,
+                                events,
+                                classification:
+                                        classifyRunSignupContainer(
+                                                item.title,
+                                                events,
+                                        ),
+                        };
+                });
+
+        const seriesHub =
+                candidates.find(
+                        (candidate) =>
+                                candidate.classification ===
+                                        "COMPETITION_SERIES_HUB" &&
+                                (candidate.item.title ?? "")
+                                        .trim()
+                                        .toLowerCase() ===
+                                        "2026 nwana open nordic walking series",
+                );
+
+        if (!seriesHub) {
+                return json(
+                        {
+                                ok: false,
+                                mode: "relationship-registry-ingest",
+                                error:
+                                        "2026 RunSignup competition series hub was not found.",
+                        },
+                        409,
+                );
+        }
+
+        const distanceSeries =
+                candidates.filter(
+                        (candidate) =>
+                                candidate.classification ===
+                                        "COMPETITION_DISTANCE_SERIES" &&
+                                (candidate.item.title ?? "")
+                                        .trim()
+                                        .startsWith("2026 "),
+                );
+
+        const db = env.nwana_engine_db;
+
+        const resolveObjectId =
+                async (
+                        sourceName: string,
+                        sourceType: string,
+                        sourceId: string,
+                ): Promise<string | null> => {
+                        const row =
+                                await db
+                                        .prepare(`
+                                                SELECT object_id
+                                                FROM objects
+                                                WHERE source = ?
+                                                AND source_type = ?
+                                                AND source_id = ?
+                                                LIMIT 1
+                                        `)
+                                        .bind(
+                                                sourceName,
+                                                sourceType,
+                                                sourceId,
+                                        )
+                                        .first<{
+                                                object_id: string;
+                                        }>();
+
+                        return row?.object_id ?? null;
+                };
+
+        const relationships: Array<{
+                subject_object_id: string;
+                relationship_type: string;
+                target_object_id: string;
+                metadata: Record<string, unknown>;
+        }> = [];
+
+        const skippedItems: Array<Record<string, unknown>> = [];
+
+        const hubObjectId =
+                await resolveObjectId(
+                        seriesHub.item.source,
+                        seriesHub.item.sourceType,
+                        String(seriesHub.item.sourceId),
+                );
+
+        if (!hubObjectId) {
+                return json(
+                        {
+                                ok: false,
+                                mode: "relationship-registry-ingest",
+                                error:
+                                        "2026 series hub exists in RunSignup discovery but is missing from the Object Registry.",
+                                source_id:
+                                        seriesHub.item.sourceId,
+                        },
+                        409,
+                );
+        }
+
+        for (const distance of distanceSeries) {
+                const distanceObjectId =
+                        await resolveObjectId(
+                                distance.item.source,
+                                distance.item.sourceType,
+                                String(distance.item.sourceId),
+                        );
+
+                if (!distanceObjectId) {
+                        skippedItems.push({
+                                source:
+                                        distance.item.source,
+                                source_type:
+                                        distance.item.sourceType,
+                                source_id:
+                                        distance.item.sourceId,
+                                reason:
+                                        "Distance series is missing from the Object Registry.",
+                        });
+
+                        continue;
+                }
+
+                relationships.push({
+                        subject_object_id:
+                                hubObjectId,
+                        relationship_type:
+                                "CONTAINS_DISTANCE_SERIES",
+                        target_object_id:
+                                distanceObjectId,
+                        metadata: {
+                                source: "runsignup",
+                                ingest:
+                                        "runsignup-relationship-ingest",
+                                season: 2026,
+                        },
+                });
+
+                relationships.push({
+                        subject_object_id:
+                                distanceObjectId,
+                        relationship_type:
+                                "BELONGS_TO_SERIES_HUB",
+                        target_object_id:
+                                hubObjectId,
+                        metadata: {
+                                source: "runsignup",
+                                ingest:
+                                        "runsignup-relationship-ingest",
+                                season: 2026,
+                        },
+                });
+
+                for (const rawEvent of distance.events) {
+                        if (
+                                !rawEvent ||
+                                typeof rawEvent !== "object"
+                        ) {
+                                skippedItems.push({
+                                        parent_source_id:
+                                                distance.item.sourceId,
+                                        reason:
+                                                "RunSignup event is not an object.",
+                                });
+
+                                continue;
+                        }
+
+                        const event =
+                                rawEvent as Record<string, unknown>;
+
+                        if (
+                                classifyRunSignupEvent(event) !==
+                                "COMPETITION_EVENT"
+                        ) {
+                                continue;
+                        }
+
+                        const eventId =
+                                event.event_id;
+
+                        if (
+                                eventId === null ||
+                                eventId === undefined
+                        ) {
+                                skippedItems.push({
+                                        parent_source_id:
+                                                distance.item.sourceId,
+                                        reason:
+                                                "Competition event has no event_id.",
+                                });
+
+                                continue;
+                        }
+
+                        const eventObjectId =
+                                await resolveObjectId(
+                                        "runsignup",
+                                        "event",
+                                        String(eventId),
+                                );
+
+                        if (!eventObjectId) {
+                                skippedItems.push({
+                                        source:
+                                                "runsignup",
+                                        source_type:
+                                                "event",
+                                        source_id:
+                                                String(eventId),
+                                        parent_source_id:
+                                                distance.item.sourceId,
+                                        reason:
+                                                "Competition event is missing from the Object Registry.",
+                                });
+
+                                continue;
+                        }
+
+                        relationships.push({
+                                subject_object_id:
+                                        distanceObjectId,
+                                relationship_type:
+                                        "CONTAINS_COMPETITION_EVENT",
+                                target_object_id:
+                                        eventObjectId,
+                                metadata: {
+                                        source:
+                                                "runsignup",
+                                        ingest:
+                                                "runsignup-relationship-ingest",
+                                        season: 2026,
+                                },
+                        });
+
+                        relationships.push({
+                                subject_object_id:
+                                        eventObjectId,
+                                relationship_type:
+                                        "BELONGS_TO_DISTANCE_SERIES",
+                                target_object_id:
+                                        distanceObjectId,
+                                metadata: {
+                                        source:
+                                                "runsignup",
+                                        ingest:
+                                                "runsignup-relationship-ingest",
+                                        season: 2026,
+                                },
+                        });
+                }
+        }
+
+        let created = 0;
+        let unchanged = 0;
+        let failed = 0;
+
+        const results: Array<Record<string, unknown>> = [];
+
+        for (const relationship of relationships) {
+                const relationshipRequest =
+                        new Request(
+                                "http://internal/relationships",
+                                {
+                                        method: "POST",
+                                        headers: {
+                                                "content-type":
+                                                        "application/json",
+                                        },
+                                        body:
+                                                JSON.stringify(
+                                                        relationship,
+                                                ),
+                                },
+                        );
+
+                const response =
+                        await createRelationship(
+                                relationshipRequest,
+                                env,
+                        );
+
+                let result: Record<string, unknown>;
+
+                try {
+                        result =
+                                await response.json() as Record<
+                                        string,
+                                        unknown
+                                >;
+                } catch {
+                        result = {
+                                ok: false,
+                                error:
+                                        "Relationship creation returned invalid JSON.",
+                        };
+                }
+
+                if (!response.ok) {
+                        failed += 1;
+
+                        results.push({
+                                status: "failed",
+                                relationship:
+                                        relationship.relationship_type,
+                                subject_object_id:
+                                        relationship.subject_object_id,
+                                target_object_id:
+                                        relationship.target_object_id,
+                                result,
+                        });
+
+                        continue;
+                }
+
+                if (result.created === true) {
+                        created += 1;
+                } else {
+                        unchanged += 1;
+                }
+
+                results.push({
+                        status:
+                                result.created === true
+                                        ? "created"
+                                        : "unchanged",
+                        relationship:
+                                relationship.relationship_type,
+                        subject_object_id:
+                                relationship.subject_object_id,
+                        target_object_id:
+                                relationship.target_object_id,
+                });
+        }
+
+        return json({
+                ok: failed === 0,
+                source: source.id,
+                mode: "relationship-registry-ingest",
+                scope: {
+                        season: 2026,
+                        hub_source_id:
+                                seriesHub.item.sourceId,
+                },
+                distance_series:
+                        distanceSeries.length,
+                desired_relationships:
+                        relationships.length,
+                processed:
+                        relationships.length,
+                created,
+                unchanged,
+                skipped:
+                        skippedItems.length,
+                failed,
+                skipped_items:
+                        skippedItems,
+                results,
+        });
+}
 async function createRelationship(
 	request: Request,
 	env: Env,
@@ -3765,6 +4152,29 @@ if (
                             );
                     }
             }
+                if (
+                        request.method === "POST" &&
+                        url.pathname === "/sources/runsignup/relationships-ingest"
+                ) {
+                        try {
+                                return await ingestRunSignupRelationships(
+                                        env,
+                                );
+                        } catch (error) {
+                                console.error(error);
+
+                                return json(
+                                        {
+                                                ok: false,
+                                                error:
+                                                        error instanceof Error
+                                                                ? error.message
+                                                                : "Unknown RunSignup relationship Registry ingest error",
+                                        },
+                                        500,
+                                );
+                        }
+                }
                 if (
 			request.method === "POST" &&
 			url.pathname === "/relationships"

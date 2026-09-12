@@ -227,3 +227,5 @@ ON proof_anchors(provider, network);
 
 CREATE INDEX IF NOT EXISTS idx_proof_anchors_status
 ON proof_anchors(status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_relationships_unique ON relationships(subject_object_id, relationship_type, target_object_id);
