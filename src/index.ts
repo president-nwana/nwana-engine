@@ -1,4 +1,4 @@
-﻿import { buildDetachedOtsProof } from "./ots-proof";
+import { buildDetachedOtsProof } from "./ots-proof";
 import { ensurePendingProofAnchor } from "./trust";
 import { getDefaultProofProvider, getProofProvider } from "./proof-providers";
 import { RunSignupSource } from "./sources/runsignup-source";
