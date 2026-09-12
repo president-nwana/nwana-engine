@@ -2006,6 +2006,44 @@ async function discoverRunSignup(
         const discovery =
                 await source.fetchChanges(null);
 
+        const discoveryRelationships =
+                discovery.items.map((candidate) => {
+                        const candidateRaw =
+                                candidate.raw &&
+                                typeof candidate.raw === "object"
+                                        ? candidate.raw as Record<string, unknown>
+                                        : {};
+
+                        const candidateEvents =
+                                Array.isArray(candidateRaw.events)
+                                        ? candidateRaw.events
+                                        : [];
+
+                        return {
+                                item: candidate,
+                                events: candidateEvents,
+                                classification:
+                                        classifyRunSignupContainer(
+                                                candidate.title,
+                                                candidateEvents,
+                                        ),
+                        };
+                });
+
+        const seriesHub =
+                discoveryRelationships.find(
+                        (candidate) =>
+                                candidate.classification ===
+                                "COMPETITION_SERIES_HUB",
+                );
+
+        const distanceSeries =
+                discoveryRelationships.filter(
+                        (candidate) =>
+                                candidate.classification ===
+                                "COMPETITION_DISTANCE_SERIES",
+                );
+
         const containers =
                 discovery.items.map((item) => {
                         const raw =
@@ -2019,6 +2057,93 @@ async function discoverRunSignup(
                                         ? raw.events
                                         : [];
 
+                        const classification =
+                                classifyRunSignupContainer(
+                                        item.title,
+                                        events,
+                                );
+
+                        const relationships: Array<
+                                Record<string, unknown>
+                        > = [];
+
+                        if (
+                                classification ===
+                                "COMPETITION_SERIES_HUB"
+                        ) {
+                                for (
+                                        const child of
+                                        distanceSeries
+                                ) {
+                                        relationships.push({
+                                                relationship:
+                                                        "CONTAINS_DISTANCE_SERIES",
+                                                target_source:
+                                                        child.item.source,
+                                                target_source_id:
+                                                        child.item.sourceId,
+                                                target_classification:
+                                                        child.classification,
+                                        });
+                                }
+                        }
+
+                        if (
+                                classification ===
+                                "COMPETITION_DISTANCE_SERIES"
+                        ) {
+                                if (seriesHub) {
+                                        relationships.push({
+                                                relationship:
+                                                        "BELONGS_TO_SERIES_HUB",
+                                                target_source:
+                                                        seriesHub.item.source,
+                                                target_source_id:
+                                                        seriesHub.item.sourceId,
+                                                target_classification:
+                                                        seriesHub.classification,
+                                        });
+                                }
+
+                                for (const event of events) {
+                                        if (
+                                                !event ||
+                                                typeof event !== "object"
+                                        ) {
+                                                continue;
+                                        }
+
+                                        const eventValue =
+                                                event as Record<
+                                                        string,
+                                                        unknown
+                                                >;
+
+                                        if (
+                                                classifyRunSignupEvent(
+                                                        eventValue,
+                                                ) !==
+                                                "COMPETITION_EVENT"
+                                        ) {
+                                                continue;
+                                        }
+
+                                        relationships.push({
+                                                relationship:
+                                                        "CONTAINS_COMPETITION_EVENT",
+                                                target_source:
+                                                        "runsignup",
+                                                target_source_type:
+                                                        "event",
+                                                target_source_id:
+                                                        eventValue.event_id ??
+                                                        null,
+                                                target_classification:
+                                                        "COMPETITION_EVENT",
+                                        });
+                                }
+                        }
+
                         return {
                                 source: item.source,
                                 source_type: item.sourceType,
@@ -2027,11 +2152,8 @@ async function discoverRunSignup(
                                 status: item.status ?? null,
                                 last_modified:
                                         item.metadata?.lastModified ?? null,
-                                classification:
-                                        classifyRunSignupContainer(
-                                                item.title,
-                                                events,
-                                        ),
+                                classification,
+                                relationships,
                                 event_count: events.length,
                                 events:
                                         events.map((event) => {
@@ -2050,11 +2172,30 @@ async function discoverRunSignup(
                                                                 unknown
                                                         >;
 
+                                                const eventClassification =
+                                                        classifyRunSignupEvent(
+                                                                value,
+                                                        );
+
                                                 return {
                                                         classification:
-                                                                classifyRunSignupEvent(
-                                                                        value,
-                                                                ),
+                                                                eventClassification,
+                                                        relationships:
+                                                                eventClassification ===
+                                                                "COMPETITION_EVENT"
+                                                                        ? [
+                                                                                {
+                                                                                        relationship:
+                                                                                                "BELONGS_TO_DISTANCE_SERIES",
+                                                                                        target_source:
+                                                                                                item.source,
+                                                                                        target_source_id:
+                                                                                                item.sourceId,
+                                                                                        target_classification:
+                                                                                                classification,
+                                                                                },
+                                                                        ]
+                                                                        : [],
                                                         event_id:
                                                                 value.event_id ??
                                                                 null,
