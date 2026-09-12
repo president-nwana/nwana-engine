@@ -12,6 +12,7 @@ interface CreateObjectRequest {
 	object_type: string;
 	title?: string;
 	source?: string;
+	source_type?: string;
 	source_id?: string;
 	status?: string;
 	parent_object_id?: string;
@@ -1755,6 +1756,9 @@ async function ingestSourceObject(
         const source =
                 body.source?.trim() ?? "";
 
+        const sourceType =
+                body.source_type?.trim() || "generic";
+
         const sourceId =
                 body.source_id?.trim() ?? "";
 
@@ -1770,6 +1774,7 @@ async function ingestSourceObject(
                                         o.object_type,
                                         o.title,
                                         o.source,
+                                        o.source_type,
                                         o.source_id,
                                         o.status,
                                         o.current_version,
@@ -1780,11 +1785,13 @@ async function ingestSourceObject(
                                         ON ov.object_id = o.object_id
                                         AND ov.version_number = o.current_version
                                 WHERE o.source = ?
+                                AND o.source_type = ?
                                 AND o.source_id = ?
                                 LIMIT 1
                         `)
                         .bind(
                                 source,
+                                sourceType,
                                 sourceId,
                         )
                         .first<{
@@ -1792,6 +1799,7 @@ async function ingestSourceObject(
                                 object_type: string;
                                 title: string | null;
                                 source: string | null;
+                                source_type: string | null;
                                 source_id: string | null;
                                 status: string;
                                 current_version: string;
@@ -1898,6 +1906,7 @@ async function ingestSourceObject(
                         object_type: existing.object_type,
                         title: incomingTitle,
                         source,
+                        source_type: sourceType,
                         source_id: sourceId,
                         status: incomingStatus,
                         current_version:
@@ -2244,6 +2253,7 @@ async function syncRunSignup(
                         object_type: item.sourceType,
                         title: item.title ?? undefined,
                         source: item.source,
+                        source_type: item.sourceType,
                         source_id: item.sourceId,
                         status: item.status ?? "active",
                         metadata: item.metadata ?? undefined,
@@ -2313,6 +2323,7 @@ async function registerObject(
 		version: versionNumber,
 		title: body.title ?? null,
 		source: body.source ?? "manual",
+		source_type: body.source_type ?? "generic",
 		source_id: body.source_id ?? null,
 		parent_object_id: body.parent_object_id ?? null,
 		metadata: body.metadata ?? null,
@@ -2357,19 +2368,21 @@ async function registerObject(
 					object_type,
 					title,
 					source,
+					source_type,
 					source_id,
 					status,
 					current_version,
 					parent_object_id,
 					metadata
 				)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`)
 			.bind(
 				objectId,
 				objectType,
 				body.title ?? null,
 				body.source ?? "manual",
+				body.source_type ?? "generic",
 				body.source_id ?? null,
 				body.status ?? "active",
 				versionNumber,

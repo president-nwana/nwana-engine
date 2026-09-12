@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS objects (
   object_type TEXT NOT NULL,
   title TEXT,
   source TEXT,
+  source_type TEXT NOT NULL DEFAULT 'generic',
   source_id TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   current_version TEXT NOT NULL DEFAULT '1.0',
@@ -75,7 +76,7 @@ ON objects(object_type);
 CREATE INDEX IF NOT EXISTS idx_objects_source
 ON objects(source, source_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_source_unique
-ON objects(source, source_id)
+ON objects(source, source_type, source_id)
 WHERE source_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_versions_object
