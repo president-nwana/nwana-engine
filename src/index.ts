@@ -1766,16 +1766,21 @@ async function ingestSourceObject(
                 await env.nwana_engine_db
                         .prepare(`
                                 SELECT
-                                        object_id,
-                                        object_type,
-                                        title,
-                                        source,
-                                        source_id,
-                                        status,
-                                        current_version
-                                FROM objects
-                                WHERE source = ?
-                                AND source_id = ?
+                                        o.object_id,
+                                        o.object_type,
+                                        o.title,
+                                        o.source,
+                                        o.source_id,
+                                        o.status,
+                                        o.current_version,
+                                        o.metadata,
+                                        ov.content_snapshot
+                                FROM objects o
+                                LEFT JOIN object_versions ov
+                                        ON ov.object_id = o.object_id
+                                        AND ov.version_number = o.current_version
+                                WHERE o.source = ?
+                                AND o.source_id = ?
                                 LIMIT 1
                         `)
                         .bind(
@@ -1790,17 +1795,118 @@ async function ingestSourceObject(
                                 source_id: string | null;
                                 status: string;
                                 current_version: string;
+                                metadata: string | null;
+                                content_snapshot: string | null;
                         }>();
 
-        if (existing) {
+        if (!existing) {
+                return registerObject(body, env);
+        }
+
+        const incomingTitle =
+                body.title ?? null;
+
+        const incomingStatus =
+                body.status ?? "active";
+
+        const incomingMetadata =
+                safeJson(body.metadata);
+
+        const incomingSnapshot =
+                safeJson(
+                        body.content ?? {
+                                title: incomingTitle,
+                                metadata: body.metadata ?? null,
+                        },
+                );
+
+        const changed =
+                existing.title !== incomingTitle ||
+                existing.status !== incomingStatus ||
+                existing.metadata !== incomingMetadata ||
+                existing.content_snapshot !== incomingSnapshot;
+
+        if (!changed) {
                 return json({
                         ok: true,
                         created: false,
+                        changed: false,
                         object: existing,
                 });
         }
 
-        return registerObject(body, env);
+        const versionRequest = new Request(
+                "http://internal/object-version",
+                {
+                        method: "POST",
+                        headers: {
+                                "content-type": "application/json",
+                        },
+                        body: JSON.stringify({
+                                title: incomingTitle,
+                                metadata: body.metadata ?? null,
+                                content: body.content ?? null,
+                                created_by:
+                                        body.created_by ??
+                                        "NWANA Source Adapter",
+                                reason_for_change:
+                                        `Source ${source} object ${sourceId} changed`,
+                        }),
+                },
+        );
+
+        const versionResponse =
+                await createVersion(
+                        existing.object_id,
+                        versionRequest,
+                        env,
+                );
+
+        const versionResult =
+                await versionResponse.json() as {
+                        version?: {
+                                version_number?: string;
+                        } | null;
+                };
+
+        if (!versionResponse.ok) {
+                return versionResponse;
+        }
+
+        if (existing.status !== incomingStatus) {
+                await env.nwana_engine_db
+                        .prepare(`
+                                UPDATE objects
+                                SET
+                                        status = ?,
+                                        updated_at = CURRENT_TIMESTAMP
+                                WHERE object_id = ?
+                        `)
+                        .bind(
+                                incomingStatus,
+                                existing.object_id,
+                        )
+                        .run();
+        }
+
+        return json({
+                ok: true,
+                created: false,
+                changed: true,
+                object: {
+                        object_id: existing.object_id,
+                        object_type: existing.object_type,
+                        title: incomingTitle,
+                        source,
+                        source_id: sourceId,
+                        status: incomingStatus,
+                        current_version:
+                                versionResult.version?.version_number ??
+                                existing.current_version,
+                },
+                version:
+                        versionResult.version ?? null,
+        });
 }
 async function syncRunSignup(
         env: Env,
