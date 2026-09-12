@@ -2866,10 +2866,10 @@ export default {
 			}
 		}
 
-		                if (
-                        request.method === "GET" &&
-                        url.pathname === "/sources/runsignup/discovery"
-                ) {
+		if (
+			request.method === "GET" &&
+			url.pathname === "/sources/runsignup/discovery"
+		) {
                         try {
                                 return await discoverRunSignup(env);
                         } catch (error) {
