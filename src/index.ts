@@ -1908,6 +1908,94 @@ async function ingestSourceObject(
                         versionResult.version ?? null,
         });
 }
+function classifyRunSignupContainer(
+        title: string | null | undefined,
+        events: unknown[],
+): string {
+        const normalizedTitle =
+                (title ?? "").trim().toLowerCase();
+
+        const hasCompetitionEvents =
+                events.some((event) => {
+                        if (
+                                !event ||
+                                typeof event !== "object"
+                        ) {
+                                return false;
+                        }
+
+                        const value =
+                                event as Record<
+                                        string,
+                                        unknown
+                                >;
+
+                        return (
+                                typeof value.distance === "string" &&
+                                value.distance.trim().length > 0
+                        );
+                });
+
+        if (
+                hasCompetitionEvents
+        ) {
+                return "COMPETITION_DISTANCE_SERIES";
+        }
+
+        if (
+                normalizedTitle ===
+                "2026 nwana open nordic walking series"
+        ) {
+                return "COMPETITION_SERIES_HUB";
+        }
+
+        if (
+                normalizedTitle.includes(
+                        "instructor growth fund",
+                )
+        ) {
+                return "FUNDRAISING_ASSET";
+        }
+
+        if (
+                normalizedTitle.includes(
+                        "nordic walking sport",
+                )
+        ) {
+                return "SPORT_ASSET";
+        }
+
+        if (
+                normalizedTitle.includes(
+                        "partner network",
+                )
+        ) {
+                return "PARTNER_NETWORK";
+        }
+
+        if (
+                normalizedTitle.includes(
+                        "| nordic walking",
+                )
+        ) {
+                return "ATHLETE_ASSET";
+        }
+
+        return "GENERIC_CONTAINER";
+}
+
+function classifyRunSignupEvent(
+        event: Record<string, unknown>,
+): string {
+        if (
+                typeof event.distance === "string" &&
+                event.distance.trim().length > 0
+        ) {
+                return "COMPETITION_EVENT";
+        }
+
+        return "GENERIC_EVENT";
+}
 async function discoverRunSignup(
         env: Env,
 ): Promise<Response> {
@@ -1939,6 +2027,11 @@ async function discoverRunSignup(
                                 status: item.status ?? null,
                                 last_modified:
                                         item.metadata?.lastModified ?? null,
+                                classification:
+                                        classifyRunSignupContainer(
+                                                item.title,
+                                                events,
+                                        ),
                                 event_count: events.length,
                                 events:
                                         events.map((event) => {
@@ -1958,6 +2051,10 @@ async function discoverRunSignup(
                                                         >;
 
                                                 return {
+                                                        classification:
+                                                                classifyRunSignupEvent(
+                                                                        value,
+                                                                ),
                                                         event_id:
                                                                 value.event_id ??
                                                                 null,
