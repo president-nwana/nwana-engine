@@ -2365,6 +2365,220 @@ async function previewRunSignupEvents(
                 events,
         });
 }
+async function ingestRunSignupEvents(
+        env: Env,
+): Promise<Response> {
+        const source = new RunSignupSource({
+                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+        });
+
+        const discovery =
+                await source.fetchChanges(null);
+
+        const results: Array<Record<string, unknown>> = [];
+
+        let discovered = 0;
+        let processed = 0;
+        let created = 0;
+        let updated = 0;
+        let unchanged = 0;
+        let skipped = 0;
+        let conflicts = 0;
+        let failed = 0;
+
+        for (const item of discovery.items) {
+                const raw =
+                        item.raw &&
+                        typeof item.raw === "object"
+                                ? item.raw as Record<string, unknown>
+                                : {};
+
+                const rawEvents =
+                        Array.isArray(raw.events)
+                                ? raw.events
+                                : [];
+
+                const containerClassification =
+                        classifyRunSignupContainer(
+                                item.title,
+                                rawEvents,
+                        );
+
+                if (
+                        containerClassification !==
+                        "COMPETITION_DISTANCE_SERIES"
+                ) {
+                        continue;
+                }
+
+                for (const rawEvent of rawEvents) {
+                        discovered += 1;
+
+                        if (
+                                !rawEvent ||
+                                typeof rawEvent !== "object"
+                        ) {
+                                skipped += 1;
+                                continue;
+                        }
+
+                        const event =
+                                rawEvent as Record<string, unknown>;
+
+                        const classification =
+                                classifyRunSignupEvent(event);
+
+                        if (
+                                classification !==
+                                "COMPETITION_EVENT"
+                        ) {
+                                skipped += 1;
+                                continue;
+                        }
+
+                        const eventId =
+                                event.event_id;
+
+                        if (
+                                eventId === null ||
+                                eventId === undefined
+                        ) {
+                                skipped += 1;
+
+                                results.push({
+                                        classification,
+                                        status: "skipped",
+                                        reason:
+                                                "RunSignup event has no event_id.",
+                                });
+
+                                continue;
+                        }
+
+                        processed += 1;
+
+                        const response =
+                                await ingestSourceObject(
+                                        {
+                                                object_type:
+                                                        classification,
+                                                title:
+                                                        typeof event.name ===
+                                                        "string"
+                                                                ? event.name
+                                                                : undefined,
+                                                source:
+                                                        "runsignup",
+                                                source_type:
+                                                        "event",
+                                                source_id:
+                                                        String(eventId),
+                                                status:
+                                                        "active",
+                                                parent_object_id:
+                                                        undefined,
+                                                metadata: {
+                                                        classification,
+                                                        registry_ingest:
+                                                                "runsignup-event-ingest",
+                                                        distance:
+                                                                event.distance ??
+                                                                null,
+                                                        start_time:
+                                                                event.start_time ??
+                                                                null,
+                                                        end_time:
+                                                                event.end_time ??
+                                                                null,
+                                                        parent_source:
+                                                                item.source,
+                                                        parent_source_type:
+                                                                item.sourceType,
+                                                        parent_source_id:
+                                                                item.sourceId,
+                                                        parent_title:
+                                                                item.title ??
+                                                                null,
+                                                        parent_classification:
+                                                                containerClassification,
+                                                },
+                                                content:
+                                                        rawEvent,
+                                                created_by:
+                                                        "RunSignup Event Ingest",
+                                        },
+                                        env,
+                                );
+
+                        let result: Record<string, unknown>;
+
+                        try {
+                                result =
+                                        await response.json() as Record<
+                                                string,
+                                                unknown
+                                        >;
+                        } catch {
+                                result = {
+                                        ok: false,
+                                        error:
+                                                "Event Registry ingest returned invalid JSON.",
+                                };
+                        }
+
+                        if (response.status === 409) {
+                                conflicts += 1;
+                        } else if (!response.ok) {
+                                failed += 1;
+                        } else if (result.created === true) {
+                                created += 1;
+                        } else if (result.changed === true) {
+                                updated += 1;
+                        } else {
+                                unchanged += 1;
+                        }
+
+                        results.push({
+                                source:
+                                        "runsignup",
+                                source_type:
+                                        "event",
+                                source_id:
+                                        String(eventId),
+                                title:
+                                        event.name ?? null,
+                                classification,
+                                parent_source:
+                                        item.source,
+                                parent_source_type:
+                                        item.sourceType,
+                                parent_source_id:
+                                        item.sourceId,
+                                http_status:
+                                        response.status,
+                                result,
+                        });
+                }
+        }
+
+        return json({
+                ok: failed === 0,
+                source: source.id,
+                mode: "event-registry-ingest",
+                writes_to_registry: true,
+                writes_events: true,
+                writes_relationships: false,
+                discovered,
+                processed,
+                created,
+                updated,
+                unchanged,
+                skipped,
+                conflicts,
+                failed,
+                results,
+        });
+}
 async function ingestRunSignupDiscovery(
         env: Env,
 ): Promise<Response> {
@@ -3440,6 +3654,29 @@ export default {
                                                         error instanceof Error
                                                                 ? error.message
                                                                 : "Unknown RunSignup event preview error",
+                                        },
+                                        500,
+                                );
+                        }
+                }
+                if (
+                        request.method === "POST" &&
+                        url.pathname === "/sources/runsignup/events-ingest"
+                ) {
+                        try {
+                                return await ingestRunSignupEvents(
+                                        env,
+                                );
+                        } catch (error) {
+                                console.error(error);
+
+                                return json(
+                                        {
+                                                ok: false,
+                                                error:
+                                                        error instanceof Error
+                                                                ? error.message
+                                                                : "Unknown RunSignup event Registry ingest error",
                                         },
                                         500,
                                 );
