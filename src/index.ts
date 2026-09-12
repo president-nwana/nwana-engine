@@ -2266,6 +2266,105 @@ async function discoverRunSignup(
                         discovery.nextCursor ?? null,
         });
 }
+async function previewRunSignupEvents(
+        env: Env,
+): Promise<Response> {
+        const source = new RunSignupSource({
+                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+        });
+
+        const discovery =
+                await source.fetchChanges(null);
+
+        const events: Array<Record<string, unknown>> = [];
+
+        for (const item of discovery.items) {
+                const raw =
+                        item.raw &&
+                        typeof item.raw === "object"
+                                ? item.raw as Record<string, unknown>
+                                : {};
+
+                const rawEvents =
+                        Array.isArray(raw.events)
+                                ? raw.events
+                                : [];
+
+                const containerClassification =
+                        classifyRunSignupContainer(
+                                item.title,
+                                rawEvents,
+                        );
+
+                if (
+                        containerClassification !==
+                        "COMPETITION_DISTANCE_SERIES"
+                ) {
+                        continue;
+                }
+
+                for (const rawEvent of rawEvents) {
+                        if (
+                                !rawEvent ||
+                                typeof rawEvent !== "object"
+                        ) {
+                                continue;
+                        }
+
+                        const event =
+                                rawEvent as Record<string, unknown>;
+
+                        const classification =
+                                classifyRunSignupEvent(event);
+
+                        if (
+                                classification !==
+                                "COMPETITION_EVENT"
+                        ) {
+                                continue;
+                        }
+
+                        events.push({
+                                source: "runsignup",
+                                source_type: "event",
+                                source_id:
+                                        event.event_id ?? null,
+                                classification,
+                                title:
+                                        event.name ?? null,
+                                distance:
+                                        event.distance ?? null,
+                                start_time:
+                                        event.start_time ?? null,
+                                end_time:
+                                        event.end_time ?? null,
+                                parent: {
+                                        source:
+                                                item.source,
+                                        source_type:
+                                                item.sourceType,
+                                        source_id:
+                                                item.sourceId,
+                                        title:
+                                                item.title ?? null,
+                                        classification:
+                                                containerClassification,
+                                },
+                        });
+                }
+        }
+
+        return json({
+                ok: true,
+                source: source.id,
+                mode: "event-preview",
+                writes_to_registry: false,
+                writes_events: false,
+                writes_relationships: false,
+                event_count: events.length,
+                events,
+        });
+}
 async function ingestRunSignupDiscovery(
         env: Env,
 ): Promise<Response> {
@@ -3318,6 +3417,29 @@ export default {
                                                         error instanceof Error
                                                                 ? error.message
                                                                 : "Unknown RunSignup discovery error",
+                                        },
+                                        500,
+                                );
+                        }
+                }
+                if (
+                        request.method === "GET" &&
+                        url.pathname === "/sources/runsignup/events-preview"
+                ) {
+                        try {
+                                return await previewRunSignupEvents(
+                                        env,
+                                );
+                        } catch (error) {
+                                console.error(error);
+
+                                return json(
+                                        {
+                                                ok: false,
+                                                error:
+                                                        error instanceof Error
+                                                                ? error.message
+                                                                : "Unknown RunSignup event preview error",
                                         },
                                         500,
                                 );
