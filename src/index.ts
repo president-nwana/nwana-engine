@@ -1908,6 +1908,90 @@ async function ingestSourceObject(
                         versionResult.version ?? null,
         });
 }
+async function discoverRunSignup(
+        env: Env,
+): Promise<Response> {
+        const source = new RunSignupSource({
+                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+        });
+
+        const discovery =
+                await source.fetchChanges(null);
+
+        const containers =
+                discovery.items.map((item) => {
+                        const raw =
+                                item.raw &&
+                                typeof item.raw === "object"
+                                        ? item.raw as Record<string, unknown>
+                                        : {};
+
+                        const events =
+                                Array.isArray(raw.events)
+                                        ? raw.events
+                                        : [];
+
+                        return {
+                                source: item.source,
+                                source_type: item.sourceType,
+                                source_id: item.sourceId,
+                                title: item.title ?? null,
+                                status: item.status ?? null,
+                                last_modified:
+                                        item.metadata?.lastModified ?? null,
+                                event_count: events.length,
+                                events:
+                                        events.map((event) => {
+                                                if (
+                                                        !event ||
+                                                        typeof event !== "object"
+                                                ) {
+                                                        return {
+                                                                raw: event,
+                                                        };
+                                                }
+
+                                                const value =
+                                                        event as Record<
+                                                                string,
+                                                                unknown
+                                                        >;
+
+                                                return {
+                                                        event_id:
+                                                                value.event_id ??
+                                                                null,
+                                                        name:
+                                                                value.name ??
+                                                                null,
+                                                        event_type:
+                                                                value.event_type ??
+                                                                null,
+                                                        distance:
+                                                                value.distance ??
+                                                                null,
+                                                        start_time:
+                                                                value.start_time ??
+                                                                null,
+                                                        end_time:
+                                                                value.end_time ??
+                                                                null,
+                                                };
+                                        }),
+                        };
+                });
+
+        return json({
+                ok: true,
+                source: source.id,
+                mode: "discovery",
+                writes_to_registry: false,
+                container_count: containers.length,
+                containers,
+                next_cursor:
+                        discovery.nextCursor ?? null,
+        });
+}
 async function syncRunSignup(
         env: Env,
 ): Promise<Response> {
@@ -2782,7 +2866,28 @@ export default {
 			}
 		}
 
-		if (
+		                if (
+                        request.method === "GET" &&
+                        url.pathname === "/sources/runsignup/discovery"
+                ) {
+                        try {
+                                return await discoverRunSignup(env);
+                        } catch (error) {
+                                console.error(error);
+
+                                return json(
+                                        {
+                                                ok: false,
+                                                error:
+                                                        error instanceof Error
+                                                                ? error.message
+                                                                : "Unknown RunSignup discovery error",
+                                        },
+                                        500,
+                                );
+                        }
+                }
+if (
                     request.method === "POST" &&
                     url.pathname === "/sources/runsignup/sync"
             ) {
