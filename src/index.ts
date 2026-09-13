@@ -2053,6 +2053,243 @@ function getRunSignupCommercialRole(
         }
 }
 
+interface ObjectCapabilitySpec {
+        capability_type: string;
+        available: boolean;
+        configured: boolean;
+        read_state: string;
+        write_state: string;
+        permission_state: string;
+        distribution_eligible: boolean;
+        source_platform: string | null;
+        metadata?: unknown;
+}
+
+function getRunSignupCapabilitySpecs(
+        classification: string,
+): ObjectCapabilitySpec[] {
+        switch (classification) {
+                case "COMPETITION_SERIES_HUB":
+                case "COMPETITION_DISTANCE_SERIES":
+                        return [
+                                {
+                                        capability_type: "REGISTRATION",
+                                        available: true,
+                                        configured: true,
+                                        read_state: "available",
+                                        write_state: "permission-dependent",
+                                        permission_state: "pending",
+                                        distribution_eligible: true,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "runsignup-property",
+                                        },
+                                },
+                                {
+                                        capability_type: "SPONSORSHIP",
+                                        available: true,
+                                        configured: true,
+                                        read_state: "unknown",
+                                        write_state: "unknown",
+                                        permission_state: "unknown",
+                                        distribution_eligible: true,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "business-capability",
+                                                configuration_detection:
+                                                        "not-yet-connected",
+                                        },
+                                },
+                        ];
+
+                case "COMPETITION_EVENT":
+                        return [
+                                {
+                                        capability_type: "PARTICIPATION",
+                                        available: true,
+                                        configured: true,
+                                        read_state: "available",
+                                        write_state: "permission-dependent",
+                                        permission_state: "pending",
+                                        distribution_eligible: true,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "runsignup-event",
+                                        },
+                                },
+                                {
+                                        capability_type: "RESULTS",
+                                        available: true,
+                                        configured: true,
+                                        read_state: "available",
+                                        write_state: "available",
+                                        permission_state: "authorized",
+                                        distribution_eligible: true,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "existing-nwana-results-flow",
+                                        },
+                                },
+                        ];
+
+                case "FUNDRAISING_ASSET":
+                        return [
+                                {
+                                        capability_type: "FUNDRAISING",
+                                        available: true,
+                                        configured: true,
+                                        read_state: "available",
+                                        write_state: "unknown",
+                                        permission_state: "unknown",
+                                        distribution_eligible: true,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "runsignup-property",
+                                        },
+                                },
+                                {
+                                        capability_type: "SPONSORSHIP",
+                                        available: true,
+                                        configured: true,
+                                        read_state: "unknown",
+                                        write_state: "unknown",
+                                        permission_state: "unknown",
+                                        distribution_eligible: true,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "business-capability",
+                                                configuration_detection:
+                                                        "not-yet-connected",
+                                        },
+                                },
+                        ];
+
+                case "SPORT_ASSET":
+                case "PARTNER_NETWORK":
+                case "ATHLETE_ASSET":
+                        return [
+                                {
+                                        capability_type: "SPONSORSHIP",
+                                        available: true,
+                                        configured: true,
+                                        read_state: "unknown",
+                                        write_state: "unknown",
+                                        permission_state: "unknown",
+                                        distribution_eligible: true,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "business-capability",
+                                                configuration_detection:
+                                                        "not-yet-connected",
+                                        },
+                                },
+                        ];
+
+                default:
+                        return [];
+        }
+}
+
+async function upsertObjectCapability(
+        db: D1Database,
+        objectId: string,
+        capability: ObjectCapabilitySpec,
+): Promise<void> {
+        const capabilityType =
+                capability.capability_type
+                        .trim()
+                        .toUpperCase()
+                        .replace(/[^A-Z0-9]+/g, "_")
+                        .replace(/^_+|_+$/g, "");
+
+        if (!capabilityType) {
+                throw new Error(
+                        "Capability type is required",
+                );
+        }
+
+        const metadataJson =
+                safeJson(capability.metadata);
+
+        await db
+                .prepare(`
+                        INSERT INTO object_capabilities (
+                                object_id,
+                                capability_type,
+                                available,
+                                configured,
+                                read_state,
+                                write_state,
+                                permission_state,
+                                distribution_eligible,
+                                source_platform,
+                                metadata
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(object_id, capability_type)
+                        DO UPDATE SET
+                                available = excluded.available,
+                                configured = excluded.configured,
+                                read_state = excluded.read_state,
+                                write_state = excluded.write_state,
+                                permission_state = excluded.permission_state,
+                                distribution_eligible =
+                                        excluded.distribution_eligible,
+                                source_platform =
+                                        excluded.source_platform,
+				metadata = excluded.metadata,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE object_capabilities.available IS NOT excluded.available
+				OR object_capabilities.configured IS NOT excluded.configured
+				OR object_capabilities.read_state IS NOT excluded.read_state
+				OR object_capabilities.write_state IS NOT excluded.write_state
+				OR object_capabilities.permission_state IS NOT excluded.permission_state
+				OR object_capabilities.distribution_eligible IS NOT excluded.distribution_eligible
+				OR object_capabilities.source_platform IS NOT excluded.source_platform
+				OR object_capabilities.metadata IS NOT excluded.metadata
+                `)
+                .bind(
+                        objectId,
+                        capabilityType,
+                        capability.available ? 1 : 0,
+                        capability.configured ? 1 : 0,
+                        capability.read_state,
+                        capability.write_state,
+                        capability.permission_state,
+                        capability.distribution_eligible ? 1 : 0,
+                        capability.source_platform,
+                        metadataJson,
+                )
+                .run();
+}
+
+async function upsertRunSignupCapabilities(
+        db: D1Database,
+        objectId: string,
+        classification: string,
+): Promise<number> {
+        const capabilities =
+                getRunSignupCapabilitySpecs(
+                        classification,
+                );
+
+        for (const capability of capabilities) {
+                await upsertObjectCapability(
+                        db,
+                        objectId,
+                        capability,
+                );
+        }
+
+        return capabilities.length;
+}
 function classifyRunSignupContainer(
         title: string | null | undefined,
         events: unknown[],
@@ -2729,6 +2966,38 @@ async function ingestRunSignupEvents(
                                 };
                         }
 
+                        let capabilitiesUpserted = 0;
+
+                        if (response.ok) {
+                                const objectResult =
+                                        result.object;
+
+                                if (
+                                        objectResult &&
+                                        typeof objectResult === "object"
+                                ) {
+                                        const objectId =
+                                                (
+                                                        objectResult as Record<
+                                                                string,
+                                                                unknown
+                                                        >
+                                                ).object_id;
+
+                                        if (
+                                                typeof objectId === "string" &&
+                                                objectId.length > 0
+                                        ) {
+                                                capabilitiesUpserted =
+                                                        await upsertRunSignupCapabilities(
+                                                                env.nwana_engine_db,
+                                                                objectId,
+                                                                classification,
+                                                        );
+                                        }
+                                }
+                        }
+
                         if (response.status === 409) {
                                 conflicts += 1;
                         } else if (!response.ok) {
@@ -2751,6 +3020,8 @@ async function ingestRunSignupEvents(
                                 title:
                                         event.name ?? null,
                                 classification,
+                                capabilities_upserted:
+                                        capabilitiesUpserted,
                                 parent_source:
                                         item.source,
                                 parent_source_type:
@@ -2921,6 +3192,38 @@ async function ingestRunSignupDiscovery(
                         };
                 }
 
+                let capabilitiesUpserted = 0;
+
+                if (response.ok) {
+                        const objectResult =
+                                result.object;
+
+                        if (
+                                objectResult &&
+                                typeof objectResult === "object"
+                        ) {
+                                const objectId =
+                                        (
+                                                objectResult as Record<
+                                                        string,
+                                                        unknown
+                                                >
+                                        ).object_id;
+
+                                if (
+                                        typeof objectId === "string" &&
+                                        objectId.length > 0
+                                ) {
+                                        capabilitiesUpserted =
+                                                await upsertRunSignupCapabilities(
+                                                        env.nwana_engine_db,
+                                                        objectId,
+                                                        classification,
+                                                );
+                                }
+                        }
+                }
+
                 if (response.status === 409) {
                         conflicts += 1;
                 } else if (!response.ok) {
@@ -2939,6 +3242,8 @@ async function ingestRunSignupDiscovery(
                         source_id: item.sourceId,
                         title: item.title ?? null,
                         classification,
+                        capabilities_upserted:
+                                capabilitiesUpserted,
                         http_status: response.status,
                         result,
                 });
