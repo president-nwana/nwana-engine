@@ -16,6 +16,9 @@ interface CreateObjectRequest {
 	source_id?: string;
 	status?: string;
 	parent_object_id?: string;
+        season?: number | null;
+        program_family?: string | null;
+        commercial_role?: string | null;
 	metadata?: unknown;
 	content?: unknown;
 	created_by?: string;
@@ -1778,6 +1781,9 @@ async function ingestSourceObject(
                                         o.source_id,
                                         o.status,
                                         o.current_version,
+                                        o.season,
+                                        o.program_family,
+                                        o.commercial_role,
                                         o.metadata,
                                         ov.content_snapshot
                                 FROM objects o
@@ -1803,6 +1809,9 @@ async function ingestSourceObject(
                                 source_id: string | null;
                                 status: string;
                                 current_version: string;
+                                season: number | null;
+                                program_family: string | null;
+                                commercial_role: string | null;
                                 metadata: string | null;
                                 content_snapshot: string | null;
                         }>();
@@ -1844,6 +1853,21 @@ async function ingestSourceObject(
         const incomingStatus =
                 body.status ?? "active";
 
+        const incomingSeason =
+                body.season === undefined
+                        ? existing.season
+                        : body.season;
+
+        const incomingProgramFamily =
+                body.program_family === undefined
+                        ? existing.program_family
+                        : body.program_family?.trim() || null;
+
+        const incomingCommercialRole =
+                body.commercial_role === undefined
+                        ? existing.commercial_role
+                        : body.commercial_role?.trim() || null;
+
         const incomingMetadata =
                 safeJson(body.metadata);
 
@@ -1852,12 +1876,18 @@ async function ingestSourceObject(
                         body.content ?? {
                                 title: incomingTitle,
                                 metadata: body.metadata ?? null,
+                                season: incomingSeason,
+                                program_family: incomingProgramFamily,
+                                commercial_role: incomingCommercialRole,
                         },
                 );
 
         const changed =
                 existing.title !== incomingTitle ||
                 existing.status !== incomingStatus ||
+                existing.season !== incomingSeason ||
+                existing.program_family !== incomingProgramFamily ||
+                existing.commercial_role !== incomingCommercialRole ||
                 existing.metadata !== incomingMetadata ||
                 existing.content_snapshot !== incomingSnapshot;
 
@@ -1880,7 +1910,14 @@ async function ingestSourceObject(
                         body: JSON.stringify({
                                 title: incomingTitle,
                                 metadata: body.metadata ?? null,
-                                content: body.content ?? null,
+                                content:
+                                        body.content ?? {
+                                                title: incomingTitle,
+                                                metadata: body.metadata ?? null,
+                                                season: incomingSeason,
+                                                program_family: incomingProgramFamily,
+                                                commercial_role: incomingCommercialRole,
+                                        },
                                 created_by:
                                         body.created_by ??
                                         "NWANA Source Adapter",
@@ -1908,21 +1945,25 @@ async function ingestSourceObject(
                 return versionResponse;
         }
 
-        if (existing.status !== incomingStatus) {
-                await env.nwana_engine_db
-                        .prepare(`
-                                UPDATE objects
-                                SET
-                                        status = ?,
-                                        updated_at = CURRENT_TIMESTAMP
-                                WHERE object_id = ?
-                        `)
-                        .bind(
-                                incomingStatus,
-                                existing.object_id,
-                        )
-                        .run();
-        }
+        await env.nwana_engine_db
+                .prepare(`
+                        UPDATE objects
+                        SET
+                                status = ?,
+                                season = ?,
+                                program_family = ?,
+                                commercial_role = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                        WHERE object_id = ?
+                `)
+                .bind(
+                        incomingStatus,
+                        incomingSeason,
+                        incomingProgramFamily,
+                        incomingCommercialRole,
+                        existing.object_id,
+                )
+                .run();
 
         return json({
                 ok: true,
@@ -1936,6 +1977,9 @@ async function ingestSourceObject(
                         source_type: sourceType,
                         source_id: sourceId,
                         status: incomingStatus,
+                        season: incomingSeason,
+                        program_family: incomingProgramFamily,
+                        commercial_role: incomingCommercialRole,
                         current_version:
                                 versionResult.version?.version_number ??
                                 existing.current_version,
@@ -1963,6 +2007,52 @@ function extractRunSignupSeason(
                 ? season
                 : null;
 }
+function getRunSignupProgramFamily(
+        classification: string,
+): string | null {
+        switch (classification) {
+                case "COMPETITION_SERIES_HUB":
+                case "COMPETITION_DISTANCE_SERIES":
+                case "COMPETITION_EVENT":
+                        return "OPEN_SERIES";
+
+                case "FUNDRAISING_ASSET":
+                        return "INSTRUCTOR_GROWTH_FUND";
+
+                case "SPORT_ASSET":
+                        return "NWANA_SPORT";
+
+                case "PARTNER_NETWORK":
+                        return "PARTNER_NETWORK";
+
+                case "ATHLETE_ASSET":
+                        return "ATHLETE_PROPERTY";
+
+                default:
+                        return null;
+        }
+}
+
+function getRunSignupCommercialRole(
+        classification: string,
+): string | null {
+        switch (classification) {
+                case "COMPETITION_EVENT":
+                        return "PARTICIPATION";
+
+                case "COMPETITION_SERIES_HUB":
+                case "COMPETITION_DISTANCE_SERIES":
+                case "FUNDRAISING_ASSET":
+                case "SPORT_ASSET":
+                case "PARTNER_NETWORK":
+                case "ATHLETE_ASSET":
+                        return "SELLABLE";
+
+                default:
+                        return null;
+        }
+}
+
 function classifyRunSignupContainer(
         title: string | null | undefined,
         events: unknown[],
@@ -2522,6 +2612,21 @@ async function ingestRunSignupEvents(
                                 continue;
                         }
 
+                        const season =
+                                extractRunSignupSeason(
+                                        item.title,
+                                );
+
+                        const programFamily =
+                                getRunSignupProgramFamily(
+                                        classification,
+                                );
+
+                        const commercialRole =
+                                getRunSignupCommercialRole(
+                                        classification,
+                                );
+
                         const eventId =
                                 event.event_id;
 
@@ -2563,6 +2668,11 @@ async function ingestRunSignupEvents(
                                                         "active",
                                                 parent_object_id:
                                                         undefined,
+                                                season,
+                                                program_family:
+                                                        programFamily,
+                                                commercial_role:
+                                                        commercialRole,
                                                 metadata: {
                                                         classification,
                                                         registry_ingest:
@@ -2588,8 +2698,15 @@ async function ingestRunSignupEvents(
                                                         parent_classification:
                                                                 containerClassification,
                                                 },
-                                                content:
-                                                        rawEvent,
+                                                content: {
+                                                        source_content:
+                                                                rawEvent,
+                                                        season,
+                                                        program_family:
+                                                                programFamily,
+                                                        commercial_role:
+                                                                commercialRole,
+                                                },
                                                 created_by:
                                                         "RunSignup Event Ingest",
                                         },
@@ -2703,6 +2820,21 @@ async function ingestRunSignupDiscovery(
                                 events,
                         );
 
+                const season =
+                        extractRunSignupSeason(
+                                item.title,
+                        );
+
+                const programFamily =
+                        getRunSignupProgramFamily(
+                                classification,
+                        );
+
+                const commercialRole =
+                        getRunSignupCommercialRole(
+                                classification,
+                        );
+
                 if (
                         classification ===
                         "GENERIC_CONTAINER"
@@ -2742,6 +2874,11 @@ async function ingestRunSignupDiscovery(
                                         status:
                                                 item.status ??
                                                 "active",
+                                        season,
+                                        program_family:
+                                                programFamily,
+                                        commercial_role:
+                                                commercialRole,
                                         metadata: {
                                                 ...(
                                                         item.metadata ??
@@ -2751,10 +2888,17 @@ async function ingestRunSignupDiscovery(
                                                 registry_ingest:
                                                         "runsignup-discovery",
                                         },
-                                        content:
-                                                item.raw ??
-                                                item.metadata ??
-                                                null,
+                                        content: {
+                                                source_content:
+                                                        item.raw ??
+                                                        item.metadata ??
+                                                        null,
+                                                season,
+                                                program_family:
+                                                        programFamily,
+                                                commercial_role:
+                                                        commercialRole,
+                                        },
                                         created_by:
                                                 "RunSignup Discovery Ingest",
                                 },
@@ -2831,16 +2975,63 @@ async function syncRunSignup(
 
         const item = await source.fetchRace(209464);
 
+        const raw =
+                item.raw &&
+                typeof item.raw === "object"
+                        ? item.raw as Record<string, unknown>
+                        : {};
+
+        const events =
+                Array.isArray(raw.events)
+                        ? raw.events
+                        : [];
+
+        const classification =
+                classifyRunSignupContainer(
+                        item.title,
+                        events,
+                );
+
+        const season =
+                extractRunSignupSeason(
+                        item.title,
+                );
+
+        const programFamily =
+                getRunSignupProgramFamily(
+                        classification,
+                );
+
+        const commercialRole =
+                getRunSignupCommercialRole(
+                        classification,
+                );
+
         const response = await ingestSourceObject(
                 {
-                        object_type: item.sourceType,
+                        object_type: classification,
                         title: item.title ?? undefined,
                         source: item.source,
                         source_type: item.sourceType,
                         source_id: item.sourceId,
                         status: item.status ?? "active",
+                        season,
+                        program_family:
+                                programFamily,
+                        commercial_role:
+                                commercialRole,
                         metadata: item.metadata ?? undefined,
-                        content: item.raw ?? item.metadata ?? null,
+                        content: {
+                                source_content:
+                                        item.raw ??
+                                        item.metadata ??
+                                        null,
+                                season,
+                                program_family:
+                                        programFamily,
+                                commercial_role:
+                                        commercialRole,
+                        },
                         created_by: "RunSignup Source Adapter",
                 },
                 env,
@@ -2893,10 +3084,29 @@ async function registerObject(
 
 	const metadataJson = safeJson(body.metadata);
 
+    const season =
+            typeof body.season === "number" &&
+            Number.isInteger(body.season)
+                    ? body.season
+                    : null;
+
+    const programFamily =
+            typeof body.program_family === "string"
+                    ? body.program_family.trim() || null
+                    : null;
+
+    const commercialRole =
+            typeof body.commercial_role === "string"
+                    ? body.commercial_role.trim() || null
+                    : null;
+
 	const contentSnapshot = safeJson(
 		body.content ?? {
 			title: body.title ?? null,
 			metadata: body.metadata ?? null,
+                    season,
+                    program_family: programFamily,
+                    commercial_role: commercialRole,
 		},
 	);
 
@@ -2909,6 +3119,9 @@ async function registerObject(
 		source_type: body.source_type ?? "generic",
 		source_id: body.source_id ?? null,
 		parent_object_id: body.parent_object_id ?? null,
+            season,
+            program_family: programFamily,
+            commercial_role: commercialRole,
 		metadata: body.metadata ?? null,
 		content: body.content ?? null,
 	});
@@ -2956,9 +3169,12 @@ async function registerObject(
 					status,
 					current_version,
 					parent_object_id,
-					metadata
+                                        season,
+                                        program_family,
+                                        commercial_role,
+                                        metadata
 				)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`)
 			.bind(
 				objectId,
@@ -2970,6 +3186,9 @@ async function registerObject(
 				body.status ?? "active",
 				versionNumber,
 				body.parent_object_id ?? null,
+                                season,
+                                programFamily,
+                                commercialRole,
 				metadataJson,
 			),
 
@@ -3049,6 +3268,9 @@ async function registerObject(
 				object_id: objectId,
 				object_type: objectType,
 				title: body.title ?? null,
+                                season,
+                                program_family: programFamily,
+                                commercial_role: commercialRole,
 				version: versionNumber,
 				version_id: versionId,
 				hash_algorithm: "SHA-256",
