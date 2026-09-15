@@ -2066,6 +2066,189 @@ function getRunSignupCommercialRole(
                         return null;
         }
 }
+interface SemanticProfileRow {
+        source: string;
+        source_type: string;
+        source_id: string;
+        object_type: string | null;
+        program_family: string | null;
+        commercial_role: string | null;
+        metadata: string | null;
+}
+
+interface ResolvedSemanticMeaning {
+        classification: string;
+        program_family: string | null;
+        commercial_role: string | null;
+        semantic_profile_applied: boolean;
+}
+
+function explicitSemanticValue(
+        value: string | null | undefined,
+): string | null {
+        const normalized =
+                (value ?? "").trim();
+
+        return normalized.length > 0
+                ? normalized
+                : null;
+}
+
+async function getSemanticProfile(
+        db: D1Database,
+        source: string,
+        sourceType: string,
+        sourceId: string | null | undefined,
+): Promise<SemanticProfileRow | null> {
+        if (
+                sourceId === null ||
+                sourceId === undefined ||
+                String(sourceId).trim().length === 0
+        ) {
+                return null;
+        }
+
+        return await db
+                .prepare(`
+                        SELECT
+                                source,
+                                source_type,
+                                source_id,
+                                object_type,
+                                program_family,
+                                commercial_role,
+                                metadata
+                        FROM semantic_profiles
+                        WHERE source = ?
+                          AND source_type = ?
+                          AND source_id = ?
+                        LIMIT 1
+                `)
+                .bind(
+                        source,
+                        sourceType,
+                        String(sourceId),
+                )
+                .first<SemanticProfileRow>();
+}
+
+async function resolveRunSignupContainerSemantic(
+        db: D1Database,
+        source: string,
+        sourceType: string,
+        sourceId: string | null | undefined,
+        title: string | null | undefined,
+        events: unknown[],
+): Promise<ResolvedSemanticMeaning> {
+        const fallbackClassification =
+                classifyRunSignupContainer(
+                        title,
+                        events,
+                );
+
+        const profile =
+                await getSemanticProfile(
+                        db,
+                        source,
+                        sourceType,
+                        sourceId,
+                );
+
+        const classification =
+                explicitSemanticValue(
+                        profile?.object_type,
+                ) ??
+                fallbackClassification;
+
+        const programFamily =
+                explicitSemanticValue(
+                        profile?.program_family,
+                ) ??
+                getRunSignupProgramFamily(
+                        classification,
+                        title,
+                );
+
+        const commercialRole =
+                explicitSemanticValue(
+                        profile?.commercial_role,
+                ) ??
+                getRunSignupCommercialRole(
+                        classification,
+                );
+
+        return {
+                classification,
+                program_family:
+                        programFamily,
+                commercial_role:
+                        commercialRole,
+                semantic_profile_applied:
+                        profile !== null,
+        };
+}
+
+async function resolveRunSignupEventSemantic(
+        db: D1Database,
+        event: Record<string, unknown>,
+        inheritedProgramFamily: string | null,
+): Promise<ResolvedSemanticMeaning> {
+        const fallbackClassification =
+                classifyRunSignupEvent(event);
+
+        const eventId =
+                event.event_id;
+
+        const profile =
+                await getSemanticProfile(
+                        db,
+                        "runsignup",
+                        "event",
+                        eventId === null ||
+                        eventId === undefined
+                                ? null
+                                : String(eventId),
+                );
+
+        const classification =
+                explicitSemanticValue(
+                        profile?.object_type,
+                ) ??
+                fallbackClassification;
+
+        const title =
+                typeof event.name === "string"
+                        ? event.name
+                        : null;
+
+        const programFamily =
+                explicitSemanticValue(
+                        profile?.program_family,
+                ) ??
+                getRunSignupProgramFamily(
+                        classification,
+                        title,
+                        inheritedProgramFamily,
+                );
+
+        const commercialRole =
+                explicitSemanticValue(
+                        profile?.commercial_role,
+                ) ??
+                getRunSignupCommercialRole(
+                        classification,
+                );
+
+        return {
+                classification,
+                program_family:
+                        programFamily,
+                commercial_role:
+                        commercialRole,
+                semantic_profile_applied:
+                        profile !== null,
+        };
+}
 interface ObjectCapabilitySpec {
         capability_type: string;
         available: boolean;
@@ -2430,32 +2613,47 @@ async function discoverRunSignup(
                 await source.fetchChanges(null);
 
         const candidates =
-                discovery.items.map((item) => {
-                        const raw =
-                                item.raw &&
-                                typeof item.raw === "object"
-                                        ? item.raw as Record<string, unknown>
-                                        : {};
+                await Promise.all(
+                        discovery.items.map(async (item) => {
+                                const raw =
+                                        item.raw &&
+                                        typeof item.raw === "object"
+                                                ? item.raw as Record<string, unknown>
+                                                : {};
 
-                        const events =
-                                Array.isArray(raw.events)
-                                        ? raw.events
-                                        : [];
+                                const events =
+                                        Array.isArray(raw.events)
+                                                ? raw.events
+                                                : [];
 
-                        return {
-                                item,
-                                events,
-                                classification:
-                                        classifyRunSignupContainer(
+                                const semantic =
+                                        await resolveRunSignupContainerSemantic(
+                                                env.nwana_engine_db,
+                                                item.source,
+                                                item.sourceType,
+                                                item.sourceId,
                                                 item.title,
                                                 events,
-                                        ),
-                                season:
-                                        extractRunSignupSeason(
-                                                item.title,
-                                        ),
-                        };
-                });
+                                        );
+
+                                return {
+                                        item,
+                                        events,
+                                        classification:
+                                                semantic.classification,
+                                        program_family:
+                                                semantic.program_family,
+                                        commercial_role:
+                                                semantic.commercial_role,
+                                        semantic_profile_applied:
+                                                semantic.semantic_profile_applied,
+                                        season:
+                                                extractRunSignupSeason(
+                                                        item.title,
+                                                ),
+                                };
+                        }),
+                );
 
         const seriesHubsBySeason =
                 new Map<
@@ -2740,11 +2938,18 @@ async function previewRunSignupEvents(
                                 ? raw.events
                                 : [];
 
-                const containerClassification =
-                        classifyRunSignupContainer(
+                const containerSemantic =
+                        await resolveRunSignupContainerSemantic(
+                                env.nwana_engine_db,
+                                item.source,
+                                item.sourceType,
+                                item.sourceId,
                                 item.title,
                                 rawEvents,
                         );
+
+                const containerClassification =
+                        containerSemantic.classification;
 
                 if (
                         !isRunSignupCompetitionContainer(
@@ -2765,8 +2970,15 @@ async function previewRunSignupEvents(
                         const event =
                                 rawEvent as Record<string, unknown>;
 
+                        const eventSemantic =
+                                await resolveRunSignupEventSemantic(
+                                        env.nwana_engine_db,
+                                        event,
+                                        containerSemantic.program_family,
+                                );
+
                         const classification =
-                                classifyRunSignupEvent(event);
+                                eventSemantic.classification;
 
                         if (
                                 classification !==
@@ -2782,16 +2994,11 @@ async function previewRunSignupEvents(
                                         event.event_id ?? null,
                                 classification,
                                 program_family:
-                                        getRunSignupProgramFamily(
-                                                classification,
-                                                typeof event.name === "string"
-                                                        ? event.name
-                                                        : null,
-                                                getRunSignupProgramFamily(
-                                                        containerClassification,
-                                                        item.title,
-                                                ),
-                                        ),
+                                        eventSemantic.program_family,
+                                commercial_role:
+                                        eventSemantic.commercial_role,
+                                semantic_profile_applied:
+                                        eventSemantic.semantic_profile_applied,
                                 title:
                                         event.name ?? null,
                                 distance:
@@ -2812,10 +3019,11 @@ async function previewRunSignupEvents(
                                         classification:
                                                 containerClassification,
                                         program_family:
-                                                getRunSignupProgramFamily(
-                                                        containerClassification,
-                                                        item.title,
-                                                ),
+                                                containerSemantic.program_family,
+                                        commercial_role:
+                                                containerSemantic.commercial_role,
+                                        semantic_profile_applied:
+                                                containerSemantic.semantic_profile_applied,
                                 },
                         });
                 }
@@ -2865,11 +3073,18 @@ async function ingestRunSignupEvents(
                                 ? raw.events
                                 : [];
 
-                const containerClassification =
-                        classifyRunSignupContainer(
+                const containerSemantic =
+                        await resolveRunSignupContainerSemantic(
+                                env.nwana_engine_db,
+                                item.source,
+                                item.sourceType,
+                                item.sourceId,
                                 item.title,
                                 rawEvents,
                         );
+
+                const containerClassification =
+                        containerSemantic.classification;
 
                 if (
                         !isRunSignupCompetitionContainer(
@@ -2893,8 +3108,15 @@ async function ingestRunSignupEvents(
                         const event =
                                 rawEvent as Record<string, unknown>;
 
+                        const eventSemantic =
+                                await resolveRunSignupEventSemantic(
+                                        env.nwana_engine_db,
+                                        event,
+                                        containerSemantic.program_family,
+                                );
+
                         const classification =
-                                classifyRunSignupEvent(event);
+                                eventSemantic.classification;
 
                         if (
                                 classification !==
@@ -2910,24 +3132,13 @@ async function ingestRunSignupEvents(
                                 );
 
                         const parentProgramFamily =
-                                getRunSignupProgramFamily(
-                                        containerClassification,
-                                        item.title,
-                                );
+                                containerSemantic.program_family;
 
                         const programFamily =
-                                getRunSignupProgramFamily(
-                                        classification,
-                                        typeof event.name === "string"
-                                                ? event.name
-                                                : null,
-                                        parentProgramFamily,
-                                );
+                                eventSemantic.program_family;
 
                         const commercialRole =
-                                getRunSignupCommercialRole(
-                                        classification,
-                                );
+                                eventSemantic.commercial_role;
 
                         const eventId =
                                 event.event_id;
@@ -3150,11 +3361,18 @@ async function ingestRunSignupDiscovery(
                                 ? raw.events
                                 : [];
 
-                const classification =
-                        classifyRunSignupContainer(
+                const semantic =
+                        await resolveRunSignupContainerSemantic(
+                                env.nwana_engine_db,
+                                item.source,
+                                item.sourceType,
+                                item.sourceId,
                                 item.title,
                                 events,
                         );
+
+                const classification =
+                        semantic.classification;
 
                 const season =
                         extractRunSignupSeason(
@@ -3162,15 +3380,10 @@ async function ingestRunSignupDiscovery(
                         );
 
                 const programFamily =
-                        getRunSignupProgramFamily(
-                                classification,
-                                item.title,
-                        );
+                        semantic.program_family;
 
                 const commercialRole =
-                        getRunSignupCommercialRole(
-                                classification,
-                        );
+                        semantic.commercial_role;
 
                 if (
                         classification ===
@@ -3222,6 +3435,8 @@ async function ingestRunSignupDiscovery(
                                                         {}
                                                 ),
                                                 classification,
+                                                semantic_profile_applied:
+                                                        semantic.semantic_profile_applied,
                                                 registry_ingest:
                                                         "runsignup-discovery",
                                         },
@@ -5196,4 +5411,10 @@ if (
                 }
         },
 };
-
+export {
+        classifyRunSignupContainer,
+        classifyRunSignupEvent,
+        getRunSignupProgramFamily,
+        resolveRunSignupContainerSemantic,
+        resolveRunSignupEventSemantic,
+};
