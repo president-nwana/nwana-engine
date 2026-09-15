@@ -292,3 +292,182 @@ ON semantic_profiles(program_family);
 
 CREATE INDEX IF NOT EXISTS idx_semantic_profiles_object_type
 ON semantic_profiles(object_type);
+
+
+-- Stage 8: Rules Engine
+
+-- Stage 8A: Rules Engine Core
+-- Object -> Rule -> Audience -> Action -> Job
+
+CREATE TABLE IF NOT EXISTS rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_id TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 100,
+
+  match_object_type TEXT,
+  match_program_family TEXT,
+  match_commercial_role TEXT,
+  match_capability_type TEXT,
+  match_status TEXT,
+
+  conditions TEXT,
+  metadata TEXT,
+
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_rules_enabled_priority
+ON rules(enabled, priority);
+
+CREATE INDEX IF NOT EXISTS idx_rules_object_type
+ON rules(match_object_type);
+
+CREATE INDEX IF NOT EXISTS idx_rules_program_family
+ON rules(match_program_family);
+
+CREATE INDEX IF NOT EXISTS idx_rules_commercial_role
+ON rules(match_commercial_role);
+
+
+CREATE TABLE IF NOT EXISTS rule_audiences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  audience_id TEXT NOT NULL UNIQUE,
+  rule_id TEXT NOT NULL,
+  audience_type TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  metadata TEXT,
+
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY (rule_id) REFERENCES rules(rule_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_audiences_unique
+ON rule_audiences(rule_id, audience_type);
+
+CREATE INDEX IF NOT EXISTS idx_rule_audiences_rule
+ON rule_audiences(rule_id);
+
+CREATE INDEX IF NOT EXISTS idx_rule_audiences_type
+ON rule_audiences(audience_type);
+
+
+CREATE TABLE IF NOT EXISTS rule_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  action_id TEXT NOT NULL UNIQUE,
+  rule_id TEXT NOT NULL,
+  audience_id TEXT,
+
+  action_type TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  destination TEXT,
+
+  execution_mode TEXT NOT NULL DEFAULT 'NOT_CONNECTED',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 100,
+
+  metadata TEXT,
+
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY (rule_id) REFERENCES rules(rule_id),
+  FOREIGN KEY (audience_id) REFERENCES rule_audiences(audience_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_actions_unique
+ON rule_actions(
+  rule_id,
+  audience_id,
+  action_type,
+  channel,
+  destination
+);
+
+CREATE INDEX IF NOT EXISTS idx_rule_actions_rule
+ON rule_actions(rule_id);
+
+CREATE INDEX IF NOT EXISTS idx_rule_actions_audience
+ON rule_actions(audience_id);
+
+CREATE INDEX IF NOT EXISTS idx_rule_actions_channel
+ON rule_actions(channel);
+
+CREATE INDEX IF NOT EXISTS idx_rule_actions_execution_mode
+ON rule_actions(execution_mode);
+
+
+-- Stage 8: Processing Profiles
+
+-- Stage 8: universal processing profiles.
+-- Processing profiles define how an NWANA object is processed.
+-- They are separate from:
+--   semantic_profiles = what an object means to NWANA
+--   object_capabilities = what an object can technically do
+--   distribution rules = who should receive an object and what outreach action to take
+--
+-- Examples:
+--   Series 2026 result processing
+--   Series 2027 result processing
+--   distance-specific result thresholds
+--   challenge-specific level/progress logic
+--
+-- Business logic belongs in configuration/metadata so future seasons and
+-- challenge types do not require Registry schema changes.
+
+CREATE TABLE IF NOT EXISTS processing_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  domain TEXT NOT NULL,
+  profile_type TEXT NOT NULL,
+  program_family TEXT,
+  season INTEGER,
+  status TEXT NOT NULL DEFAULT 'active',
+  configuration TEXT,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_profiles_domain
+ON processing_profiles(domain);
+
+CREATE INDEX IF NOT EXISTS idx_processing_profiles_type
+ON processing_profiles(profile_type);
+
+CREATE INDEX IF NOT EXISTS idx_processing_profiles_program_family
+ON processing_profiles(program_family);
+
+CREATE INDEX IF NOT EXISTS idx_processing_profiles_season
+ON processing_profiles(season);
+
+CREATE TABLE IF NOT EXISTS object_processing_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  object_id TEXT NOT NULL,
+  profile_id TEXT NOT NULL,
+  profile_role TEXT NOT NULL DEFAULT 'PRIMARY',
+  priority INTEGER NOT NULL DEFAULT 100,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (object_id) REFERENCES objects(object_id),
+  FOREIGN KEY (profile_id) REFERENCES processing_profiles(profile_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_object_processing_profiles_unique
+ON object_processing_profiles(object_id, profile_id, profile_role);
+
+CREATE INDEX IF NOT EXISTS idx_object_processing_profiles_object
+ON object_processing_profiles(object_id);
+
+CREATE INDEX IF NOT EXISTS idx_object_processing_profiles_profile
+ON object_processing_profiles(profile_id);
+
+CREATE INDEX IF NOT EXISTS idx_object_processing_profiles_enabled
+ON object_processing_profiles(enabled);
