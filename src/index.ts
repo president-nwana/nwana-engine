@@ -2009,12 +2009,26 @@ function extractRunSignupSeason(
 }
 function getRunSignupProgramFamily(
         classification: string,
+        title: string | null | undefined = null,
+        inheritedProgramFamily: string | null = null,
 ): string | null {
+        if (
+                inheritedProgramFamily !== null &&
+                inheritedProgramFamily.trim().length > 0
+        ) {
+                return inheritedProgramFamily;
+        }
+
         switch (classification) {
                 case "COMPETITION_SERIES_HUB":
                 case "COMPETITION_DISTANCE_SERIES":
-                case "COMPETITION_EVENT":
                         return "OPEN_SERIES";
+
+                case "COMPETITION_PROPERTY":
+                        return "COMPETITION_PROGRAM";
+
+                case "COMPETITION_EVENT":
+                        return null;
 
                 case "FUNDRAISING_ASSET":
                         return "INSTRUCTOR_GROWTH_FUND";
@@ -2032,7 +2046,6 @@ function getRunSignupProgramFamily(
                         return null;
         }
 }
-
 function getRunSignupCommercialRole(
         classification: string,
 ): string | null {
@@ -2042,6 +2055,7 @@ function getRunSignupCommercialRole(
 
                 case "COMPETITION_SERIES_HUB":
                 case "COMPETITION_DISTANCE_SERIES":
+                case "COMPETITION_PROPERTY":
                 case "FUNDRAISING_ASSET":
                 case "SPORT_ASSET":
                 case "PARTNER_NETWORK":
@@ -2052,7 +2066,6 @@ function getRunSignupCommercialRole(
                         return null;
         }
 }
-
 interface ObjectCapabilitySpec {
         capability_type: string;
         available: boolean;
@@ -2071,6 +2084,7 @@ function getRunSignupCapabilitySpecs(
         switch (classification) {
                 case "COMPETITION_SERIES_HUB":
                 case "COMPETITION_DISTANCE_SERIES":
+                case "COMPETITION_PROPERTY":
                         return [
                                 {
                                         capability_type: "REGISTRATION",
@@ -2290,12 +2304,28 @@ async function upsertRunSignupCapabilities(
 
         return capabilities.length;
 }
+function isRunSignupCompetitionContainer(
+        classification: string,
+): boolean {
+        switch (classification) {
+                case "COMPETITION_DISTANCE_SERIES":
+                case "COMPETITION_PROPERTY":
+                        return true;
+
+                default:
+                        return false;
+        }
+}
+
 function classifyRunSignupContainer(
         title: string | null | undefined,
         events: unknown[],
 ): string {
         const normalizedTitle =
                 (title ?? "").trim().toLowerCase();
+
+        const season =
+                extractRunSignupSeason(title);
 
         const hasCompetitionEvents =
                 events.some((event) => {
@@ -2317,15 +2347,6 @@ function classifyRunSignupContainer(
                                 value.distance.trim().length > 0
                         );
                 });
-
-        if (
-                hasCompetitionEvents
-        ) {
-                return "COMPETITION_DISTANCE_SERIES";
-        }
-
-        const season =
-                extractRunSignupSeason(title);
 
         if (
                 season !== null &&
@@ -2367,9 +2388,25 @@ function classifyRunSignupContainer(
                 return "ATHLETE_ASSET";
         }
 
+        if (
+                hasCompetitionEvents &&
+                season !== null &&
+                normalizedTitle.startsWith(
+                        `${season} nwana open `,
+                ) &&
+                normalizedTitle.endsWith(
+                        " nordic walking series",
+                )
+        ) {
+                return "COMPETITION_DISTANCE_SERIES";
+        }
+
+        if (hasCompetitionEvents) {
+                return "COMPETITION_PROPERTY";
+        }
+
         return "GENERIC_CONTAINER";
 }
-
 function classifyRunSignupEvent(
         event: Record<string, unknown>,
 ): string {
@@ -2710,8 +2747,9 @@ async function previewRunSignupEvents(
                         );
 
                 if (
-                        containerClassification !==
-                        "COMPETITION_DISTANCE_SERIES"
+                        !isRunSignupCompetitionContainer(
+                                containerClassification,
+                        )
                 ) {
                         continue;
                 }
@@ -2743,6 +2781,17 @@ async function previewRunSignupEvents(
                                 source_id:
                                         event.event_id ?? null,
                                 classification,
+                                program_family:
+                                        getRunSignupProgramFamily(
+                                                classification,
+                                                typeof event.name === "string"
+                                                        ? event.name
+                                                        : null,
+                                                getRunSignupProgramFamily(
+                                                        containerClassification,
+                                                        item.title,
+                                                ),
+                                        ),
                                 title:
                                         event.name ?? null,
                                 distance:
@@ -2762,6 +2811,11 @@ async function previewRunSignupEvents(
                                                 item.title ?? null,
                                         classification:
                                                 containerClassification,
+                                        program_family:
+                                                getRunSignupProgramFamily(
+                                                        containerClassification,
+                                                        item.title,
+                                                ),
                                 },
                         });
                 }
@@ -2818,8 +2872,9 @@ async function ingestRunSignupEvents(
                         );
 
                 if (
-                        containerClassification !==
-                        "COMPETITION_DISTANCE_SERIES"
+                        !isRunSignupCompetitionContainer(
+                                containerClassification,
+                        )
                 ) {
                         continue;
                 }
@@ -2854,9 +2909,19 @@ async function ingestRunSignupEvents(
                                         item.title,
                                 );
 
+                        const parentProgramFamily =
+                                getRunSignupProgramFamily(
+                                        containerClassification,
+                                        item.title,
+                                );
+
                         const programFamily =
                                 getRunSignupProgramFamily(
                                         classification,
+                                        typeof event.name === "string"
+                                                ? event.name
+                                                : null,
+                                        parentProgramFamily,
                                 );
 
                         const commercialRole =
@@ -3099,6 +3164,7 @@ async function ingestRunSignupDiscovery(
                 const programFamily =
                         getRunSignupProgramFamily(
                                 classification,
+                                item.title,
                         );
 
                 const commercialRole =
