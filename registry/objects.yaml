@@ -1,0 +1,136 @@
+﻿registry_version: 1
+last_updated: "2026-09-16"
+
+objects:
+
+  - object_id: NWANA-RACE-000001
+
+    reconciliation_status: NEEDS_RECONCILIATION
+
+    internal_identity_note: >
+      The existing internal object_id contains RACE, but the verified external
+      object is not itself a race. The object_id must not be used to infer
+      platform type, capabilities, or NWANA business meaning. Any future
+      object_id change must be handled through an explicit migration because
+      this identifier may already be referenced by relationships, profiles,
+      rules, or other Registry records.
+
+    external:
+      provider: RUNSIGNUP_TICKETSIGNUP
+      source_id: "209464"
+      public_url: "https://series.nwaofna.org/"
+      platform_container_type: NONPROFIT_EVENT
+      verification_status: VERIFIED
+
+    nwana:
+      purpose: SERIES_PUBLIC_HUB
+      program_family: OPEN_SERIES
+      season: 2026
+      verification_status: VERIFIED
+
+    capabilities:
+      public_website:
+        available: true
+        verification_status: VERIFIED
+
+      registration:
+        available: false
+        verification_status: VERIFIED
+
+      results:
+        available: false
+        verification_status: VERIFIED
+
+      sponsorship:
+        available: UNKNOWN
+        verification_status: UNKNOWN
+        note: >
+          NWANA uses this class of RunSignup/TicketSignup infrastructure partly
+          because sponsorship functions are useful, but the exact enabled
+          sponsorship configuration for source_id 209464 must be verified and
+          recorded rather than inferred.
+
+      fundraising:
+        available: UNKNOWN
+        verification_status: UNKNOWN
+
+      email:
+        available: UNKNOWN
+        verification_status: UNKNOWN
+
+    verified_facts:
+      - "This object is the public website/hub for the 2026 NWANA Open Nordic Walking Series."
+      - "This object is implemented using RunSignup/TicketSignup nonprofit-event/site infrastructure."
+      - "This object is not itself a competition race."
+      - "This object does not provide participant registration."
+      - "This object is not a results container."
+      - "Competition results are not stored on this object."
+
+    reconciliation_required:
+      - "Review current local D1 object_type for NWANA-RACE-000001."
+      - "Review current semantic profile for source_id 209464."
+      - "Remove any REGISTRATION capability if assigned to this object."
+      - "Remove any RESULTS capability if assigned to this object."
+      - "Verify sponsorship and other actual platform capabilities separately."
+      - "Decide separately whether the misleading internal object_id requires an explicit migration."
+
+  - registry_key: RUNSIGNUP_ASSET_ALBERT_FATIKHOV
+    display_name: "Albert Fatikhov | Nordic Walking"
+    reconciliation_status: NEEDS_RECONCILIATION
+
+    external:
+      provider: RUNSIGNUP_TICKETSIGNUP
+      source_id: "213546"
+      platform_container_type: UNKNOWN
+      public_url: UNKNOWN
+      verification_status: PARTIALLY_VERIFIED
+
+    nwana:
+      purpose: ATHLETE_ASSET
+      verification_status: VERIFIED
+
+    notes:
+      - "Uses RunSignup/TicketSignup site/container infrastructure."
+      - "Exact platform container type and enabled capabilities must be verified."
+      - "Do not infer registration or results functionality from the platform container."
+
+  - registry_key: RUNSIGNUP_ASSET_NWANA_SPORT
+    display_name: "NWANA Nordic Walking SPORT"
+    reconciliation_status: NEEDS_RECONCILIATION
+
+    external:
+      provider: RUNSIGNUP_TICKETSIGNUP
+      source_id: "212466"
+      platform_container_type: UNKNOWN
+      public_url: UNKNOWN
+      verification_status: PARTIALLY_VERIFIED
+
+    nwana:
+      purpose: SPORT_ASSET
+      verification_status: VERIFIED
+
+    notes:
+      - "Uses RunSignup/TicketSignup site/container infrastructure."
+      - "Exact platform container type and enabled capabilities must be verified."
+
+  - registry_key: RUNSIGNUP_ASSET_PARTNER_NETWORK
+    display_name: "NWANA Partner Network"
+    reconciliation_status: NEEDS_RECONCILIATION
+
+    external:
+      provider: RUNSIGNUP_TICKETSIGNUP
+      source_id: "214054"
+      platform_container_type: UNKNOWN
+      public_url: UNKNOWN
+      verification_status: PARTIALLY_VERIFIED
+
+    nwana:
+      purpose: PARTNER_NETWORK
+      verification_status: VERIFIED
+
+    notes:
+      - "Uses RunSignup/TicketSignup site/container infrastructure."
+      - "Exact platform container type and enabled capabilities must be verified."
+
+# More objects will be added only as their actual platform configuration is reconciled.
+# UNKNOWN is intentional and must not be replaced by inference.

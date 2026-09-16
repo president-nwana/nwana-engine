@@ -1,24 +1,41 @@
-\# NWANA Engine
+# NWANA Engine
 
 
 
+
+## START HERE — Canonical Project Memory
+
+For current development work, do not reconstruct the project from chat history.
+
+Read these files first:
+
+- `SYSTEM_STATE.md` — current stage, verified state, blocker, next action, and remote/local status.
+- `registry/README.md` — rules for verified external object facts.
+- `registry/objects.yaml` — canonical factual Registry of real NWANA external platform objects.
+- `docs/adr/` — accepted architecture decisions.
+- `CHANGELOG.md` — significant implementation and system-state milestones.
+- `AGENTS.md` — mandatory instructions for developers and AI systems.
+
+The repository is the canonical development memory of NWANA Engine.
+
+If an external platform fact is not verified in the canonical Registry, it must be treated as `UNKNOWN` rather than inferred from a title, URL, internal ID, hierarchy, or similar object.
 NWANA Engine is a zero-cost-first sports infrastructure, integrity, provenance, automation, and proof-processing system developed by the Nordic Walking Association of North America.
 
 
 
-\## Organization
+## Organization
 
 
 
-\*\*Organization / Grantee:\*\* Nordic Walking Association of North America (NWANA), a U.S. 501(c)(3) nonprofit organization.
+**Organization / Grantee:** Nordic Walking Association of North America (NWANA), a U.S. 501(c)(3) nonprofit organization.
 
 
 
-\## Project
+## Project
 
 
 
-\*\*Project:\*\* NWANA Engine
+**Project:** NWANA Engine
 
 
 
@@ -26,11 +43,11 @@ NWANA Engine is being developed as an operating infrastructure for sports progra
 
 
 
-The system is designed under a mandatory \*\*ZERO-COST FIRST\*\* principle: its required operating path must remain functional without mandatory paid APIs, paid infrastructure services, or paid blockchain transactions.
+The system is designed under a mandatory **ZERO-COST FIRST** principle: its required operating path must remain functional without mandatory paid APIs, paid infrastructure services, or paid blockchain transactions.
 
 
 
-\## Open Proof Registry
+## Open Proof Registry
 
 
 
@@ -38,7 +55,7 @@ A modular trust and proof layer is being developed within NWANA Engine with the 
 
 
 
-\*\*NWANA Open Proof Registry\*\*
+**NWANA Open Proof Registry**
 
 
 
@@ -46,13 +63,13 @@ The intended proof architecture is:
 
 
 
-NWANA Engine  
+NWANA Engine
 
-→ official object or competition result  
+→ official object or competition result
 
-→ cryptographic hash  
+→ cryptographic hash
 
-→ proof / timestamp layer  
+→ proof / timestamp layer
 
 → public verification
 
@@ -66,17 +83,17 @@ NWANA Engine itself must remain fully operational without blockchain infrastruct
 
 
 
-\## Project Origin and Leadership
+## Project Origin and Leadership
 
 
 
-\*\*Founder / Initiator of the Open Proof Registry concept:\*\* Albert Fatikhov  
+**Founder / Initiator of the Open Proof Registry concept:** Albert Fatikhov
 
-\*\*Project Lead:\*\* Albert Fatikhov  
+**Project Lead:** Albert Fatikhov
 
-\*\*Product Architect:\*\* Albert Fatikhov  
+**Product Architect:** Albert Fatikhov
 
-\*\*President, NWANA:\*\* Albert Fatikhov
+**President, NWANA:** Albert Fatikhov
 
 
 
@@ -96,7 +113,7 @@ https://albertfatikhov.nwaofna.org/
 
 
 
-\## Current Architecture
+## Current Architecture
 
 
 
@@ -104,27 +121,27 @@ The current system includes:
 
 
 
-\- object registry;
+- object registry;
 
-\- object version history;
+- object version history;
 
-\- cryptographic SHA-256 hashing;
+- cryptographic SHA-256 hashing;
 
-\- trust records;
+- trust records;
 
-\- OpenTimestamps proof generation;
+- OpenTimestamps proof generation;
 
-\- Bitcoin-compatible proof verification;
+- Bitcoin-compatible proof verification;
 
-\- audit events;
+- audit events;
 
-\- blockchain anchor metadata;
+- blockchain anchor metadata;
 
-\- specialized proof-processing jobs;
+- specialized proof-processing jobs;
 
-\- a generic due-job scheduler and dispatcher;
+- a generic due-job scheduler and dispatcher;
 
-\- Cloudflare Workers and D1-based infrastructure.
+- Cloudflare Workers and D1-based infrastructure.
 
 
 
@@ -132,11 +149,11 @@ The architecture is being developed so that application-specific sports data rem
 
 
 
-\## Architectural Principles
+## Architectural Principles
 
 
 
-\### Zero-Cost First
+### Zero-Cost First
 
 
 
@@ -148,7 +165,7 @@ Paid services may later improve speed, convenience, or scale, but they must not 
 
 
 
-\### Event-Driven Where Possible
+### Event-Driven Where Possible
 
 
 
@@ -160,7 +177,7 @@ Scheduled processing should operate only on due jobs rather than repeatedly scan
 
 
 
-\### Application-Agnostic Proof Layer
+### Application-Agnostic Proof Layer
 
 
 
@@ -168,7 +185,7 @@ Proof and verification infrastructure should not require NWANA-specific object t
 
 
 
-\### Verifiable History
+### Verifiable History
 
 
 
@@ -176,7 +193,7 @@ Significant architectural and product decisions are preserved through Git histor
 
 
 
-\## Architecture Decision Records
+## Architecture Decision Records
 
 
 
@@ -200,7 +217,7 @@ It establishes the modular boundary between NWANA Engine and the future applicat
 
 
 
-\## Status
+## Status
 
 
 
@@ -212,7 +229,7 @@ Current functionality has been tested locally. Production deployment, public reg
 
 
 
-\## License
+## License
 
 
 
@@ -221,4 +238,3 @@ A final open-source license has not yet been selected.
 
 
 Until a license is explicitly added, publication of this repository should not be interpreted as granting an open-source software license.
-
