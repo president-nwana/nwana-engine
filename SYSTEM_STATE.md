@@ -1,4 +1,4 @@
-# NWANA ENGINE — CURRENT SYSTEM STATE
+﻿# NWANA ENGINE — CURRENT SYSTEM STATE
 
 This file is the canonical starting point for any developer or AI working on NWANA Engine.
 
@@ -191,74 +191,30 @@ It must NOT be generalized automatically to:
 
 Those may receive different processing profiles.
 
-## SERIES 2026 REGISTRY RECONCILIATION STATUS
-
-Verified distance-series parent containers:
-
-- 1K — source_id 209980
-- 3K — source_id 210000
-- 5K — source_id 209477
-- 10K — source_id 210018
-- 15K — source_id 210016
-- 20K — source_id 210020
-
-All six are verified as RunSignup race containers with NWANA purpose:
-
-COMPETITION_DISTANCE_SERIES / OPEN_SERIES / season 2026.
-
-Their exact parent-level registration, results, sponsorship, and other capabilities remain individually subject to reconciliation where not directly verified.
-
-Verified child competition-event inventory:
-
-- 5K / parent 209477 = 7 events
-- 1K / parent 209980 = 14 events
-- 3K / parent 210000 = 14 events
-- 15K / parent 210016 = 6 events
-- 10K / parent 210018 = 6 events
-- 20K / parent 210020 = 6 events
-
-Total verified competition events = 53.
-
-For all 53 child events, the following are verified:
-
-- source_type = event
-- NWANA purpose = COMPETITION_EVENT
-- program_family = OPEN_SERIES
-- season = 2026
-- parent distance-series relationship
-- event_type = virtual_race
-- participant registration is available
-- official competition results are produced
-
-The 53-event canonical inventory is now recorded in registry/objects.yaml.
 ## CURRENT NEXT ACTION
 
-Continue Registry reconciliation with the remaining real RunSignup/TicketSignup assets and unresolved capabilities.
+Reconcile real RunSignup/TicketSignup objects one by one.
 
-Next priority:
+For every external object establish:
+- source platform
+- source_type / platform container type
+- source_id
+- public URL/domain
+- factual NWANA purpose
+- actual available capabilities
+- actual unavailable capabilities
+- relationships
+- verification status
+- notes necessary to prevent future incorrect inference
 
-1. Reconcile source_id 209464 remaining capabilities:
-   - sponsorship
-   - fundraising
-   - email
-   - any other actually enabled platform functions
+Begin with the known sponsorship/site containers, then reconcile the six 2026 distance-series containers and their competition events.
 
-2. Reconcile the known site/sponsorship assets individually:
-   - Albert Fatikhov | Nordic Walking — source_id 213546
-   - NWANA Nordic Walking SPORT — source_id 212466
-   - NWANA Partner Network — source_id 214054
-   - Instructor Growth Fund — source_id 208087
-
-3. Reconcile parent-level capabilities for the six verified 2026 distance-series containers without inferring them from their child events.
-
-4. Review the existing PROFILE-SERIES-2026-RESULTS binding after Registry reconciliation. The public hub source_id 209464 is not itself a results container, so processing-profile attachment must reflect the real competition/result object model.
-
-Only after the relevant Registry reconciliation is complete:
-
-1. correct local D1 records where necessary;
+Only after that reconciliation:
+1. correct local Registry records where necessary;
 2. rerun regression/control tests;
 3. update canonical files;
 4. seed verified Registry and Stage 8 data to remote D1.
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.

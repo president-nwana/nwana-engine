@@ -1,20 +1,10 @@
-# NWANA Engine Changelog
+﻿# NWANA Engine Changelog
 
 This file records significant implementation and system-state milestones.
 
 It is not a substitute for Git history, SYSTEM_STATE.md, or Architecture Decision Records.
 
 ## 2026-09-16
-
-### Series 2026 Registry Reconciliation
-
-- Verified all six 2026 Open Series distance-series parent source IDs.
-- Added the six distance-series containers to the canonical Registry.
-- Verified and added all 53 Series 2026 competition events.
-- Verified event distribution by parent: 7 / 14 / 14 / 6 / 6 / 6.
-- Verified registration and results capabilities on all 53 child competition events.
-- Parent-container capabilities remain partially reconciled where exact platform configuration has not yet been verified.
-- Remote D1 data remains intentionally unseeded.
 
 ### Canonical Project Memory
 
