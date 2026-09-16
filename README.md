@@ -1,5 +1,13 @@
 # NWANA Engine
 
+NWANA Engine is the growth, revenue, fundraising, sponsorship, partnership, and distribution engine for the connected NWANA ecosystem.
+
+Its core operating loop is:
+
+`OBJECT -> MONEY OR CONVERSION -> AUDIENCE -> SPONSORSHIP -> DISTRIBUTION -> NEXT OBJECT`
+
+Read `MACHINE_PURPOSE.md` for the canonical product purpose, operating model, current priority, and the boundary between the separate Series 2026 legacy process and the future Series 2027 processing inside NWANA Engine.
+
 
 
 
@@ -9,6 +17,7 @@ For current development work, do not reconstruct the project from chat history.
 
 Read these files first:
 
+- `MACHINE_PURPOSE.md` — why the machine exists, what it must do, and the required implementation order.
 - `SYSTEM_STATE.md` — current stage, verified state, blocker, next action, and remote/local status.
 - `registry/README.md` — rules for verified external object facts.
 - `registry/objects.yaml` — canonical factual Registry of real NWANA external platform objects.

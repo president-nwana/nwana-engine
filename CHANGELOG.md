@@ -6,6 +6,16 @@ It is not a substitute for Git history, SYSTEM_STATE.md, or Architecture Decisio
 
 ## 2026-09-16
 
+### Product Direction Correction
+
+- Added MACHINE_PURPOSE.md as the canonical statement of what NWANA Machine must accomplish.
+- Defined the operating loop: OBJECT -> MONEY OR CONVERSION -> AUDIENCE -> SPONSORSHIP -> DISTRIBUTION -> NEXT OBJECT.
+- Restored the Stage 8 priority to connecting existing NWANA revenue and distribution assets rather than mass Registry population.
+- Recorded the required order: Series 2026, Academy, Licenses, NW Groups, Instructor Growth Fund, Sponsorship, Partner Network.
+- Recorded that the separate Series 2026 PowerShell result-level and Meta-publication process predates NWANA Engine and must remain untouched until its actual files are inspected.
+- Recorded that Series 2027 will use a new, substantially expanded and changed level system inside NWANA Engine under its own processing profile.
+
+
 ### Canonical Project Memory
 
 - Established the repository as the canonical development memory for NWANA Engine.

@@ -2,11 +2,20 @@
 
 Before changing code, Registry data, D1, adapters, processing logic, distribution rules, or architecture:
 
-1. Read `SYSTEM_STATE.md`.
-2. Read `registry/README.md`.
-3. Read `registry/objects.yaml`.
-4. Read relevant files in `docs/adr/`.
-5. Then read the technical instructions below.
+1. Read `MACHINE_PURPOSE.md`.
+2. Read `SYSTEM_STATE.md`.
+3. Read `registry/README.md` only when Registry or external-object facts are relevant.
+4. Read `registry/objects.yaml` only when Registry or external-object facts are relevant.
+5. Read relevant files in `docs/adr/`.
+6. Then read the technical instructions below.
+
+## Product Direction Rule
+
+`MACHINE_PURPOSE.md` is the canonical statement of what NWANA Machine must accomplish.
+
+Registry reconciliation is supporting work, not the product goal. Do not mass-populate Registry objects unless they are required by a real processing, rule, distribution, revenue, sponsorship, funding, or next-object path.
+
+Before committing, explain in plain language how the change advances the machine's operating loop.
 
 ## Canonical Truth Rule
 

@@ -11,20 +11,26 @@ Do not treat a RunSignup "race" container as a real competition unless the canon
 If a platform fact is not verified, record it as UNKNOWN rather than guessing.
 
 Read before making changes:
-1. SYSTEM_STATE.md
-2. registry/README.md
-3. registry/objects.yaml
-4. docs/adr/
-5. AGENTS.md
+1. MACHINE_PURPOSE.md
+2. SYSTEM_STATE.md
+3. registry/README.md when Registry facts are relevant
+4. registry/objects.yaml when Registry facts are relevant
+5. relevant docs/adr/
+6. AGENTS.md
 
 ## CURRENT STAGE
 
-Stage 8 — Rules Engine / Processing Profiles / Registry Reconciliation
+Stage 8 — Connect existing NWANA assets to the Rules and Distribution Engine
 
 Stage 7 is closed.
 
-The immediate task is not to redesign the Registry.
-The immediate task is to reconcile the Registry with the actual NWANA RunSignup/TicketSignup configuration.
+The product direction is defined in MACHINE_PURPOSE.md.
+
+The immediate task is to audit the existing Stage 8 implementation against the complete operating loop:
+
+OBJECT -> MONEY OR CONVERSION -> AUDIENCE -> SPONSORSHIP -> DISTRIBUTION -> NEXT OBJECT
+
+Registry reconciliation is performed only where a real Stage 8 rule, processing path, distribution action, or verified relationship requires it. It is not the main project stage and must not become mass object cataloguing.
 
 ## LAST VERIFIED CODE STATE
 
@@ -165,6 +171,14 @@ An unknown RunSignup race/container must not automatically become OPEN_SERIES.
 A new adapter is created when a real source/integration is connected.
 Do not pre-build every possible future RunSignup/TicketSignup adapter.
 
+## SERIES 2026 LEGACY PROCESS BOUNDARY
+
+Series 2026 already has a separate working Windows/PowerShell process created before NWANA Engine. The project owner states that the existing files receive results, assign speed levels, and one component publishes through Meta.
+
+Keep that process separate for 2026. Do not rewrite it, change its formulas, or duplicate its Meta publication without explicit verification and approval. Exact file behavior must be documented only after the actual files are inspected.
+
+Series 2027 will use a new, substantially expanded and changed level system implemented inside NWANA Engine under its own processing profile.
+
 ## SERIES 2026 PROCESSING
 
 Existing processing profile:
@@ -193,27 +207,33 @@ Those may receive different processing profiles.
 
 ## CURRENT NEXT ACTION
 
-Reconcile real RunSignup/TicketSignup objects one by one.
+Audit the existing Stage 8 implementation against MACHINE_PURPOSE.md.
 
-For every external object establish:
-- source platform
-- source_type / platform container type
-- source_id
-- public URL/domain
-- factual NWANA purpose
-- actual available capabilities
-- actual unavailable capabilities
-- relationships
-- verification status
-- notes necessary to prevent future incorrect inference
+For the first operational asset group, establish what already exists and what is missing across:
 
-Begin with the known sponsorship/site containers, then reconcile the six 2026 distance-series containers and their competition events.
+- money or conversion;
+- audiences;
+- sponsorship;
+- partner routing;
+- distribution actions and channels;
+- observation of outcomes;
+- follow-up, renewal, cross-sell, or next-object transitions.
 
-Only after that reconciliation:
-1. correct local Registry records where necessary;
-2. rerun regression/control tests;
-3. update canonical files;
-4. seed verified Registry and Stage 8 data to remote D1.
+Required implementation order:
+
+1. Series 2026;
+2. Academy;
+3. Licenses;
+4. NW Groups;
+5. Instructor Growth Fund;
+6. Sponsorship;
+7. Partner Network.
+
+Do not create Free Challenges, Series 2027, U.S. Championships, or Continental Championships until the existing assets operate inside the connected Rules and Distribution Engine.
+
+For Series 2026, preserve the separate legacy result-level and Meta-publication process. NWANA Engine must not duplicate its processing or publication. Inspect the actual legacy files before documenting exact invocation details or integrating their finalized outputs.
+
+After the read-only Stage 8 gap audit, propose the smallest working end-to-end improvement. Do not mass-populate registry/objects.yaml.
 
 ## DO NOT
 
@@ -225,6 +245,10 @@ Only after that reconciliation:
 - Do not create future Challenges or event concepts as existing assets.
 - Do not hard-code Series 2026 processing as universal competition logic.
 - Do not redesign the universal Registry merely to support a future RunSignup/TicketSignup feature that can be represented as another object, relationship, capability, semantic profile, or adapter.
+- Do not treat Registry reconciliation as the product goal.
+- Do not mass-populate Registry objects without a real processing, rule, distribution, revenue, sponsorship, funding, or next-object use.
+- Do not rewrite the separate Series 2026 PowerShell process or duplicate its Meta publication.
+- Do not apply Series 2026 level formulas automatically to Series 2027.
 
 ## SESSION CLOSE RULE
 
