@@ -1,5 +1,14 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-17 — Add varied branded result-card previews
+
+- Added three deterministic square-card compositions: Stage Leaders, Performance Level Winners, and Results Spotlight.
+- Reused the official NWANA website logo asset and the verified winner names, levels, genders, times, distance, and event title.
+- Added a read-only SVG preview endpoint; it generates no publication and changes no result data.
+- Corrected Facebook delivery to create photo posts instead of link-only feed posts.
+- Kept the same approved image requirement across both Facebook Pages and both Instagram accounts.
+- Final JPEG production and the first controlled live delivery remain disabled.
+
 ## 2026-09-17 — Expand guarded result delivery to four Meta accounts
 
 - Added Facebook Nordic Walking Sport and Instagram n_w_sport alongside Facebook NWANA and Instagram nwana.official.
