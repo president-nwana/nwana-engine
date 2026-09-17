@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSeries2026PublicationDraft } from "../src/series-2026-results";
+import { applySeries2026PublicationHistory, buildSeries2026PublicationDraft } from "../src/series-2026-results";
 
 const source = {
 	distance: "5K",
@@ -69,6 +69,36 @@ describe("Series 2026 result publication handoff", () => {
 			performance_level_field_found: false,
 			level_place_field_found: false,
 			all_results_finalized: false,
+		});
+	});
+	it("excludes the accepted legacy baseline from future publication", () => {
+		const draft = buildSeries2026PublicationDraft({
+			source,
+			eventId: 123,
+			eventName: "September 5K",
+			resultSetId: 456,
+			resultSet: {
+				results_headers: {
+					"custom-field-10": "Performance Level",
+					"custom-field-11": "Level Place",
+				},
+				results: [{
+					first_name: "Alex",
+					last_name: "Walker",
+					"custom-field-10": "Elite (< 33:00)",
+					"custom-field-11": "1",
+				}],
+			},
+		});
+		const [historical] = applySeries2026PublicationHistory(
+			[draft],
+			new Set([draft.publication_key]),
+		);
+
+		expect(historical).toMatchObject({
+			publication_status: "LEGACY_BASELINE",
+			publication_required: false,
+			execution_allowed: false,
 		});
 	});
 });

@@ -52,3 +52,7 @@ The actual files were inspected on 2026-09-17 without executing them:
 - Neither `NWANA-RUN.bat` nor `NWANA-FINAL.ps1` invokes `Publish-NWANA.ps1`.
 
 Therefore the durable handoff is RunSignup itself: Engine reads the already updated result sets and recognizes finalized results through the populated `Performance Level` and `Level Place` fields. No legacy script file is uploaded to Engine and no credential is copied into the repository.
+
+## Historical baseline decision
+
+On 2026-09-17 the live preview found 53 RunSignup result sets, of which 22 were finalized. The project owner chose not to spend time republishing those historical results. Engine records them once as `LEGACY_BASELINE` and begins new publication work with the next finalized result that is not already present in publication history.

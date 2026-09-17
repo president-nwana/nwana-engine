@@ -274,7 +274,11 @@ GET /sources/runsignup/series-2026/results-preview
 
 It reads the six verified Series 2026 distance races, recognizes a result set as finalized only when every result has both Performance Level and Level Place, and returns deterministic DRAFT publication records. Every draft requires review, execution_allowed remains false, and no Meta delivery code is present.
 
-Next, verify the endpoint locally against real finalized RunSignup data. After the returned draft shape is checked, define the approved editorial template and destination routing. Do not enable sending yet.
+The endpoint was verified locally against real RunSignup data on 2026-09-17: 53 result sets were found and 22 were fully finalized with both required fields. The project owner chose not to republish those historical result sets.
+
+Migration 0014 and a baseline endpoint now record the currently finalized sets as LEGACY_BASELINE. The operation is idempotent, writes only the local Engine publication ledger, publishes nothing, and leaves execution_allowed=false. The normal preview excludes baseline records from new publication work.
+
+Next, apply migration 0014 locally, establish the 22-record baseline once, and verify that new_ready_for_editorial_review becomes zero. Then define the approved editorial template and destination routing for the next genuinely new finalized result. Do not enable sending yet.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 

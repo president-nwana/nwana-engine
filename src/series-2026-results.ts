@@ -197,3 +197,21 @@ export async function previewSeries2026ResultPublications(accessToken: string) {
 		},
 	};
 }
+
+
+export function applySeries2026PublicationHistory(
+	drafts: ReturnType<typeof buildSeries2026PublicationDraft>[],
+	historyKeys: ReadonlySet<string>,
+) {
+	return drafts.map((draft) => {
+		const historical = historyKeys.has(draft.publication_key);
+		return {
+			...draft,
+			publication_status: historical
+				? "LEGACY_BASELINE" as const
+				: "NEW" as const,
+			publication_required:
+				draft.ready_for_editorial_review && !historical,
+		};
+	});
+}

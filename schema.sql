@@ -471,3 +471,24 @@ ON object_processing_profiles(profile_id);
 
 CREATE INDEX IF NOT EXISTS idx_object_processing_profiles_enabled
 ON object_processing_profiles(enabled);
+
+
+-- Idempotency and history for result publication ownership.
+CREATE TABLE IF NOT EXISTS result_publication_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  publication_key TEXT NOT NULL UNIQUE,
+  series TEXT NOT NULL,
+  status TEXT NOT NULL,
+  race_id INTEGER NOT NULL,
+  event_id INTEGER NOT NULL,
+  result_set_id INTEGER NOT NULL,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_result_publication_history_series_status
+ON result_publication_history(series, status);
+
+CREATE INDEX IF NOT EXISTS idx_result_publication_history_source
+ON result_publication_history(race_id, event_id, result_set_id);

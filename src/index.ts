@@ -10,7 +10,7 @@ import {
         type DistributionObject,
         type DistributionRule,
 } from "./distribution-planner";
-import { previewSeries2026ResultPublications } from "./series-2026-results";
+import { applySeries2026PublicationHistory, previewSeries2026ResultPublications } from "./series-2026-results";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -5103,6 +5103,109 @@ async function getDistributionPlan(
         });
 }
 
+
+interface ResultPublicationHistoryRow {
+	publication_key: string;
+}
+
+async function getSeries2026ResultPublicationPreview(
+	env: Env,
+): Promise<Response> {
+	const preview = await previewSeries2026ResultPublications(
+		env.RUNSIGNUP_ACCESS_TOKEN,
+	);
+	const history = await env.nwana_engine_db
+		.prepare(`
+			SELECT publication_key
+			FROM result_publication_history
+			WHERE series = 'SERIES_2026'
+		`)
+		.all<ResultPublicationHistoryRow>();
+	const historyKeys = new Set(
+		history.results.map((row) => row.publication_key),
+	);
+	const drafts = applySeries2026PublicationHistory(
+		preview.drafts,
+		historyKeys,
+	);
+
+	return json({
+		...preview,
+		drafts,
+		summary: {
+			...preview.summary,
+			historical_baseline:
+				drafts.filter((draft) =>
+					draft.publication_status === "LEGACY_BASELINE"
+				).length,
+			new_ready_for_editorial_review:
+				drafts.filter((draft) =>
+					draft.publication_required
+				).length,
+		},
+	});
+}
+
+async function establishSeries2026ResultPublicationBaseline(
+	env: Env,
+): Promise<Response> {
+	const preview = await previewSeries2026ResultPublications(
+		env.RUNSIGNUP_ACCESS_TOKEN,
+	);
+	const readyDrafts = preview.drafts.filter(
+		(draft) => draft.ready_for_editorial_review,
+	);
+	const statements = readyDrafts.map((draft) =>
+		env.nwana_engine_db
+			.prepare(`
+				INSERT OR IGNORE INTO result_publication_history (
+					publication_key,
+					series,
+					status,
+					race_id,
+					event_id,
+					result_set_id,
+					metadata
+				)
+				VALUES (?, 'SERIES_2026', 'LEGACY_BASELINE', ?, ?, ?, ?)
+			`)
+			.bind(
+				draft.publication_key,
+				draft.source.race_id,
+				draft.source.event_id,
+				draft.source.result_set_id,
+				JSON.stringify({
+					title: draft.content.title,
+					result_count:
+						draft.verification.result_count,
+					reason:
+						"Accepted existing finalized results as the pre-Engine publication baseline.",
+				}),
+			),
+	);
+	if (statements.length > 0) {
+		await env.nwana_engine_db.batch(statements);
+	}
+	const baseline = await env.nwana_engine_db
+		.prepare(`
+			SELECT COUNT(*) AS count
+			FROM result_publication_history
+			WHERE series = 'SERIES_2026'
+			  AND status = 'LEGACY_BASELINE'
+		`)
+		.first<{ count: number }>();
+
+	return json({
+		ok: true,
+		mode: "BASELINE_ONLY",
+		execution_allowed: false,
+		published: 0,
+		legacy_baseline_count: baseline?.count ?? 0,
+		message:
+			"Existing finalized Series 2026 result sets will not be proposed as new publications.",
+	});
+}
+
 export default {
 	async fetch(
 		request: Request,
@@ -5158,15 +5261,32 @@ export default {
 		}
 
 		if (
+			request.method === "POST" &&
+			url.pathname === "/sources/runsignup/series-2026/results-baseline"
+		) {
+			try {
+				return await establishSeries2026ResultPublicationBaseline(env);
+			} catch (error) {
+				console.error(error);
+				return json(
+					{
+						ok: false,
+						error:
+							error instanceof Error
+								? error.message
+								: "Unknown Series 2026 baseline error",
+					},
+					500,
+				);
+			}
+		}
+
+		if (
 			request.method === "GET" &&
 			url.pathname === "/sources/runsignup/series-2026/results-preview"
 		) {
 			try {
-				return json(
-					await previewSeries2026ResultPublications(
-						env.RUNSIGNUP_ACCESS_TOKEN,
-					),
-				);
+				return await getSeries2026ResultPublicationPreview(env);
 			} catch (error) {
 				console.error(error);
 				return json(

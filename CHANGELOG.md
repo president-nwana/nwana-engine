@@ -1,5 +1,14 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-17 — Establish Series 2026 publication baseline
+
+- Added a local publication-history ledger and migration 0014.
+- Added an idempotent baseline operation for finalized Series 2026 result sets that predate Engine publication ownership.
+- Marked baseline records as historical rather than new publication work.
+- Kept publication disabled; the operation does not call Meta or modify RunSignup.
+- Added a regression test proving that baseline records are excluded from future publication.
+
+
 ## 2026-09-17 — Series 2026 finalized-result handoff preview
 
 - Inspected the actual legacy launcher, result processor, and retired Meta publisher.
