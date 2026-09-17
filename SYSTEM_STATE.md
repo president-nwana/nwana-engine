@@ -229,15 +229,20 @@ Safety boundary:
 - it does not call Meta;
 - it does not change the separate Series 2026 result-processing workflow.
 
-The planner's pure logic passed a local direct check for a matching Series 2026 object and for rejection when the required capability is absent.
+Verification completed on 2026-09-17 in the full local repository at commit 6025d09:
 
-GitHub currently has no CI status checks. Full repository TypeScript and Vitest verification for commit a1de380 is still required before deployment.
+- Vitest passed: 2 test files, 6/6 tests;
+- distribution planner tests passed: 2/2;
+- existing semantic tests passed: 4/4;
+- npx tsc --noEmit passed with no errors.
+
+GitHub currently has no CI status checks. The successful local verification is the current evidence for this implementation.
 
 ## CURRENT NEXT ACTION
 
-Run full TypeScript and Vitest verification for commit a1de380 in a complete repository checkout.
+Exercise the read-only planner against local Stage 8 seed data and inspect the Series 2026 plan. Do not deploy or enable execution.
 
-If verification passes, exercise the read-only planner against local Stage 8 seed data and inspect the Series 2026 plan. Do not deploy or enable execution.
+Confirm that the returned audiences and actions match NWANA's intended business use and that no duplicate 2026 Meta publication is present.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 

@@ -14,7 +14,8 @@ It is not a substitute for Git history, SYSTEM_STATE.md, or Architecture Decisio
 - Returned plans are explicitly PLAN_ONLY with execution_allowed=false.
 - Added tests for a matching Series 2026 plan and rejection when a required capability is absent.
 - Direct local planner checks passed.
-- Full repository TypeScript and Vitest verification remains pending because GitHub CI is not configured.
+- Full local repository verification completed: Vitest 6/6 tests passed and npx tsc --noEmit passed with no errors.
+- GitHub CI is not configured; the local verification is the current evidence.
 - No deployment, D1 mutation, job creation, channel execution, or Meta call occurred.
 
 ## 2026-09-16
