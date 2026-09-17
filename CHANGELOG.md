@@ -1,5 +1,15 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-17 — Render public JPEG result cards
+
+- Added the Cloudflare Images binding and cache for zero-cost result-card conversion within the free monthly allowance.
+- Added a public JPEG card endpoint alongside the read-only SVG preview.
+- Embedded the official NWANA logo into the rendered card before conversion.
+- Made the publish endpoint derive the JPEG URL automatically; operators no longer need to supply image_url.
+- Kept explicit PUBLISH confirmation, historical-baseline blocking, and per-account duplicate protection.
+- Local HTTP development cannot trigger publication because the delivery guard requires a deployed public HTTPS card.
+- No live Meta request, deployment, or publication was performed.
+
 ## 2026-09-17 — Add varied branded result-card previews
 
 - Added three deterministic square-card compositions: Stage Leaders, Performance Level Winners, and Results Spotlight.
