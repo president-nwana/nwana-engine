@@ -5342,10 +5342,17 @@ async function publishSeries2026Result(
 	}
 	let imageUrl: URL;
 	try {
-		imageUrl = new URL(body.image_url ?? "");
+		const generatedImageUrl = new URL(
+			`/result-publications/card/${encodeURIComponent(body.publication_key)}.jpg`,
+			request.url,
+		);
+		imageUrl = new URL(body.image_url ?? generatedImageUrl.toString());
 		if (imageUrl.protocol !== "https:") throw new Error("HTTPS required");
 	} catch {
-		return json({ ok: false, error: "A public HTTPS image_url is required for Instagram" }, 400);
+		return json({
+			ok: false,
+			error: "Publication requires the deployed public HTTPS JPEG card",
+		}, 400);
 	}
 	if (!env.NWANA_META_TOKEN) {
 		return json({ ok: false, error: "NWANA_META_TOKEN is not configured" }, 503);
