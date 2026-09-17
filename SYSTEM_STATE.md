@@ -278,7 +278,18 @@ The endpoint was verified locally against real RunSignup data on 2026-09-17: 53 
 
 Migration 0014 and a baseline endpoint now record the currently finalized sets as LEGACY_BASELINE. The operation is idempotent, writes only the local Engine publication ledger, publishes nothing, and leaves execution_allowed=false. The normal preview excludes baseline records from new publication work.
 
-Next, apply migration 0014 locally, establish the 22-record baseline once, and verify that new_ready_for_editorial_review becomes zero. Then define the approved editorial template and destination routing for the next genuinely new finalized result. Do not enable sending yet.
+Local baseline verification completed on 2026-09-17:
+
+- migration 0014 executed successfully: 3 commands;
+- baseline operation returned ok=true;
+- legacy_baseline_count=22;
+- published=0;
+- subsequent preview returned result_sets=53, ready_for_editorial_review=22, historical_baseline=22, and new_ready_for_editorial_review=0;
+- execution_allowed remained false.
+
+The transition is complete: the 22 existing finalized result sets are history, and the next genuinely new finalized result will be the first new Engine publication candidate.
+
+Next, define the approved editorial template and destination routing for a new result draft. Do not enable sending yet.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 

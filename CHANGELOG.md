@@ -7,6 +7,7 @@
 - Marked baseline records as historical rather than new publication work.
 - Kept publication disabled; the operation does not call Meta or modify RunSignup.
 - Added a regression test proving that baseline records are excluded from future publication.
+- Verified locally: migration 0014 ran successfully; 22 records became LEGACY_BASELINE; the follow-up preview reported zero new publication candidates and published zero items.
 
 
 ## 2026-09-17 — Series 2026 finalized-result handoff preview
