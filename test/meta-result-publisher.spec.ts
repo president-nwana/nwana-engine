@@ -13,14 +13,16 @@ describe("Meta result publisher", () => {
 
 	it("publishes Facebook and Instagram through their separate endpoints", async () => {
 		const facebookFetch = vi.fn(async () => response({ id: "fb-post" }));
-		await expect(publishFacebookResult({ pageId: "103190499173992", message: "Results", link: "https://example.com/results", pageToken: "secret", fetcher: facebookFetch as typeof fetch })).resolves.toEqual({ external_id: "fb-post" });
+		await expect(publishFacebookResult({ pageId: "103190499173992", message: "Results", imageUrl: "https://example.com/result.jpg", pageToken: "secret", fetcher: facebookFetch as typeof fetch })).resolves.toEqual({ external_id: "fb-post" });
 
 		const instagramFetch = vi.fn()
 			.mockResolvedValueOnce(response({ id: "container" }))
 			.mockResolvedValueOnce(response({ id: "ig-media" }));
 		await expect(publishInstagramResult({ accountId: "17841455094791338", caption: "Results", imageUrl: "https://example.com/result.jpg", userToken: "secret", fetcher: instagramFetch as typeof fetch })).resolves.toEqual({ external_id: "ig-media" });
 		expect(instagramFetch).toHaveBeenCalledTimes(2);
-		expect(String(facebookFetch.mock.calls[0]?.[0])).toContain("/103190499173992/feed");
+		expect(String(facebookFetch.mock.calls[0]?.[0])).toContain("/103190499173992/photos");
+		const facebookBody = facebookFetch.mock.calls[0]?.[1]?.body as URLSearchParams;
+		expect(facebookBody.get("url")).toBe("https://example.com/result.jpg");
 		expect(String(instagramFetch.mock.calls[0]?.[0])).toContain("/17841455094791338/media");
 	});
 });
