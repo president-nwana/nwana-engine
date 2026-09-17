@@ -11,6 +11,9 @@
 		"enabled": true
 	},
 	"upload_source_maps": true,
+	"images": {
+		"binding": "IMAGES"
+	},
         "triggers": {
                 "crons": [
                         "*/5 * * * *"
