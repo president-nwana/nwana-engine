@@ -56,3 +56,19 @@ Therefore the durable handoff is RunSignup itself: Engine reads the already upda
 ## Historical baseline decision
 
 On 2026-09-17 the live preview found 53 RunSignup result sets, of which 22 were finalized. The project owner chose not to spend time republishing those historical results. Engine records them once as `LEGACY_BASELINE` and begins new publication work with the next finalized result that is not already present in publication history.
+
+
+## Meta destinations and visual publication decision
+
+On 2026-09-17 the project owner confirmed that finalized Series 2026 results must be distributed to all four established Meta accounts:
+
+- Facebook: NWANA;
+- Instagram: nwana.official;
+- Facebook: Nordic Walking Sport;
+- Instagram: n_w_sport.
+
+Delivery state is tracked independently for every destination so a retry cannot duplicate a post on an account that already succeeded.
+
+Results must not be published as image-less posts. Engine will create a branded result card and use a family of layouts rather than one mandatory template. The family may include single-stage leaders, performance-level winners, and weekend recap compositions. Visual variants may rotate, while the selected variant for a publication key must remain deterministic so review and retry use the same design.
+
+The first real generated card and first real delivery require owner review. After that successful controlled run, ordinary finalized results may proceed automatically; missing or inconsistent data, image-generation failure, and Meta delivery failure remain exceptions requiring attention.
