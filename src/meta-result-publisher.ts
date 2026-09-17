@@ -1,8 +1,26 @@
 const GRAPH_VERSION = "v23.0";
 
 export const RESULT_DESTINATIONS = {
-	facebook: { pageId: "595301193675669", name: "NWANA" },
-	instagram: { accountId: "17841474409019986", name: "nwana.official" },
+	facebookNwana: {
+		ledgerKey: "FACEBOOK_NWANA",
+		pageId: "595301193675669",
+		name: "NWANA",
+	},
+	instagramNwanaOfficial: {
+		ledgerKey: "INSTAGRAM_NWANA_OFFICIAL",
+		accountId: "17841474409019986",
+		name: "nwana.official",
+	},
+	facebookNordicWalkingSport: {
+		ledgerKey: "FACEBOOK_NORDIC_WALKING_SPORT",
+		pageId: "103190499173992",
+		name: "Nordic Walking Sport",
+	},
+	instagramNwSport: {
+		ledgerKey: "INSTAGRAM_N_W_SPORT",
+		accountId: "17841455094791338",
+		name: "n_w_sport",
+	},
 } as const;
 
 type FetchLike = typeof fetch;
@@ -36,12 +54,13 @@ export async function getFacebookPageToken(
 	) as Record<string, unknown> | undefined;
 	const token = page?.access_token;
 	if (typeof token !== "string" || token.length === 0) {
-		throw new Error("NWANA Facebook Page token was not returned by Meta");
+		throw new Error(`Facebook Page token was not returned by Meta for page ${pageId}`);
 	}
 	return token;
 }
 
 export async function publishFacebookResult(params: {
+	pageId: string;
 	message: string;
 	link: string;
 	pageToken: string;
@@ -53,7 +72,7 @@ export async function publishFacebookResult(params: {
 		access_token: params.pageToken,
 	});
 	const data = await graphJson(
-		`https://graph.facebook.com/${GRAPH_VERSION}/${RESULT_DESTINATIONS.facebook.pageId}/feed`,
+		`https://graph.facebook.com/${GRAPH_VERSION}/${params.pageId}/feed`,
 		{ method: "POST", body },
 		params.fetcher ?? fetch,
 	);
@@ -62,6 +81,7 @@ export async function publishFacebookResult(params: {
 }
 
 export async function publishInstagramResult(params: {
+	accountId: string;
 	caption: string;
 	imageUrl: string;
 	userToken: string;
@@ -69,7 +89,7 @@ export async function publishInstagramResult(params: {
 }) {
 	const fetcher = params.fetcher ?? fetch;
 	const container = await graphJson(
-		`https://graph.facebook.com/${GRAPH_VERSION}/${RESULT_DESTINATIONS.instagram.accountId}/media`,
+		`https://graph.facebook.com/${GRAPH_VERSION}/${params.accountId}/media`,
 		{ method: "POST", body: new URLSearchParams({
 			image_url: params.imageUrl,
 			caption: params.caption,
@@ -80,7 +100,7 @@ export async function publishInstagramResult(params: {
 	if (typeof container.id !== "string") throw new Error("Meta did not create an Instagram media container");
 	await new Promise((resolve) => setTimeout(resolve, 3000));
 	const published = await graphJson(
-		`https://graph.facebook.com/${GRAPH_VERSION}/${RESULT_DESTINATIONS.instagram.accountId}/media_publish`,
+		`https://graph.facebook.com/${GRAPH_VERSION}/${params.accountId}/media_publish`,
 		{ method: "POST", body: new URLSearchParams({
 			creation_id: container.id,
 			access_token: params.userToken,
