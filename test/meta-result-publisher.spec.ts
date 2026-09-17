@@ -12,10 +12,10 @@ describe("Meta result publisher", () => {
 	});
 
 	it("publishes Facebook and Instagram through their separate endpoints", async () => {
-		const facebookFetch = vi.fn(async () => response({ id: "fb-post" }));
+		const facebookFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => response({ id: "fb-post" }));
 		await expect(publishFacebookResult({ pageId: "103190499173992", message: "Results", imageUrl: "https://example.com/result.jpg", pageToken: "secret", fetcher: facebookFetch as typeof fetch })).resolves.toEqual({ external_id: "fb-post" });
 
-		const instagramFetch = vi.fn()
+		const instagramFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => response({ id: "fallback" }))
 			.mockResolvedValueOnce(response({ id: "container" }))
 			.mockResolvedValueOnce(response({ id: "ig-media" }));
 		await expect(publishInstagramResult({ accountId: "17841455094791338", caption: "Results", imageUrl: "https://example.com/result.jpg", userToken: "secret", fetcher: instagramFetch as typeof fetch })).resolves.toEqual({ external_id: "ig-media" });
