@@ -209,6 +209,9 @@ export async function previewSeries2026ResultPublications(accessToken: string) {
 		const raceResponse = await getJson(raceUrl, accessToken);
 		const race = asRecord(raceResponse.race);
 		const events = race && Array.isArray(race.events) ? race.events : [];
+		const raceResultsPageUrl = text(race?.url)
+			? `${text(race?.url)?.replace(/\/$/, "")}/Results`
+			: null;
 
 		for (const rawEvent of events) {
 			const event = asRecord(rawEvent);
@@ -248,9 +251,7 @@ export async function previewSeries2026ResultPublications(accessToken: string) {
 					resultSet,
 					resultsPageUrl:
 						text(resultSet.results_source_url) ??
-						(text(race.url)
-							? `${text(race.url)?.replace(/\/$/, "")}/Results`
-							: null),
+						raceResultsPageUrl,
 				}));
 			}
 		}
