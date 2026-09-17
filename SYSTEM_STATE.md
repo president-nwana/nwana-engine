@@ -40,7 +40,11 @@ president-nwana/nwana-engine
 Branch:
 main
 
-Last implementation commit before canonical-memory work:
+Latest implementation commit:
+a1de3805b066d31f687e8c5962b3d0b2ba820af0
+Add plan-only distribution planner
+
+Previous verified Stage 8 implementation commit:
 149ce1df88f2d32deec17cb3f5ff811e6fbb2bf5
 Add Stage 8 rules and processing profiles
 
@@ -205,9 +209,37 @@ It must NOT be generalized automatically to:
 
 Those may receive different processing profiles.
 
+## PLAN ONLY DISTRIBUTION PLANNER
+
+Commit a1de380 added the first working general Stage 8 planner.
+
+Read-only endpoint:
+
+GET /distribution/plan/{object_id}
+
+It reads the object, its available capabilities, enabled rules, audiences, and actions, then returns a reviewable plan.
+
+Safety boundary:
+
+- mode is always PLAN_ONLY;
+- execution_allowed is always false;
+- it does not create jobs;
+- it does not write D1 data;
+- it does not publish or send anything;
+- it does not call Meta;
+- it does not change the separate Series 2026 result-processing workflow.
+
+The planner's pure logic passed a local direct check for a matching Series 2026 object and for rejection when the required capability is absent.
+
+GitHub currently has no CI status checks. Full repository TypeScript and Vitest verification for commit a1de380 is still required before deployment.
+
 ## CURRENT NEXT ACTION
 
-Audit the existing Stage 8 implementation against MACHINE_PURPOSE.md.
+Run full TypeScript and Vitest verification for commit a1de380 in a complete repository checkout.
+
+If verification passes, exercise the read-only planner against local Stage 8 seed data and inspect the Series 2026 plan. Do not deploy or enable execution.
+
+After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 
 For the first operational asset group, establish what already exists and what is missing across:
 

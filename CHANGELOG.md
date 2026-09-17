@@ -4,6 +4,19 @@ This file records significant implementation and system-state milestones.
 
 It is not a substitute for Git history, SYSTEM_STATE.md, or Architecture Decision Records.
 
+## 2026-09-17
+
+### Plan Only Distribution Planner
+
+- Added a general rule matcher and distribution-plan builder.
+- Added GET /distribution/plan/{object_id}.
+- The endpoint reads objects, capabilities, rules, audiences, and actions without writing data.
+- Returned plans are explicitly PLAN_ONLY with execution_allowed=false.
+- Added tests for a matching Series 2026 plan and rejection when a required capability is absent.
+- Direct local planner checks passed.
+- Full repository TypeScript and Vitest verification remains pending because GitHub CI is not configured.
+- No deployment, D1 mutation, job creation, channel execution, or Meta call occurred.
+
 ## 2026-09-16
 
 ### Product Direction Correction
