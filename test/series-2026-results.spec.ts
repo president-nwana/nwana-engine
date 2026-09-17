@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSeries2026PublicationDraft } from "./series-2026-results";
+import { buildSeries2026PublicationDraft } from "../src/series-2026-results";
 
 const source = {
 	distance: "5K",
