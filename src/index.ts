@@ -18,6 +18,7 @@ interface Env {
         nwana_engine_db: D1Database;
         RUNSIGNUP_ACCESS_TOKEN: string;
         NWANA_META_TOKEN: string;
+        IMAGES: ImagesBinding;
 }
 
 interface CreateObjectRequest {
@@ -5152,6 +5153,7 @@ async function getSeries2026ResultPublicationPreview(
 
 async function getSeries2026ResultCard(
 	publicationKey: string,
+	format: "svg" | "jpeg",
 	env: Env,
 ): Promise<Response> {
 	const preview = await previewSeries2026ResultPublications(
@@ -5178,18 +5180,36 @@ async function getSeries2026ResultCard(
 			time: row.time,
 			performance_level: row.performance_level,
 		}));
+	let logoUrl: string | undefined;
+	if (format === "jpeg") {
+		const logoResponse = await fetch(
+			"https://d368g9lw5ileu7.cloudfront.net/uploads/generic/genericImage-websiteLogo-281959-1788823407.1047-0.bQN0DV.jpg",
+		);
+		if (!logoResponse.ok) {
+			throw new Error("Official NWANA logo could not be loaded");
+		}
+		const logoBytes = new Uint8Array(await logoResponse.arrayBuffer());
+		logoUrl = `data:image/jpeg;base64,${bytesToBase64(logoBytes)}`;
+	}
 	const svg = buildResultCardSvg({
 		publicationKey: draft.publication_key,
 		title: draft.editorial_draft.title,
 		distance: draft.source.distance,
 		winners,
+		logoUrl,
 	});
-	return new Response(svg, {
-		headers: {
-			"content-type": "image/svg+xml; charset=utf-8",
-			"cache-control": "public, max-age=3600",
-		},
-	});
+	if (format === "svg") {
+		return new Response(svg, {
+			headers: {
+				"content-type": "image/svg+xml; charset=utf-8",
+				"cache-control": "public, max-age=3600",
+			},
+		});
+	}
+	const output = await env.IMAGES
+		.input(new TextEncoder().encode(svg))
+		.output({ format: "image/jpeg", quality: 90 });
+	return output.response();
 }
 
 async function establishSeries2026ResultPublicationBaseline(
@@ -5498,16 +5518,22 @@ export default {
 		if (
 			request.method === "GET" &&
 			url.pathname.startsWith("/result-publications/card/") &&
-			url.pathname.endsWith(".svg")
+			(url.pathname.endsWith(".svg") || url.pathname.endsWith(".jpg"))
 		) {
+			const format = url.pathname.endsWith(".jpg") ? "jpeg" : "svg";
+			const suffix = format === "jpeg" ? ".jpg" : ".svg";
 			const publicationKey = decodeURIComponent(
 				url.pathname.slice(
 					"/result-publications/card/".length,
-					-".svg".length,
+					-suffix.length,
 				),
 			);
 			try {
-				return await getSeries2026ResultCard(publicationKey, env);
+				return await getSeries2026ResultCard(
+					publicationKey,
+					format,
+					env,
+				);
 			} catch (error) {
 				console.error(error);
 				return json({
