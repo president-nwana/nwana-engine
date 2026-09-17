@@ -62,17 +62,17 @@ export async function getFacebookPageToken(
 export async function publishFacebookResult(params: {
 	pageId: string;
 	message: string;
-	link: string;
+	imageUrl: string;
 	pageToken: string;
 	fetcher?: FetchLike;
 }) {
 	const body = new URLSearchParams({
 		message: params.message,
-		link: params.link,
+		url: params.imageUrl,
 		access_token: params.pageToken,
 	});
 	const data = await graphJson(
-		`https://graph.facebook.com/${GRAPH_VERSION}/${params.pageId}/feed`,
+		`https://graph.facebook.com/${GRAPH_VERSION}/${params.pageId}/photos`,
 		{ method: "POST", body },
 		params.fetcher ?? fetch,
 	);
