@@ -72,3 +72,12 @@ Delivery state is tracked independently for every destination so a retry cannot 
 Results must not be published as image-less posts. Engine will create a branded result card and use a family of layouts rather than one mandatory template. The family may include single-stage leaders, performance-level winners, and weekend recap compositions. Visual variants may rotate, while the selected variant for a publication key must remain deterministic so review and retry use the same design.
 
 The first real generated card and first real delivery require owner review. After that successful controlled run, ordinary finalized results may proceed automatically; missing or inconsistent data, image-generation failure, and Meta delivery failure remain exceptions requiring attention.
+
+
+## September 12, 2026 3K correction
+
+The project owner confirmed on 2026-09-17 that the September 12, 2026 3K result was not published by the legacy publisher. Its exact publication key is:
+
+`runsignup:series-2026:210000:1178567:666098`
+
+Migration 0016 removes only this key from LEGACY_BASELINE. It becomes the first controlled Engine card and publication candidate. The remaining historical baseline records stay excluded. The migration does not call Meta or publish anything.
