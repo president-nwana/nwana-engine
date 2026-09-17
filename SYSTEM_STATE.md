@@ -299,6 +299,8 @@ Three deterministic 1080x1080 visual compositions are implemented: Stage Leaders
 
 Cloudflare Images now converts the SVG composition to a cached public JPEG. The binding is available on the free Images plan, which includes 5,000 unique transformations per month and does not automatically charge when that free-plan limit is exceeded. The publish endpoint derives the JPEG URL automatically, so image_url is no longer an operator task. Local HTTP development still cannot trigger Meta delivery because the safety guard requires a public HTTPS image. No card or post has been delivered to Meta.
 
+The project owner then confirmed that the September 12, 2026 3K result was not published by the legacy publisher. Migration 0016 removes only publication key `runsignup:series-2026:210000:1178567:666098` from LEGACY_BASELINE. This exact result is the first controlled card and publication candidate; every other baseline record remains excluded. The migration itself publishes nothing.
+
 Next, pull the four-destination and JPEG-card changes, regenerate Wrangler types for the new IMAGES binding, and run the full local tests and type check. Migration 0015 still provides the generic per-destination ledger and does not need another schema change. Then inspect one generated card before any live Meta delivery. The generator must select deterministically from a family of layouts rather than enforce one permanent template. The first real card and first real delivery require owner review; ordinary finalized results may become automatic only after that controlled run succeeds. Do not publish a historical result for testing.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
