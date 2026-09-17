@@ -295,13 +295,26 @@ The rendered draft was verified locally against the September 12 3K result. It c
 
 A guarded Meta delivery path is now implemented for all four verified legacy destinations: Facebook NWANA, Instagram nwana.official, Facebook Nordic Walking Sport, and Instagram n_w_sport. Each destination has an independent delivery-ledger key, so a partial retry skips only accounts that already succeeded. It requires the exact PUBLISH confirmation and a public HTTPS image URL. Migration 0015 adds a per-destination ledger so a retry skips a channel that already succeeded. Historical baseline records remain unpublishable. No live Meta request has been made.
 
-Three deterministic 1080x1080 visual compositions are implemented: Stage Leaders, Performance Level Winners, and Results Spotlight. The selected layout is stable for a publication key, while different results rotate across the family. The card uses verified result data and the official NWANA website logo asset. Facebook delivery creates photo posts rather than link-only feed posts.
+The first geometric SVG result-card family was inspected by the project owner and rejected. It made the athlete name and official result too small, overemphasized generic headings, wasted most of the canvas, and did not match the quality of the existing NWANA result posts. Those layouts are not approved assets and have been removed from the executable card generator.
 
-Cloudflare Images now converts the SVG composition to a cached public JPEG. The binding is available on the free Images plan, which includes 5,000 unique transformations per month and does not automatically charge when that free-plan limit is exceeded. The publish endpoint derives the JPEG URL automatically, so image_url is no longer an operator task. Local HTTP development still cannot trigger Meta delivery because the safety guard requires a public HTTPS image. No card or post has been delivered to Meta.
+Result-card generation and all Series 2026 Meta publication are now explicitly blocked with VISUAL_DESIGN_NOT_APPROVED. No supplied image URL can bypass this block. The publication path stays disabled until an approved visual family exists.
+
+The approved zero-cost direction is:
+
+- use the Gemini app included with Google Workspace for Nonprofits to create a varied family of polished NWANA background compositions;
+- do not let generative AI write athlete names, finishing times, performance levels, dates, or other official result data;
+- have Engine overlay verified result data exactly;
+- make athlete name and official time the dominant, phone-readable elements;
+- keep level and gender clearly visible;
+- keep distance and date prominent but secondary;
+- keep the series name and NWANA logo visible without competing with the athlete result;
+- rotate approved compositions so consecutive result posts do not look identical.
+
+Google Workspace for Nonprofits access does not imply free Gemini Developer API image-generation quota. Therefore Engine must not add a paid Gemini API dependency. Approved backgrounds are created through the included Gemini Workspace application and reused by Engine at $0 operating cost. Cloudflare Images remains available for final zero-cost conversion after the approved assets are installed. No card or post has been delivered to Meta.
 
 The project owner then confirmed that the September 12, 2026 3K result was not published by the legacy publisher. Migration 0016 removes only publication key `runsignup:series-2026:210000:1178567:666098` from LEGACY_BASELINE. This exact result is the first controlled card and publication candidate; every other baseline record remains excluded. The migration itself publishes nothing.
 
-Next, pull the four-destination and JPEG-card changes, regenerate Wrangler types for the new IMAGES binding, and run the full local tests and type check. Migration 0015 still provides the generic per-destination ledger and does not need another schema change. Then inspect one generated card before any live Meta delivery. The generator must select deterministically from a family of layouts rather than enforce one permanent template. The first real card and first real delivery require owner review; ordinary finalized results may become automatic only after that controlled run succeeds. Do not publish a historical result for testing.
+Next, create and approve the Gemini background family, install it in Engine, and implement the exact-data overlay with explicit readability tests for athlete name and finishing time. Then inspect the September 12 controlled card before any live Meta delivery. The first real card and first real delivery require owner review; ordinary finalized results may become automatic only after that controlled run succeeds. Do not publish a historical result for testing.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 
