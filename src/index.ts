@@ -11,6 +11,7 @@ import {
         type DistributionRule,
 } from "./distribution-planner";
 import { applySeries2026PublicationHistory, previewSeries2026ResultPublications } from "./series-2026-results";
+import { getFacebookPageToken, publishFacebookResult, publishInstagramResult } from "./meta-result-publisher";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -5206,6 +5207,155 @@ async function establishSeries2026ResultPublicationBaseline(
 	});
 }
 
+
+interface ResultDeliveryRow {
+	destination: string;
+	status: string;
+	external_id: string | null;
+}
+
+async function getMetaConnectionStatus(env: Env): Promise<Response> {
+	if (!env.NWANA_META_TOKEN) {
+		return json({ ok: false, connected: false, error: "NWANA_META_TOKEN is not configured" }, 503);
+	}
+	await getFacebookPageToken(
+		env.NWANA_META_TOKEN,
+		"595301193675669",
+	);
+	return json({
+		ok: true,
+		connected: true,
+		facebook: "NWANA",
+		instagram: "nwana.official",
+		execution_allowed: false,
+	});
+}
+
+async function saveResultDelivery(
+	db: D1Database,
+	publicationKey: string,
+	destination: string,
+	externalId: string,
+): Promise<void> {
+	await db.prepare(`
+		INSERT INTO result_publication_deliveries (
+			publication_key, destination, status, external_id, published_at
+		) VALUES (?, ?, 'PUBLISHED', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(publication_key, destination) DO UPDATE SET
+			status = 'PUBLISHED',
+			external_id = excluded.external_id,
+			last_error = NULL,
+			published_at = CURRENT_TIMESTAMP,
+			updated_at = CURRENT_TIMESTAMP
+	`).bind(publicationKey, destination, externalId).run();
+}
+
+async function publishSeries2026Result(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	const body = await request.json() as {
+		publication_key?: string;
+		confirmation?: string;
+		image_url?: string;
+	};
+	if (body.confirmation !== "PUBLISH") {
+		return json({ ok: false, error: "Explicit PUBLISH confirmation is required" }, 400);
+	}
+	if (!body.publication_key) {
+		return json({ ok: false, error: "publication_key is required" }, 400);
+	}
+	let imageUrl: URL;
+	try {
+		imageUrl = new URL(body.image_url ?? "");
+		if (imageUrl.protocol !== "https:") throw new Error("HTTPS required");
+	} catch {
+		return json({ ok: false, error: "A public HTTPS image_url is required for Instagram" }, 400);
+	}
+	if (!env.NWANA_META_TOKEN) {
+		return json({ ok: false, error: "NWANA_META_TOKEN is not configured" }, 503);
+	}
+
+	const existing = await env.nwana_engine_db.prepare(`
+		SELECT status FROM result_publication_history
+		WHERE publication_key = ? LIMIT 1
+	`).bind(body.publication_key).first<{ status: string }>();
+	if (existing?.status === "LEGACY_BASELINE") {
+		return json({ ok: false, error: "Historical baseline results cannot be published as new" }, 409);
+	}
+	if (existing?.status === "PUBLISHED") {
+		return json({ ok: true, already_published: true, publication_key: body.publication_key });
+	}
+
+	const preview = await previewSeries2026ResultPublications(env.RUNSIGNUP_ACCESS_TOKEN);
+	const draft = preview.drafts.find((value) => value.publication_key === body.publication_key);
+	if (!draft || !draft.ready_for_editorial_review || !draft.editorial_draft.ready_for_approval) {
+		return json({ ok: false, error: "Publication draft is missing or not ready" }, 409);
+	}
+
+	await env.nwana_engine_db.prepare(`
+		INSERT INTO result_publication_history (
+			publication_key, series, status, race_id, event_id, result_set_id, metadata
+		) VALUES (?, 'SERIES_2026', 'APPROVED', ?, ?, ?, ?)
+		ON CONFLICT(publication_key) DO UPDATE SET
+			status = CASE WHEN status = 'PUBLISHED' THEN status ELSE 'APPROVED' END,
+			metadata = excluded.metadata,
+			updated_at = CURRENT_TIMESTAMP
+	`).bind(
+		draft.publication_key,
+		draft.source.race_id,
+		draft.source.event_id,
+		draft.source.result_set_id,
+		JSON.stringify({ editorial_draft: draft.editorial_draft, image_url: imageUrl.toString() }),
+	).run();
+
+	const deliveryResult = await env.nwana_engine_db.prepare(`
+		SELECT destination, status, external_id
+		FROM result_publication_deliveries
+		WHERE publication_key = ?
+	`).bind(draft.publication_key).all<ResultDeliveryRow>();
+	const delivered = new Map(deliveryResult.results.map((row) => [row.destination, row]));
+	const result: Record<string, unknown> = {};
+
+	if (delivered.get("FACEBOOK_NWANA")?.status === "PUBLISHED") {
+		result.facebook = { skipped_duplicate: true, external_id: delivered.get("FACEBOOK_NWANA")?.external_id };
+	} else {
+		const pageToken = await getFacebookPageToken(env.NWANA_META_TOKEN, "595301193675669");
+		const published = await publishFacebookResult({
+			message: draft.editorial_draft.post_text,
+			link: draft.editorial_draft.link_url as string,
+			pageToken,
+		});
+		await saveResultDelivery(env.nwana_engine_db, draft.publication_key, "FACEBOOK_NWANA", published.external_id);
+		result.facebook = published;
+	}
+
+	if (delivered.get("INSTAGRAM_NWANA_OFFICIAL")?.status === "PUBLISHED") {
+		result.instagram = { skipped_duplicate: true, external_id: delivered.get("INSTAGRAM_NWANA_OFFICIAL")?.external_id };
+	} else {
+		const published = await publishInstagramResult({
+			caption: draft.editorial_draft.post_text,
+			imageUrl: imageUrl.toString(),
+			userToken: env.NWANA_META_TOKEN,
+		});
+		await saveResultDelivery(env.nwana_engine_db, draft.publication_key, "INSTAGRAM_NWANA_OFFICIAL", published.external_id);
+		result.instagram = published;
+	}
+
+	await env.nwana_engine_db.prepare(`
+		UPDATE result_publication_history
+		SET status = 'PUBLISHED', updated_at = CURRENT_TIMESTAMP
+		WHERE publication_key = ?
+	`).bind(draft.publication_key).run();
+
+	return json({
+		ok: true,
+		publication_key: draft.publication_key,
+		status: "PUBLISHED",
+		deliveries: result,
+	});
+}
+
 export default {
 	async fetch(
 		request: Request,
@@ -5246,6 +5396,23 @@ export default {
 					"audit",
 				],
 			});
+		}
+
+		if (request.method === "GET" && url.pathname === "/integrations/meta/status") {
+			try {
+				return await getMetaConnectionStatus(env);
+			} catch (error) {
+				return json({ ok: false, connected: false, error: error instanceof Error ? error.message : "Meta connection failed" }, 502);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/result-publications/publish") {
+			try {
+				return await publishSeries2026Result(request, env);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Result publication failed" }, 500);
+			}
 		}
 
 		if (

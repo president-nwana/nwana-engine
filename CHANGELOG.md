@@ -1,5 +1,15 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-17 — Add guarded Meta result delivery
+
+- Added the existing NWANA Facebook Page and nwana.official Instagram delivery adapter based on the inspected working legacy publisher.
+- Added an exact PUBLISH confirmation requirement and mandatory public HTTPS image URL.
+- Added migration 0015 with a per-destination delivery ledger so retries do not duplicate a channel that already succeeded.
+- Blocked every LEGACY_BASELINE result from the new delivery path.
+- Added a read-only Meta connection check.
+- Added adapter tests; no live Meta request or publication was performed.
+
+
 ## 2026-09-17 — Generate Series 2026 result editorial drafts
 
 - Added deterministic English post copy for finalized result sets.

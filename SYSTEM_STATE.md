@@ -291,7 +291,11 @@ The transition is complete: the 22 existing finalized result sets are history, a
 
 A deterministic English editorial draft is now generated for every result set. For finalized results it includes the event title, every Performance Level + gender winner (Level Place 1), finishing time, and the RunSignup results link. Missing finalization or a missing results URL remains an explicit blocker. Image selection is still unset. Execution remains disabled.
 
-Next, verify the rendered draft locally against real RunSignup data, then define approval and the existing NWANA Facebook/Instagram destination routing. Do not enable sending yet.
+The rendered draft was verified locally against the September 12 3K result. It correctly produced the event title, Albert Fatikhov as the Elite Men winner with 18:25, and the real RunSignup results URL.
+
+A guarded Meta delivery path is now implemented for the existing canonical destinations: Facebook NWANA and Instagram nwana.official. It requires the exact PUBLISH confirmation and a public HTTPS image URL. Migration 0015 adds a per-destination ledger so a retry skips a channel that already succeeded. Historical baseline records remain unpublishable. No live Meta request has been made.
+
+Next, run the full local tests and type check, apply migration 0015 locally, configure NWANA_META_TOKEN as a local Worker secret, and verify the read-only Meta connection endpoint. Do not publish a historical result for testing.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 
