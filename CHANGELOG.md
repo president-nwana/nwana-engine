@@ -1,5 +1,15 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-17 — Reject placeholder result-card design
+
+- Recorded the owner review: the geometric card is not publication quality.
+- Removed the rejected visual layouts from executable card generation.
+- Blocked card rendering and every Series 2026 Meta delivery with VISUAL_DESIGN_NOT_APPROVED.
+- Prevented an operator-supplied image URL from bypassing the design block.
+- Established the $0 visual workflow: create varied approved backgrounds in the Gemini app included with Google Workspace for Nonprofits, then let Engine overlay exact verified results.
+- Established visual hierarchy: athlete name and official time must be dominant and phone-readable; level and gender remain clear; distance and date are secondary; logo and series name do not compete with the result.
+- Kept all four Meta destinations inactive. No live post was made.
+
 ## 2026-09-17 — Reopen unpublished September 12 3K result
 
 - Recorded the owner-confirmed fact that the September 12, 2026 3K result was not published by the legacy publisher.
