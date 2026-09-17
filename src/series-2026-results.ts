@@ -22,6 +22,7 @@ export interface Series2026ResultSetInput {
 	eventName: string | null;
 	resultSetId: number;
 	resultSet: UnknownRecord;
+	resultsPageUrl?: string | null;
 }
 
 function asRecord(value: unknown): UnknownRecord | null {
@@ -59,6 +60,29 @@ function resultValue(result: UnknownRecord, headerKey: string | null): string | 
 	return text(result[headerKey]);
 }
 
+const LEVEL_ORDER = [
+	"Elite",
+	"High Performance",
+	"Performance",
+	"Competitive",
+	"Open",
+] as const;
+
+function levelOrder(value: string | null): number {
+	if (!value) return LEVEL_ORDER.length;
+	const index = LEVEL_ORDER.findIndex((level) => value.startsWith(level));
+	return index === -1 ? LEVEL_ORDER.length : index;
+}
+
+function genderLabel(value: string | null): string {
+	switch (value?.toUpperCase()) {
+		case "M": return "Men";
+		case "F": return "Women";
+		case "X": return "Non-binary";
+		default: return value ?? "Division";
+	}
+}
+
 export function buildSeries2026PublicationDraft(input: Series2026ResultSetInput) {
 	const headers = input.resultSet.results_headers;
 	const levelKey = findHeaderKey(headers, "Performance Level");
@@ -83,6 +107,33 @@ export function buildSeries2026PublicationDraft(input: Series2026ResultSetInput)
 		levelKey !== null &&
 		levelPlaceKey !== null &&
 		rows.every((row) => row.performance_level !== null && row.level_place !== null);
+	const fullResultsUrl =
+		text(input.resultSet.results_source_url) ??
+		text(input.resultsPageUrl);
+	const winners = rows
+		.filter((row) => row.level_place === "1")
+		.sort((left, right) => {
+			const levelDifference =
+				levelOrder(left.performance_level) - levelOrder(right.performance_level);
+			return levelDifference !== 0
+				? levelDifference
+				: (left.gender ?? "").localeCompare(right.gender ?? "");
+		});
+	const winnerLines = winners.map((winner) =>
+		`${winner.performance_level} — ${genderLabel(winner.gender)}: ${winner.athlete}${winner.time ? ` — ${winner.time}` : ""}`
+	);
+	const postText = [
+		"Official Results",
+		input.eventName ?? `NWANA Open ${input.source.distance} Series`,
+		"",
+		...(winnerLines.length > 0
+			? ["Level winners:", ...winnerLines]
+			: []),
+		...(fullResultsUrl
+			? ["", `Full results: ${fullResultsUrl}`]
+			: []),
+	].join("\n");
+
 	const sourceKey = [
 		"runsignup",
 		"series-2026",
@@ -107,6 +158,21 @@ export function buildSeries2026PublicationDraft(input: Series2026ResultSetInput)
 			race_series_year_id: input.source.raceSeriesYearId,
 			event_id: input.eventId,
 			result_set_id: input.resultSetId,
+		},
+		editorial_draft: {
+			status: "DRAFT" as const,
+			title: input.eventName
+				? `${input.eventName} — Official Results`
+				: `NWANA Open ${input.source.distance} Series — Official Results`,
+			post_text: postText,
+			link_url: fullResultsUrl,
+			image_url: null,
+			winner_count: winners.length,
+			ready_for_approval: finalized && fullResultsUrl !== null,
+			blocking_reasons: [
+				...(!finalized ? ["RESULTS_NOT_FINALIZED"] : []),
+				...(fullResultsUrl === null ? ["RESULTS_URL_REQUIRED"] : []),
+			],
 		},
 		content: {
 			title: input.eventName
@@ -180,6 +246,11 @@ export async function previewSeries2026ResultPublications(accessToken: string) {
 					eventName: text(event.name),
 					resultSetId,
 					resultSet,
+					resultsPageUrl:
+						text(resultSet.results_source_url) ??
+						(text(race.url)
+							? `${text(race.url)?.replace(/\/$/, "")}/Results`
+							: null),
 				}));
 			}
 		}

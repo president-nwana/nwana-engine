@@ -1,5 +1,14 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-17 — Generate Series 2026 result editorial drafts
+
+- Added deterministic English post copy for finalized result sets.
+- Included all Level Place 1 winners by Performance Level and gender, with finishing times.
+- Added the RunSignup results page link and explicit blockers when finalization or the link is missing.
+- Kept image selection unset, review required, and execution disabled.
+- Added tests for ready and blocked editorial drafts.
+
+
 ## 2026-09-17 — Establish Series 2026 publication baseline
 
 - Added a local publication-history ledger and migration 0014.

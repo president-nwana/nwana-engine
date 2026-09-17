@@ -15,6 +15,7 @@ describe("Series 2026 result publication handoff", () => {
 			eventId: 123,
 			eventName: "September 5K",
 			resultSetId: 456,
+			resultsPageUrl: "https://runsignup.com/Race/NWANAOpen5K/Results",
 			resultSet: {
 				results_headers: {
 					"custom-field-10": "Performance Level",
@@ -49,6 +50,16 @@ describe("Series 2026 result publication handoff", () => {
 			performance_level: "Elite (< 33:00)",
 			level_place: "1",
 		});
+		expect(draft.editorial_draft).toMatchObject({
+			status: "DRAFT",
+			link_url: "https://runsignup.com/Race/NWANAOpen5K/Results",
+			winner_count: 1,
+			ready_for_approval: true,
+			blocking_reasons: [],
+		});
+		expect(draft.editorial_draft.post_text).toContain(
+			"Elite (< 33:00) — Men: Alex Walker — 00:32:00",
+		);
 	});
 
 	it("does not mark unprocessed results ready", () => {
@@ -65,6 +76,10 @@ describe("Series 2026 result publication handoff", () => {
 
 		expect(draft.ready_for_editorial_review).toBe(false);
 		expect(draft.execution_allowed).toBe(false);
+		expect(draft.editorial_draft).toMatchObject({
+			ready_for_approval: false,
+			blocking_reasons: ["RESULTS_NOT_FINALIZED", "RESULTS_URL_REQUIRED"],
+		});
 		expect(draft.verification).toMatchObject({
 			performance_level_field_found: false,
 			level_place_field_found: false,

@@ -289,7 +289,9 @@ Local baseline verification completed on 2026-09-17:
 
 The transition is complete: the 22 existing finalized result sets are history, and the next genuinely new finalized result will be the first new Engine publication candidate.
 
-Next, define the approved editorial template and destination routing for a new result draft. Do not enable sending yet.
+A deterministic English editorial draft is now generated for every result set. For finalized results it includes the event title, every Performance Level + gender winner (Level Place 1), finishing time, and the RunSignup results link. Missing finalization or a missing results URL remains an explicit blocker. Image selection is still unset. Execution remains disabled.
+
+Next, verify the rendered draft locally against real RunSignup data, then define approval and the existing NWANA Facebook/Instagram destination routing. Do not enable sending yet.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 
