@@ -11,11 +11,12 @@ import {
         type DistributionRule,
 } from "./distribution-planner";
 import { applySeries2026PublicationHistory, previewSeries2026ResultPublications } from "./series-2026-results";
-import { getFacebookPageToken, publishFacebookResult, publishInstagramResult } from "./meta-result-publisher";
+import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
 
 interface Env {
         nwana_engine_db: D1Database;
         RUNSIGNUP_ACCESS_TOKEN: string;
+        NWANA_META_TOKEN: string;
 }
 
 interface CreateObjectRequest {
@@ -5218,15 +5219,25 @@ async function getMetaConnectionStatus(env: Env): Promise<Response> {
 	if (!env.NWANA_META_TOKEN) {
 		return json({ ok: false, connected: false, error: "NWANA_META_TOKEN is not configured" }, 503);
 	}
-	await getFacebookPageToken(
-		env.NWANA_META_TOKEN,
-		"595301193675669",
-	);
+	await Promise.all([
+		getFacebookPageToken(
+			env.NWANA_META_TOKEN,
+			RESULT_DESTINATIONS.facebookNwana.pageId,
+		),
+		getFacebookPageToken(
+			env.NWANA_META_TOKEN,
+			RESULT_DESTINATIONS.facebookNordicWalkingSport.pageId,
+		),
+	]);
 	return json({
 		ok: true,
 		connected: true,
-		facebook: "NWANA",
-		instagram: "nwana.official",
+		destinations: [
+			{ channel: "FACEBOOK", name: RESULT_DESTINATIONS.facebookNwana.name },
+			{ channel: "INSTAGRAM", name: RESULT_DESTINATIONS.instagramNwanaOfficial.name },
+			{ channel: "FACEBOOK", name: RESULT_DESTINATIONS.facebookNordicWalkingSport.name },
+			{ channel: "INSTAGRAM", name: RESULT_DESTINATIONS.instagramNwSport.name },
+		],
 		execution_allowed: false,
 	});
 }
@@ -5317,29 +5328,62 @@ async function publishSeries2026Result(
 	const delivered = new Map(deliveryResult.results.map((row) => [row.destination, row]));
 	const result: Record<string, unknown> = {};
 
-	if (delivered.get("FACEBOOK_NWANA")?.status === "PUBLISHED") {
-		result.facebook = { skipped_duplicate: true, external_id: delivered.get("FACEBOOK_NWANA")?.external_id };
-	} else {
-		const pageToken = await getFacebookPageToken(env.NWANA_META_TOKEN, "595301193675669");
+	const facebookDestinations = [
+		RESULT_DESTINATIONS.facebookNwana,
+		RESULT_DESTINATIONS.facebookNordicWalkingSport,
+	] as const;
+	for (const destination of facebookDestinations) {
+		if (delivered.get(destination.ledgerKey)?.status === "PUBLISHED") {
+			result[destination.ledgerKey] = {
+				skipped_duplicate: true,
+				external_id: delivered.get(destination.ledgerKey)?.external_id,
+			};
+			continue;
+		}
+		const pageToken = await getFacebookPageToken(
+			env.NWANA_META_TOKEN,
+			destination.pageId,
+		);
 		const published = await publishFacebookResult({
+			pageId: destination.pageId,
 			message: draft.editorial_draft.post_text,
 			link: draft.editorial_draft.link_url as string,
 			pageToken,
 		});
-		await saveResultDelivery(env.nwana_engine_db, draft.publication_key, "FACEBOOK_NWANA", published.external_id);
-		result.facebook = published;
+		await saveResultDelivery(
+			env.nwana_engine_db,
+			draft.publication_key,
+			destination.ledgerKey,
+			published.external_id,
+		);
+		result[destination.ledgerKey] = published;
 	}
 
-	if (delivered.get("INSTAGRAM_NWANA_OFFICIAL")?.status === "PUBLISHED") {
-		result.instagram = { skipped_duplicate: true, external_id: delivered.get("INSTAGRAM_NWANA_OFFICIAL")?.external_id };
-	} else {
+	const instagramDestinations = [
+		RESULT_DESTINATIONS.instagramNwanaOfficial,
+		RESULT_DESTINATIONS.instagramNwSport,
+	] as const;
+	for (const destination of instagramDestinations) {
+		if (delivered.get(destination.ledgerKey)?.status === "PUBLISHED") {
+			result[destination.ledgerKey] = {
+				skipped_duplicate: true,
+				external_id: delivered.get(destination.ledgerKey)?.external_id,
+			};
+			continue;
+		}
 		const published = await publishInstagramResult({
+			accountId: destination.accountId,
 			caption: draft.editorial_draft.post_text,
 			imageUrl: imageUrl.toString(),
 			userToken: env.NWANA_META_TOKEN,
 		});
-		await saveResultDelivery(env.nwana_engine_db, draft.publication_key, "INSTAGRAM_NWANA_OFFICIAL", published.external_id);
-		result.instagram = published;
+		await saveResultDelivery(
+			env.nwana_engine_db,
+			draft.publication_key,
+			destination.ledgerKey,
+			published.external_id,
+		);
+		result[destination.ledgerKey] = published;
 	}
 
 	await env.nwana_engine_db.prepare(`
