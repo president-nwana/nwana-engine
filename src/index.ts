@@ -5209,7 +5209,12 @@ async function getSeries2026ResultCard(
 	const output = await env.IMAGES
 		.input(new TextEncoder().encode(svg))
 		.output({ format: "image/jpeg", quality: 90 });
-	return output.response();
+	return output.response({
+		headers: {
+			"Cache-Control":
+				"public, max-age=3600, stale-while-revalidate=86400",
+		},
+	});
 }
 
 async function establishSeries2026ResultPublicationBaseline(
