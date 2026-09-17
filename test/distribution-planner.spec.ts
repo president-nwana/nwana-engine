@@ -19,6 +19,19 @@ const rule = {
 	match_capability_type: "SPONSORSHIP",
 	match_status: "active",
 };
+const capabilities = [
+	{
+		capability_type: "SPONSORSHIP",
+		available: 1,
+		configured: 0,
+		read_state: "unknown",
+		write_state: "unknown",
+		permission_state: "unknown",
+		distribution_eligible: 1,
+		source_platform: "runsignup",
+	},
+];
+
 const audiences = [
 	{ audience_id: "AUD-PARTICIPANTS", rule_id: rule.rule_id, audience_type: "PARTICIPANTS", enabled: 1 },
 	{ audience_id: "AUD-SPONSORS", rule_id: rule.rule_id, audience_type: "SPONSORS", enabled: 1 },
@@ -30,15 +43,20 @@ const actions = [
 
 describe("Stage 8 distribution planner", () => {
 	it("builds a reviewable Series 2026 plan without allowing execution", () => {
-		const plan = buildDistributionPlan({ object, capabilityTypes: ["SPONSORSHIP"], rules: [rule], audiences, actions });
+		const plan = buildDistributionPlan({ object, capabilities, rules: [rule], audiences, actions });
 		expect(plan.mode).toBe("PLAN_ONLY");
 		expect(plan.execution_allowed).toBe(false);
 		expect(plan.summary).toEqual({ matched_rules: 1, audiences: 2, actions: 2 });
+		expect(plan.capabilities[0]).toMatchObject({
+			capability_type: "SPONSORSHIP",
+			platform_available: true,
+			configured_for_object: false,
+		});
 		expect(plan.rules[0]?.audiences[0]?.actions[0]?.action_id).toBe("ACT-FB");
 	});
 
 	it("does not match a rule when the object lacks its required capability", () => {
-		const plan = buildDistributionPlan({ object, capabilityTypes: [], rules: [rule], audiences, actions });
+		const plan = buildDistributionPlan({ object, capabilities: [], rules: [rule], audiences, actions });
 		expect(plan.summary).toEqual({ matched_rules: 0, audiences: 0, actions: 0 });
 	});
 });

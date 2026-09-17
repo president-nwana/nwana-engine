@@ -1,5 +1,5 @@
 ﻿registry_version: 1
-last_updated: "2026-09-16"
+last_updated: "2026-09-17"
 
 objects:
 
@@ -34,8 +34,15 @@ objects:
         verification_status: VERIFIED
 
       registration:
-        available: false
+        platform_available: true
+        configured_for_object: false
+        public_visibility: HIDDEN
+        operational_use: false
         verification_status: VERIFIED
+        note: >
+          RunSignup provides the registration module because this website uses
+          race/nonprofit-event infrastructure. NWANA hides the registration
+          button and does not use this hub as a registration destination.
 
       results:
         available: false
@@ -62,14 +69,15 @@ objects:
       - "This object is the public website/hub for the 2026 NWANA Open Nordic Walking Series."
       - "This object is implemented using RunSignup/TicketSignup nonprofit-event/site infrastructure."
       - "This object is not itself a competition race."
-      - "This object does not provide participant registration."
+      - "RunSignup technically provides a registration module for this container."
+      - "NWANA hides the registration button and does not use this hub for public registration."
       - "This object is not a results container."
       - "Competition results are not stored on this object."
 
     reconciliation_required:
       - "Review current local D1 object_type for NWANA-RACE-000001."
       - "Review current semantic profile for source_id 209464."
-      - "Remove any REGISTRATION capability if assigned to this object."
+      - "Keep REGISTRATION as a platform capability but mark it unconfigured, hidden, and not used operationally."
       - "Remove any RESULTS capability if assigned to this object."
       - "Verify sponsorship and other actual platform capabilities separately."
       - "Decide separately whether the misleading internal object_id requires an explicit migration."

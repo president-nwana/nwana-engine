@@ -7,6 +7,17 @@ export interface DistributionObject {
 	commercial_role: string | null;
 }
 
+export interface DistributionCapability {
+	capability_type: string;
+	available: number;
+	configured: number;
+	read_state: string;
+	write_state: string;
+	permission_state: string;
+	distribution_eligible: number;
+	source_platform: string | null;
+}
+
 export interface DistributionRule {
 	rule_id: string;
 	name: string;
@@ -57,15 +68,19 @@ export function matchesDistributionRule(
 
 export function buildDistributionPlan(params: {
 	object: DistributionObject;
-	capabilityTypes: string[];
+	capabilities: DistributionCapability[];
 	rules: DistributionRule[];
 	audiences: DistributionAudience[];
 	actions: DistributionAction[];
 }) {
-	const capabilities = new Set(params.capabilityTypes);
+	const availableCapabilityTypes = new Set(
+		params.capabilities
+			.filter((capability) => capability.available === 1)
+			.map((capability) => capability.capability_type),
+	);
 	const matchedRules = params.rules
 		.filter((rule) =>
-			matchesDistributionRule(params.object, capabilities, rule),
+			matchesDistributionRule(params.object, availableCapabilityTypes, rule),
 		)
 		.sort((left, right) => left.priority - right.priority)
 		.map((rule) => {
@@ -122,7 +137,23 @@ export function buildDistributionPlan(params: {
 		mode: "PLAN_ONLY" as const,
 		execution_allowed: false as const,
 		object: params.object,
-		capabilities: [...capabilities].sort(),
+		capabilities: params.capabilities
+			.map((capability) => ({
+				capability_type: capability.capability_type,
+				platform_available: capability.available === 1,
+				configured_for_object: capability.configured === 1,
+				distribution_eligible:
+					capability.distribution_eligible === 1,
+				read_state: capability.read_state,
+				write_state: capability.write_state,
+				permission_state: capability.permission_state,
+				source_platform: capability.source_platform,
+			}))
+			.sort((left, right) =>
+				left.capability_type.localeCompare(
+					right.capability_type,
+				),
+			),
 		rules: matchedRules,
 		summary: {
 			matched_rules: matchedRules.length,

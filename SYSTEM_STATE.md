@@ -112,7 +112,7 @@ It is NOT:
 - a participant-registration object
 - a results container
 
-There is no registration on this site/container.
+RunSignup provides a registration module because this site uses race/nonprofit-event infrastructure, but NWANA hides the registration button and does not use this hub as a public registration destination.
 There are no competition results on this site/container.
 
 The existing internal identifier NWANA-RACE-000001 must NOT be interpreted as proof that the external object is a race.
@@ -240,9 +240,11 @@ GitHub currently has no CI status checks. The successful local verification is t
 
 ## CURRENT NEXT ACTION
 
-Exercise the read-only planner against local Stage 8 seed data and inspect the Series 2026 plan. Do not deploy or enable execution.
+Apply migration 0012 locally and exercise the read-only Series 2026 plan again. Do not deploy or enable execution.
 
-Confirm that the returned audiences and actions match NWANA's intended business use and that no duplicate 2026 Meta publication is present.
+The first live plan exposed that the planner collapsed technical platform capability and actual NWANA operational use into one word. The corrected plan must show detailed capability state. For source_id 209464, REGISTRATION must remain platform-available while configured_for_object=false and distribution_eligible=false; the public button is hidden and the hub is not a registration destination.
+
+Confirm that the returned audiences and actions match NWANA's intended business use and that no duplicate 2026 Meta result publication is present.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 
@@ -276,7 +278,8 @@ After the read-only Stage 8 gap audit, propose the smallest working end-to-end i
 
 - Do not seed remote D1 Registry data yet.
 - Do not infer that source_id 209464 is a race.
-- Do not assign REGISTRATION or RESULTS to 209464.
+- Do not treat REGISTRATION as active for 209464: it is platform-available but hidden, unconfigured for NWANA use, and not a public conversion path.
+- Do not treat 209464 as a RESULTS container.
 - Do not infer business meaning from an internal object_id.
 - Do not infer an external object's capabilities from another similar-looking object.
 - Do not create future Challenges or event concepts as existing assets.

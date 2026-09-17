@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
         classifyRunSignupContainer,
+        getRunSignupCapabilitySpecs,
         getRunSignupProgramFamily,
         resolveRunSignupContainerSemantic,
         resolveRunSignupEventSemantic,
@@ -162,5 +163,42 @@ describe("Stage 7 semantic registry", () => {
                 expect(
                         semantic.semantic_profile_applied,
                 ).toBe(false);
+        });
+});
+
+describe("RunSignup Series hub capabilities", () => {
+        it("separates platform availability from NWANA operational use", () => {
+                const capabilities =
+                        getRunSignupCapabilitySpecs(
+                                "COMPETITION_SERIES_HUB",
+                        );
+
+                const byType = new Map(
+                        capabilities.map((capability) => [
+                                capability.capability_type,
+                                capability,
+                        ]),
+                );
+
+                expect(
+                        byType.get("REGISTRATION"),
+                ).toMatchObject({
+                        available: true,
+                        configured: false,
+                        distribution_eligible: false,
+                        metadata: {
+                                public_visibility: "hidden",
+                                operational_use: false,
+                        },
+                });
+                expect(
+                        byType.get("RESULTS")?.available,
+                ).toBe(false);
+                expect(
+                        byType.get("PUBLIC_WEBSITE"),
+                ).toMatchObject({
+                        available: true,
+                        configured: true,
+                });
         });
 });

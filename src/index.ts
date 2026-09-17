@@ -6,6 +6,7 @@ import {
         buildDistributionPlan,
         type DistributionAction,
         type DistributionAudience,
+        type DistributionCapability,
         type DistributionObject,
         type DistributionRule,
 } from "./distribution-planner";
@@ -2268,11 +2269,76 @@ interface ObjectCapabilitySpec {
         metadata?: unknown;
 }
 
-function getRunSignupCapabilitySpecs(
+export function getRunSignupCapabilitySpecs(
         classification: string,
 ): ObjectCapabilitySpec[] {
         switch (classification) {
                 case "COMPETITION_SERIES_HUB":
+                        return [
+                                {
+                                        capability_type: "PUBLIC_WEBSITE",
+                                        available: true,
+                                        configured: true,
+                                        read_state: "available",
+                                        write_state: "permission-dependent",
+                                        permission_state: "pending",
+                                        distribution_eligible: true,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "verified-public-hub",
+                                        },
+                                },
+                                {
+                                        capability_type: "REGISTRATION",
+                                        available: true,
+                                        configured: false,
+                                        read_state: "available",
+                                        write_state: "permission-dependent",
+                                        permission_state: "pending",
+                                        distribution_eligible: false,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "platform-capability",
+                                                public_visibility:
+                                                        "hidden",
+                                                operational_use:
+                                                        false,
+                                        },
+                                },
+                                {
+                                        capability_type: "RESULTS",
+                                        available: false,
+                                        configured: false,
+                                        read_state: "unavailable",
+                                        write_state: "unavailable",
+                                        permission_state: "not_applicable",
+                                        distribution_eligible: false,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "verified-not-results-container",
+                                        },
+                                },
+                                {
+                                        capability_type: "SPONSORSHIP",
+                                        available: true,
+                                        configured: false,
+                                        read_state: "unknown",
+                                        write_state: "unknown",
+                                        permission_state: "unknown",
+                                        distribution_eligible: true,
+                                        source_platform: "runsignup",
+                                        metadata: {
+                                                evidence:
+                                                        "platform-capability",
+                                                configuration_detection:
+                                                        "not-yet-connected",
+                                        },
+                                },
+                        ];
+
                 case "COMPETITION_DISTANCE_SERIES":
                 case "COMPETITION_PROPERTY":
                         return [
@@ -4993,10 +5059,13 @@ async function getDistributionPlan(
 
         const [capabilities, rules, audiences, actions] = await Promise.all([
                 db.prepare(`
-                        SELECT capability_type
+                        SELECT capability_type, available, configured,
+                               read_state, write_state, permission_state,
+                               distribution_eligible, source_platform
                         FROM object_capabilities
-                        WHERE object_id = ? AND available = 1
-                `).bind(objectId).all<{ capability_type: string }>(),
+                        WHERE object_id = ?
+                        ORDER BY capability_type ASC
+                `).bind(objectId).all<DistributionCapability>(),
                 db.prepare(`
                         SELECT rule_id, name, priority, match_object_type,
                                match_program_family, match_commercial_role,
@@ -5024,9 +5093,7 @@ async function getDistributionPlan(
                 ok: true,
                 ...buildDistributionPlan({
                         object,
-                        capabilityTypes: capabilities.results.map(
-                                (capability) => capability.capability_type,
-                        ),
+                        capabilities: capabilities.results,
                         rules: rules.results,
                         audiences: audiences.results,
                         actions: actions.results,

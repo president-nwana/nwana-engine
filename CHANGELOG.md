@@ -6,6 +6,16 @@ It is not a substitute for Git history, SYSTEM_STATE.md, or Architecture Decisio
 
 ## 2026-09-17
 
+### Platform Capability Versus Operational Use
+
+- Corrected the Series 2026 hub model after the first live planner inspection.
+- Preserved REGISTRATION as a technical RunSignup capability while recording that NWANA hides it and does not use the hub as a registration destination.
+- Added detailed capability state to distribution plans instead of returning bare capability names.
+- Added PUBLIC_WEBSITE and explicit non-results state for the hub.
+- Added migration 0012 and regression tests.
+- Corrected the canonical Registry and SYSTEM_STATE so future sessions retain this distinction.
+- No deployment, remote D1 write, publication, or external-channel action occurred.
+
 ### Plan Only Distribution Planner
 
 - Added a general rule matcher and distribution-plan builder.
