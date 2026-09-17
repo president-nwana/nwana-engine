@@ -5206,8 +5206,14 @@ async function getSeries2026ResultCard(
 			},
 		});
 	}
+	const svgStream = new Response(svg, {
+		headers: { "content-type": "image/svg+xml" },
+	}).body;
+	if (!svgStream) {
+		throw new Error("Result card stream could not be created");
+	}
 	const output = await env.IMAGES
-		.input(new TextEncoder().encode(svg))
+		.input(svgStream)
 		.output({ format: "image/jpeg", quality: 90 });
 	return output.response({
 		headers: {
