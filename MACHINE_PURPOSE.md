@@ -72,15 +72,17 @@ Registry work is supporting work, not the product goal. Reconcile or add an exte
 
 ## Series 2026 legacy boundary
 
-Series 2026 already has a separate working Windows/PowerShell process created before NWANA Engine. According to the project owner, the existing files receive competition results, assign speed levels, and one component publishes through Meta.
+Series 2026 already has separate working Windows/PowerShell components created before NWANA Engine. According to the project owner, result processing/level assignment and Meta publication are launched independently.
 
-Treat this as an existing legacy production process:
+The accepted transition boundary is:
 
-- do not rewrite it merely to move it into NWANA Engine;
-- do not alter its 2026 level formulas without explicit verification and approval;
-- do not create duplicate Meta publication from NWANA Engine;
+- keep the existing 2026 result-processing and speed-level logic;
+- do not alter its 2026 formulas without explicit verification and approval;
+- stop launching the separate legacy Meta publisher;
+- make NWANA Engine the single future publisher and distributor of finalized Series 2026 results;
+- keep Engine publication disabled until its result input, task, approval, and delivery path are implemented and verified;
 - preserve Series 2026 as its own versioned processing behavior;
-- NWANA Engine may ingest or use its finalized outputs for relationships, standings, rankings, media, sponsorship, and later actions.
+- NWANA Engine may ingest finalized outputs for publication, relationships, standings, rankings, media, sponsorship, and later actions.
 
 The exact filenames, invocation order, inputs, outputs, dependencies, and credential handling must be documented only after the actual files are inspected. Do not infer those details from screenshots.
 

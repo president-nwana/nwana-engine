@@ -6,6 +6,23 @@ It is not a substitute for Git history, SYSTEM_STATE.md, or Architecture Decisio
 
 ## 2026-09-17
 
+### Series 2026 Result Publication Ownership
+
+- Recorded the project-owner decision that legacy result processing/level assignment and legacy Meta publication are independent launches.
+- Preserved the existing 2026 result-processing and speed-level logic.
+- Retired the separate legacy Meta publisher from future operation rather than running two publishers.
+- Assigned NWANA Engine as the single future publisher and distributor of finalized Series 2026 results.
+- Kept Engine publication disabled until the actual finalized-output input, review task, approval boundary, and channel delivery are implemented and verified.
+- Added ADR-0005 for the decision.
+
+### Local Planner Verification
+
+- Applied migration 0012 successfully to local D1.
+- Vitest passed: 2 test files, 7/7 tests.
+- npx tsc --noEmit passed.
+- Verified the live local plan: PLAN_ONLY, execution_allowed=false, 1 matched rule, 4 audiences, and 10 actions.
+- Verified REGISTRATION is platform-available but not configured or distribution-eligible for the Series 2026 hub.
+
 ### Platform Capability Versus Operational Use
 
 - Corrected the Series 2026 hub model after the first live planner inspection.

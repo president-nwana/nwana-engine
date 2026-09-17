@@ -41,8 +41,8 @@ Branch:
 main
 
 Latest implementation commit:
-a1de3805b066d31f687e8c5962b3d0b2ba820af0
-Add plan-only distribution planner
+84e0448e34f14797e99627dcce0ba9d42061a69a
+Separate platform capability from operational use
 
 Previous verified Stage 8 implementation commit:
 149ce1df88f2d32deec17cb3f5ff811e6fbb2bf5
@@ -177,9 +177,15 @@ Do not pre-build every possible future RunSignup/TicketSignup adapter.
 
 ## SERIES 2026 LEGACY PROCESS BOUNDARY
 
-Series 2026 already has a separate working Windows/PowerShell process created before NWANA Engine. The project owner states that the existing files receive results, assign speed levels, and one component publishes through Meta.
+Series 2026 has separate Windows/PowerShell components created before NWANA Engine. The project owner verified that result processing/level assignment and Meta publication are launched independently.
 
-Keep that process separate for 2026. Do not rewrite it, change its formulas, or duplicate its Meta publication without explicit verification and approval. Exact file behavior must be documented only after the actual files are inspected.
+Accepted decision on 2026-09-17:
+
+- continue using the existing 2026 result-processing and speed-level component;
+- stop launching the separate legacy Meta publication component;
+- NWANA Engine becomes the single future publisher and distributor of finalized Series 2026 results;
+- Engine remains PLAN_ONLY and must not send results until the finalized-output input, publication task, approval boundary, and delivery path are implemented and verified;
+- exact file inputs, outputs, invocation, and credential handling must still be documented from the actual files rather than inferred from screenshots.
 
 Series 2027 will use a new, substantially expanded and changed level system implemented inside NWANA Engine under its own processing profile.
 
@@ -240,11 +246,17 @@ GitHub currently has no CI status checks. The successful local verification is t
 
 ## CURRENT NEXT ACTION
 
-Apply migration 0012 locally and exercise the read-only Series 2026 plan again. Do not deploy or enable execution.
+The corrected Series 2026 planner was verified locally on 2026-09-17:
 
-The first live plan exposed that the planner collapsed technical platform capability and actual NWANA operational use into one word. The corrected plan must show detailed capability state. For source_id 209464, REGISTRATION must remain platform-available while configured_for_object=false and distribution_eligible=false; the public button is hidden and the hub is not a registration destination.
+- migration 0012 executed successfully locally;
+- Vitest passed: 2 test files, 7/7 tests;
+- npx tsc --noEmit passed;
+- the live local plan returned detailed capability state;
+- REGISTRATION remained platform-available but configured_for_object=false and distribution_eligible=false;
+- mode remained PLAN_ONLY and execution_allowed=false;
+- the plan returned 1 rule, 4 audiences, and 10 actions.
 
-Confirm that the returned audiences and actions match NWANA's intended business use and that no duplicate 2026 Meta result publication is present.
+Next, define reviewable work items for the 10 Series-hub distribution actions and a separate finalized-result publication path. The result-publication path must target NWANA Engine as the future single publisher, while the independent legacy publisher is no longer launched. Do not enable sending yet.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 
@@ -270,7 +282,7 @@ Required implementation order:
 
 Do not create Free Challenges, Series 2027, U.S. Championships, or Continental Championships until the existing assets operate inside the connected Rules and Distribution Engine.
 
-For Series 2026, preserve the separate legacy result-level and Meta-publication process. NWANA Engine must not duplicate its processing or publication. Inspect the actual legacy files before documenting exact invocation details or integrating their finalized outputs.
+For Series 2026, preserve the legacy result-processing and speed-level component. Do not launch the separate legacy Meta publisher. NWANA Engine is the future single result publisher, but remains PLAN_ONLY until the actual files and finalized output are inspected and the publication path is verified.
 
 After the read-only Stage 8 gap audit, propose the smallest working end-to-end improvement. Do not mass-populate registry/objects.yaml.
 
@@ -287,7 +299,9 @@ After the read-only Stage 8 gap audit, propose the smallest working end-to-end i
 - Do not redesign the universal Registry merely to support a future RunSignup/TicketSignup feature that can be represented as another object, relationship, capability, semantic profile, or adapter.
 - Do not treat Registry reconciliation as the product goal.
 - Do not mass-populate Registry objects without a real processing, rule, distribution, revenue, sponsorship, funding, or next-object use.
-- Do not rewrite the separate Series 2026 PowerShell process or duplicate its Meta publication.
+- Do not rewrite the Series 2026 result-processing/level logic.
+- Do not launch the separate legacy Meta publisher after Engine publication is adopted.
+- Do not enable Engine result sending before its finalized-output input and delivery path are verified.
 - Do not apply Series 2026 level formulas automatically to Series 2027.
 
 ## SESSION CLOSE RULE
