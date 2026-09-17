@@ -15,6 +15,7 @@ export interface ResultCardInput {
 	title: string;
 	distance: string;
 	winners: ResultCardWinner[];
+	logoUrl?: string;
 }
 
 const NWANA_LOGO_URL =
@@ -121,7 +122,7 @@ export function buildResultCardSvg(input: ResultCardInput): string {
 		<path d="M0 0H1080V34H0Z" fill="${palette.accent}"/>
 		<path d="M780 0H1080V1080H955Z" fill="${palette.secondary}" opacity=".18"/>
 		<circle cx="950" cy="145" r="190" fill="${palette.accent}" opacity=".12"/>
-		<image href="${NWANA_LOGO_URL}" x="90" y="65" width="290" height="110" preserveAspectRatio="xMinYMid meet"/>
+		<image href="${escapeXml(input.logoUrl ?? NWANA_LOGO_URL)}" x="90" y="65" width="290" height="110" preserveAspectRatio="xMinYMid meet"/>
 		<text x="90" y="215" class="eyebrow">${palette.eyebrow}</text>
 		${title}
 		<rect x="90" y="425" width="155" height="6" rx="3" fill="${palette.accent}"/>
