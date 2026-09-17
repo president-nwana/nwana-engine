@@ -12,7 +12,7 @@ import {
 } from "./distribution-planner";
 import { applySeries2026PublicationHistory, previewSeries2026ResultPublications } from "./series-2026-results";
 import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
-import { buildResultCardSvg } from "./result-card";
+import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -5156,6 +5156,14 @@ async function getSeries2026ResultCard(
 	format: "svg" | "jpeg",
 	env: Env,
 ): Promise<Response> {
+	if (!isResultCardDesignReady()) {
+		return json({
+			ok: false,
+			status: "VISUAL_DESIGN_NOT_APPROVED",
+			execution_allowed: false,
+			error: RESULT_CARD_DESIGN_BLOCKER,
+		}, 409);
+	}
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
 	);
@@ -5350,6 +5358,14 @@ async function publishSeries2026Result(
 	}
 	if (!body.publication_key) {
 		return json({ ok: false, error: "publication_key is required" }, 400);
+	}
+	if (!isResultCardDesignReady()) {
+		return json({
+			ok: false,
+			status: "VISUAL_DESIGN_NOT_APPROVED",
+			execution_allowed: false,
+			error: RESULT_CARD_DESIGN_BLOCKER,
+		}, 409);
 	}
 	let imageUrl: URL;
 	try {
