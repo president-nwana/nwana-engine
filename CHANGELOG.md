@@ -1,5 +1,14 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-17 — Expand guarded result delivery to four Meta accounts
+
+- Added Facebook Nordic Walking Sport and Instagram n_w_sport alongside Facebook NWANA and Instagram nwana.official.
+- Made the Meta adapters destination-aware instead of hard-coding a single Facebook Page and Instagram account.
+- Kept a separate idempotency ledger key for every account so partial retries cannot duplicate successful posts.
+- Expanded the read-only connection check to verify both Facebook Page tokens and report all four destinations.
+- Recorded that result posts require branded images from a rotating family of deterministic layouts.
+- No live Meta request or publication was performed.
+
 ## 2026-09-17 — Add guarded Meta result delivery
 
 - Added the existing NWANA Facebook Page and nwana.official Instagram delivery adapter based on the inspected working legacy publisher.
