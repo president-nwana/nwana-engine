@@ -1,5 +1,13 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-17 — Reopen unpublished September 12 3K result
+
+- Recorded the owner-confirmed fact that the September 12, 2026 3K result was not published by the legacy publisher.
+- Added migration 0016 to remove only publication key runsignup:series-2026:210000:1178567:666098 from LEGACY_BASELINE.
+- Selected this result as the first controlled Engine card and publication candidate.
+- Left all other historical baseline records excluded.
+- The migration does not call Meta or publish anything.
+
 ## 2026-09-17 — Render public JPEG result cards
 
 - Added the Cloudflare Images binding and cache for zero-cost result-card conversion within the free monthly allowance.
