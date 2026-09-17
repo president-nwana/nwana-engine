@@ -5391,7 +5391,7 @@ async function publishSeries2026Result(
 		const published = await publishFacebookResult({
 			pageId: destination.pageId,
 			message: draft.editorial_draft.post_text,
-			link: draft.editorial_draft.link_url as string,
+			imageUrl: imageUrl.toString(),
 			pageToken,
 		});
 		await saveResultDelivery(
