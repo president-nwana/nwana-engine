@@ -2,6 +2,13 @@ import { buildDetachedOtsProof } from "./ots-proof";
 import { ensurePendingProofAnchor } from "./trust";
 import { getDefaultProofProvider, getProofProvider } from "./proof-providers";
 import { RunSignupSource } from "./sources/runsignup-source";
+import {
+        buildDistributionPlan,
+        type DistributionAction,
+        type DistributionAudience,
+        type DistributionObject,
+        type DistributionRule,
+} from "./distribution-planner";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -4960,6 +4967,73 @@ async function listRelationships(
 	});
 }
 
+
+async function getDistributionPlan(
+        objectId: string,
+        env: Env,
+): Promise<Response> {
+        const db = env.nwana_engine_db;
+        const object = await db
+                .prepare(`
+                        SELECT object_id, object_type, title, status,
+                               program_family, commercial_role
+                        FROM objects
+                        WHERE object_id = ?
+                        LIMIT 1
+                `)
+                .bind(objectId)
+                .first<DistributionObject>();
+
+        if (!object) {
+                return json(
+                        { ok: false, error: "Object not found", object_id: objectId },
+                        404,
+                );
+        }
+
+        const [capabilities, rules, audiences, actions] = await Promise.all([
+                db.prepare(`
+                        SELECT capability_type
+                        FROM object_capabilities
+                        WHERE object_id = ? AND available = 1
+                `).bind(objectId).all<{ capability_type: string }>(),
+                db.prepare(`
+                        SELECT rule_id, name, priority, match_object_type,
+                               match_program_family, match_commercial_role,
+                               match_capability_type, match_status
+                        FROM rules
+                        WHERE enabled = 1
+                        ORDER BY priority ASC, id ASC
+                `).all<DistributionRule>(),
+                db.prepare(`
+                        SELECT audience_id, rule_id, audience_type, enabled
+                        FROM rule_audiences
+                        WHERE enabled = 1
+                        ORDER BY id ASC
+                `).all<DistributionAudience>(),
+                db.prepare(`
+                        SELECT action_id, rule_id, audience_id, action_type,
+                               channel, destination, execution_mode, priority, enabled
+                        FROM rule_actions
+                        WHERE enabled = 1
+                        ORDER BY priority ASC, id ASC
+                `).all<DistributionAction>(),
+        ]);
+
+        return json({
+                ok: true,
+                ...buildDistributionPlan({
+                        object,
+                        capabilityTypes: capabilities.results.map(
+                                (capability) => capability.capability_type,
+                        ),
+                        rules: rules.results,
+                        audiences: audiences.results,
+                        actions: actions.results,
+                }),
+        });
+}
+
 export default {
 	async fetch(
 		request: Request,
@@ -5012,6 +5086,38 @@ export default {
 				timestamp:
 					new Date().toISOString(),
 			});
+		}
+
+		if (
+			request.method === "GET" &&
+			url.pathname.startsWith("/distribution/plan/")
+		) {
+			const objectId = decodeURIComponent(
+				url.pathname.slice("/distribution/plan/".length),
+			);
+
+			if (!objectId) {
+				return json(
+					{ ok: false, error: "Object ID is required" },
+					400,
+				);
+			}
+
+			try {
+				return await getDistributionPlan(objectId, env);
+			} catch (error) {
+				console.error(error);
+				return json(
+					{
+						ok: false,
+						error:
+							error instanceof Error
+								? error.message
+								: "Unknown distribution planning error",
+					},
+					500,
+				);
+			}
 		}
 
 		if (
