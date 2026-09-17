@@ -12,6 +12,7 @@ import {
 } from "./distribution-planner";
 import { applySeries2026PublicationHistory, previewSeries2026ResultPublications } from "./series-2026-results";
 import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
+import { buildResultCardSvg } from "./result-card";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -5148,6 +5149,49 @@ async function getSeries2026ResultPublicationPreview(
 	});
 }
 
+
+async function getSeries2026ResultCard(
+	publicationKey: string,
+	env: Env,
+): Promise<Response> {
+	const preview = await previewSeries2026ResultPublications(
+		env.RUNSIGNUP_ACCESS_TOKEN,
+	);
+	const draft = preview.drafts.find(
+		(value) => value.publication_key === publicationKey,
+	);
+	if (!draft) {
+		return json({ ok: false, error: "Result publication draft not found" }, 404);
+	}
+	if (!draft.ready_for_editorial_review) {
+		return json({ ok: false, error: "Results are not finalized" }, 409);
+	}
+	const winners = draft.content.results
+		.filter((row) => row.level_place === "1")
+		.map((row) => ({
+			athlete: row.athlete,
+			gender: row.gender === "M"
+				? "Men"
+				: row.gender === "F"
+					? "Women"
+					: row.gender ?? "Division",
+			time: row.time,
+			performance_level: row.performance_level,
+		}));
+	const svg = buildResultCardSvg({
+		publicationKey: draft.publication_key,
+		title: draft.editorial_draft.title,
+		distance: draft.source.distance,
+		winners,
+	});
+	return new Response(svg, {
+		headers: {
+			"content-type": "image/svg+xml; charset=utf-8",
+			"cache-control": "public, max-age=3600",
+		},
+	});
+}
+
 async function establishSeries2026ResultPublicationBaseline(
 	env: Env,
 ): Promise<Response> {
@@ -5447,6 +5491,31 @@ export default {
 				return await getMetaConnectionStatus(env);
 			} catch (error) {
 				return json({ ok: false, connected: false, error: error instanceof Error ? error.message : "Meta connection failed" }, 502);
+			}
+		}
+
+
+		if (
+			request.method === "GET" &&
+			url.pathname.startsWith("/result-publications/card/") &&
+			url.pathname.endsWith(".svg")
+		) {
+			const publicationKey = decodeURIComponent(
+				url.pathname.slice(
+					"/result-publications/card/".length,
+					-".svg".length,
+				),
+			);
+			try {
+				return await getSeries2026ResultCard(publicationKey, env);
+			} catch (error) {
+				console.error(error);
+				return json({
+					ok: false,
+					error: error instanceof Error
+						? error.message
+						: "Result card generation failed",
+				}, 500);
 			}
 		}
 
