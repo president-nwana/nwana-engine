@@ -1,5 +1,15 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-17 — Series 2026 finalized-result handoff preview
+
+- Inspected the actual legacy launcher, result processor, and retired Meta publisher.
+- Confirmed that RunSignup is the durable handoff: the legacy processor writes Performance Level, Level Place, and standings back to RunSignup.
+- Added a read-only preview for the six verified Series 2026 distance races.
+- Added deterministic draft publication records with stable publication keys for later duplicate prevention.
+- Kept every draft in PLAN_ONLY mode with required review and execution disabled.
+- Added tests for finalized and unprocessed result sets.
+- Did not add Meta delivery, automatic publication, D1 writes, deployment, or remote seeding.
+
 This file records significant implementation and system-state milestones.
 
 It is not a substitute for Git history, SYSTEM_STATE.md, or Architecture Decision Records.

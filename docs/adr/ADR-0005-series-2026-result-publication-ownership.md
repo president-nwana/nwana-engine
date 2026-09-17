@@ -39,6 +39,16 @@ For Series 2026:
 - Until the Engine publication path is verified, no automatic result post is sent.
 - The legacy publisher remains available as historical code but is not the operating publication path after the transition.
 
-## Evidence Boundary
+## Verified legacy handoff evidence
 
-This decision records facts supplied directly by the project owner. Exact filenames, parameters, input/output formats, invocation sequence, and credential handling must be documented only after the actual files are inspected.
+The actual files were inspected on 2026-09-17 without executing them:
+
+- `NWANA-RUN.bat` only launches `NWANA-FINAL.ps1` from the Windows Desktop.
+- `NWANA-FINAL.ps1` reads a RunSignup bearer token from `nwana-runsignup-token.json` on the Desktop.
+- It reads the six Series 2026 distance races from RunSignup, assigns Performance Level and Level Place, calculates category points, and writes the finalized values and standings back to RunSignup.
+- The six verified race IDs are 209980, 210000, 209477, 210018, 210016, and 210020 for 1K, 3K, 5K, 10K, 15K, and 20K respectively.
+- Temporary JSON request files are written under the Windows temporary directory; they are transport files, not the durable handoff to Engine.
+- `Publish-NWANA.ps1` is a separate generic manual Meta publisher. It reads `NWANA_META_TOKEN` from the environment and asks the operator for title, text, link, image URL, target selection, and an explicit `YES` confirmation.
+- Neither `NWANA-RUN.bat` nor `NWANA-FINAL.ps1` invokes `Publish-NWANA.ps1`.
+
+Therefore the durable handoff is RunSignup itself: Engine reads the already updated result sets and recognizes finalized results through the populated `Performance Level` and `Level Place` fields. No legacy script file is uploaded to Engine and no credential is copied into the repository.

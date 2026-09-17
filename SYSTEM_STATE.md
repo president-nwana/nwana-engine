@@ -40,9 +40,9 @@ president-nwana/nwana-engine
 Branch:
 main
 
-Latest implementation commit:
-84e0448e34f14797e99627dcce0ba9d42061a69a
-Separate platform capability from operational use
+Latest base commit reviewed before the current Series 2026 handoff implementation:
+0cf74e8dafc4440318bd31f5151ffe5e4f897d50
+Record verified Series hub work items
 
 Previous verified Stage 8 implementation commit:
 149ce1df88f2d32deec17cb3f5ff811e6fbb2bf5
@@ -266,7 +266,15 @@ Migration 0013 and the Series 2026 work items were verified locally on 2026-09-1
 - every work item had requires_review=true and execution_allowed=false;
 - the plan remained PLAN_ONLY with execution_allowed=false.
 
-Next, inspect the actual Series 2026 result-processing and retired publication files to define the finalized-result handoff into NWANA Engine. The result-publication path must target NWANA Engine as the future single publisher. Do not enable sending yet.
+The actual Series 2026 legacy files were inspected on 2026-09-17. The verified handoff is RunSignup, not a local output file: `NWANA-FINAL.ps1` writes Performance Level, Level Place, and standings back to RunSignup. `NWANA-RUN.bat` only starts that processor. `Publish-NWANA.ps1` is separate, manual, and is not called by either processing file.
+
+A read-only Engine preview endpoint is now implemented:
+
+GET /sources/runsignup/series-2026/results-preview
+
+It reads the six verified Series 2026 distance races, recognizes a result set as finalized only when every result has both Performance Level and Level Place, and returns deterministic DRAFT publication records. Every draft requires review, execution_allowed remains false, and no Meta delivery code is present.
+
+Next, verify the endpoint locally against real finalized RunSignup data. After the returned draft shape is checked, define the approved editorial template and destination routing. Do not enable sending yet.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 

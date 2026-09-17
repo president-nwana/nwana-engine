@@ -10,6 +10,7 @@ import {
         type DistributionObject,
         type DistributionRule,
 } from "./distribution-planner";
+import { previewSeries2026ResultPublications } from "./series-2026-results";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -5154,6 +5155,31 @@ export default {
 				timestamp:
 					new Date().toISOString(),
 			});
+		}
+
+		if (
+			request.method === "GET" &&
+			url.pathname === "/sources/runsignup/series-2026/results-preview"
+		) {
+			try {
+				return json(
+					await previewSeries2026ResultPublications(
+						env.RUNSIGNUP_ACCESS_TOKEN,
+					),
+				);
+			} catch (error) {
+				console.error(error);
+				return json(
+					{
+						ok: false,
+						error:
+							error instanceof Error
+								? error.message
+								: "Unknown Series 2026 result preview error",
+					},
+					500,
+				);
+			}
 		}
 
 		if (

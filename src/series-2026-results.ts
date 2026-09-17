@@ -1,0 +1,199 @@
+export interface Series2026Source {
+	distance: string;
+	raceId: number;
+	raceSeriesId: number;
+	raceSeriesYearId: number;
+}
+
+export const SERIES_2026_SOURCES: readonly Series2026Source[] = [
+	{ distance: "1K", raceId: 209980, raceSeriesId: 1444, raceSeriesYearId: 2110 },
+	{ distance: "3K", raceId: 210000, raceSeriesId: 1447, raceSeriesYearId: 2112 },
+	{ distance: "5K", raceId: 209477, raceSeriesId: 1439, raceSeriesYearId: 2102 },
+	{ distance: "10K", raceId: 210018, raceSeriesId: 1449, raceSeriesYearId: 2114 },
+	{ distance: "15K", raceId: 210016, raceSeriesId: 1448, raceSeriesYearId: 2113 },
+	{ distance: "20K", raceId: 210020, raceSeriesId: 1450, raceSeriesYearId: 2115 },
+] as const;
+
+type UnknownRecord = Record<string, unknown>;
+
+export interface Series2026ResultSetInput {
+	source: Series2026Source;
+	eventId: number;
+	eventName: string | null;
+	resultSetId: number;
+	resultSet: UnknownRecord;
+}
+
+function asRecord(value: unknown): UnknownRecord | null {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? value as UnknownRecord
+		: null;
+}
+
+function text(value: unknown): string | null {
+	if (value === null || value === undefined) return null;
+	const normalized = String(value).trim();
+	return normalized.length > 0 ? normalized : null;
+}
+
+function headerLabel(value: unknown): string | null {
+	const direct = text(value);
+	if (direct && typeof value !== "object") return direct;
+	const record = asRecord(value);
+	if (!record) return null;
+	return text(record.column_text ?? record.label ?? record.name ?? record.field_name);
+}
+
+function findHeaderKey(headers: unknown, expectedLabel: string): string | null {
+	const record = asRecord(headers);
+	if (!record) return null;
+	const wanted = expectedLabel.toLowerCase();
+	for (const [key, value] of Object.entries(record)) {
+		if (headerLabel(value)?.toLowerCase() === wanted) return key;
+	}
+	return null;
+}
+
+function resultValue(result: UnknownRecord, headerKey: string | null): string | null {
+	if (!headerKey) return null;
+	return text(result[headerKey]);
+}
+
+export function buildSeries2026PublicationDraft(input: Series2026ResultSetInput) {
+	const headers = input.resultSet.results_headers;
+	const levelKey = findHeaderKey(headers, "Performance Level");
+	const levelPlaceKey = findHeaderKey(headers, "Level Place");
+	const rawResults = Array.isArray(input.resultSet.results)
+		? input.resultSet.results
+		: [];
+	const rows = rawResults
+		.map(asRecord)
+		.filter((result): result is UnknownRecord => result !== null)
+		.map((result) => ({
+			result_id: text(result.result_id),
+			athlete: [text(result.first_name), text(result.last_name)].filter(Boolean).join(" "),
+			gender: text(result.gender),
+			time: text(result.chip_time) ?? text(result.clock_time),
+			performance_level: resultValue(result, levelKey),
+			level_place: resultValue(result, levelPlaceKey),
+		}));
+
+	const finalized =
+		rows.length > 0 &&
+		levelKey !== null &&
+		levelPlaceKey !== null &&
+		rows.every((row) => row.performance_level !== null && row.level_place !== null);
+	const sourceKey = [
+		"runsignup",
+		"series-2026",
+		input.source.raceId,
+		input.eventId,
+		input.resultSetId,
+	].join(":");
+
+	return {
+		publication_key: sourceKey,
+		status: "DRAFT" as const,
+		mode: "PLAN_ONLY" as const,
+		execution_allowed: false as const,
+		requires_review: true as const,
+		ready_for_editorial_review: finalized,
+		source: {
+			platform: "RUNSIGNUP" as const,
+			season: 2026,
+			distance: input.source.distance,
+			race_id: input.source.raceId,
+			race_series_id: input.source.raceSeriesId,
+			race_series_year_id: input.source.raceSeriesYearId,
+			event_id: input.eventId,
+			result_set_id: input.resultSetId,
+		},
+		content: {
+			title: input.eventName
+				? `${input.eventName} — Results`
+				: `NWANA Open ${input.source.distance} Series — Results`,
+			content_scope: "SERIES_2026_RESULTS" as const,
+			results: rows,
+		},
+		verification: {
+			result_count: rows.length,
+			performance_level_field_found: levelKey !== null,
+			level_place_field_found: levelPlaceKey !== null,
+			all_results_finalized: finalized,
+		},
+	};
+}
+
+async function getJson(url: URL, accessToken: string): Promise<UnknownRecord> {
+	const response = await fetch(url, {
+		headers: { Authorization: `Bearer ${accessToken}` },
+	});
+	if (!response.ok) {
+		throw new Error(`RunSignup request failed: ${response.status} ${response.statusText}`);
+	}
+	return await response.json() as UnknownRecord;
+}
+
+export async function previewSeries2026ResultPublications(accessToken: string) {
+	const drafts = [];
+	for (const source of SERIES_2026_SOURCES) {
+		const raceUrl = new URL(`https://api.runsignup.com/rest/race/${source.raceId}`);
+		raceUrl.searchParams.set("format", "json");
+		raceUrl.searchParams.set("events", "T");
+		const raceResponse = await getJson(raceUrl, accessToken);
+		const race = asRecord(raceResponse.race);
+		const events = race && Array.isArray(race.events) ? race.events : [];
+
+		for (const rawEvent of events) {
+			const event = asRecord(rawEvent);
+			const eventId = Number(event?.event_id);
+			if (!event || !Number.isInteger(eventId)) continue;
+
+			const setsUrl = new URL(`https://api.runsignup.com/rest/race/${source.raceId}/results/get-result-sets`);
+			setsUrl.searchParams.set("format", "json");
+			setsUrl.searchParams.set("event_id", String(eventId));
+			const setsResponse = await getJson(setsUrl, accessToken);
+			const sets = Array.isArray(setsResponse.individual_results_sets)
+				? setsResponse.individual_results_sets
+				: [];
+
+			for (const rawSet of sets) {
+				const set = asRecord(rawSet);
+				const resultSetId = Number(set?.individual_result_set_id);
+				if (!set || !Number.isInteger(resultSetId)) continue;
+
+				const resultsUrl = new URL(`https://api.runsignup.com/rest/race/${source.raceId}/results/get-results`);
+				resultsUrl.searchParams.set("format", "json");
+				resultsUrl.searchParams.set("event_id", String(eventId));
+				resultsUrl.searchParams.set("individual_result_set_id", String(resultSetId));
+				resultsUrl.searchParams.set("results_per_page", "1000");
+				const resultsResponse = await getJson(resultsUrl, accessToken);
+				const resultSets = Array.isArray(resultsResponse.individual_results_sets)
+					? resultsResponse.individual_results_sets
+					: [];
+				const resultSet = asRecord(resultSets[0]);
+				if (!resultSet) continue;
+
+				drafts.push(buildSeries2026PublicationDraft({
+					source,
+					eventId,
+					eventName: text(event.name),
+					resultSetId,
+					resultSet,
+				}));
+			}
+		}
+	}
+
+	return {
+		ok: true,
+		mode: "PLAN_ONLY" as const,
+		execution_allowed: false as const,
+		legacy_publisher_allowed: false as const,
+		drafts,
+		summary: {
+			result_sets: drafts.length,
+			ready_for_editorial_review: drafts.filter((draft) => draft.ready_for_editorial_review).length,
+		},
+	};
+}
