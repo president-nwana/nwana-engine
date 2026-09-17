@@ -293,9 +293,9 @@ A deterministic English editorial draft is now generated for every result set. F
 
 The rendered draft was verified locally against the September 12 3K result. It correctly produced the event title, Albert Fatikhov as the Elite Men winner with 18:25, and the real RunSignup results URL.
 
-A guarded Meta delivery path is now implemented for the existing canonical destinations: Facebook NWANA and Instagram nwana.official. It requires the exact PUBLISH confirmation and a public HTTPS image URL. Migration 0015 adds a per-destination ledger so a retry skips a channel that already succeeded. Historical baseline records remain unpublishable. No live Meta request has been made.
+A guarded Meta delivery path is now implemented for all four verified legacy destinations: Facebook NWANA, Instagram nwana.official, Facebook Nordic Walking Sport, and Instagram n_w_sport. Each destination has an independent delivery-ledger key, so a partial retry skips only accounts that already succeeded. It requires the exact PUBLISH confirmation and a public HTTPS image URL. Migration 0015 adds a per-destination ledger so a retry skips a channel that already succeeded. Historical baseline records remain unpublishable. No live Meta request has been made.
 
-Next, run the full local tests and type check, apply migration 0015 locally, configure NWANA_META_TOKEN as a local Worker secret, and verify the read-only Meta connection endpoint. Do not publish a historical result for testing.
+Next, pull the four-destination change and run the full local tests and type check. Migration 0015 still provides the generic per-destination ledger and does not need another schema change. Then implement and verify the branded result-card generator before any live Meta delivery. The generator must select deterministically from a family of layouts rather than enforce one permanent template. The first real card and first real delivery require owner review; ordinary finalized results may become automatic only after that controlled run succeeds. Do not publish a historical result for testing.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 
