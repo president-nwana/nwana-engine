@@ -37,8 +37,8 @@ const audiences = [
 	{ audience_id: "AUD-SPONSORS", rule_id: rule.rule_id, audience_type: "SPONSORS", enabled: 1 },
 ];
 const actions = [
-	{ action_id: "ACT-FB", rule_id: rule.rule_id, audience_id: "AUD-PARTICIPANTS", action_type: "SOCIAL_POST", channel: "FACEBOOK", destination: "NWANA", execution_mode: "MANUAL_LAST_MILE", priority: 10, enabled: 1 },
-	{ action_id: "ACT-SELLERS", rule_id: rule.rule_id, audience_id: "AUD-SPONSORS", action_type: "SELLER_OUTREACH", channel: "SELLER_NETWORK", destination: "NWANA_SELLERS", execution_mode: "NOT_CONNECTED", priority: 10, enabled: 1 },
+	{ action_id: "ACT-FB", rule_id: rule.rule_id, audience_id: "AUD-PARTICIPANTS", action_type: "SOCIAL_POST", channel: "FACEBOOK", destination: "NWANA", execution_mode: "MANUAL_LAST_MILE", priority: 10, enabled: 1, metadata: '{"purpose":"Promote the Series","deliverable":"Facebook post","call_to_action":"Visit the Series hub","content_scope":"SERIES_PROMOTION"}' },
+	{ action_id: "ACT-SELLERS", rule_id: rule.rule_id, audience_id: "AUD-SPONSORS", action_type: "SELLER_OUTREACH", channel: "SELLER_NETWORK", destination: "NWANA_SELLERS", execution_mode: "NOT_CONNECTED", priority: 10, enabled: 1, metadata: null },
 ];
 
 describe("Stage 8 distribution planner", () => {
@@ -53,6 +53,16 @@ describe("Stage 8 distribution planner", () => {
 			configured_for_object: false,
 		});
 		expect(plan.rules[0]?.audiences[0]?.actions[0]?.action_id).toBe("ACT-FB");
+		expect(plan.rules[0]?.audiences[0]?.actions[0]?.work_item).toMatchObject({
+			work_item_id: "WORK-ACT-FB",
+			status: "DRAFT",
+			purpose: "Promote the Series",
+			deliverable: "Facebook post",
+			call_to_action: "Visit the Series hub",
+			content_scope: "SERIES_PROMOTION",
+			requires_review: true,
+			execution_allowed: false,
+		});
 	});
 
 	it("does not match a rule when the object lacks its required capability", () => {

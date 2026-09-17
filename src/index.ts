@@ -5082,7 +5082,8 @@ async function getDistributionPlan(
                 `).all<DistributionAudience>(),
                 db.prepare(`
                         SELECT action_id, rule_id, audience_id, action_type,
-                               channel, destination, execution_mode, priority, enabled
+                               channel, destination, execution_mode, priority, enabled,
+                               metadata
                         FROM rule_actions
                         WHERE enabled = 1
                         ORDER BY priority ASC, id ASC

@@ -256,7 +256,9 @@ The corrected Series 2026 planner was verified locally on 2026-09-17:
 - mode remained PLAN_ONLY and execution_allowed=false;
 - the plan returned 1 rule, 4 audiences, and 10 actions.
 
-Next, define reviewable work items for the 10 Series-hub distribution actions and a separate finalized-result publication path. The result-publication path must target NWANA Engine as the future single publisher, while the independent legacy publisher is no longer launched. Do not enable sending yet.
+Next, apply migration 0013 locally and verify that each of the 10 Series-hub actions contains a reviewable DRAFT work item with a business purpose, deliverable, call to action, and content scope. Every work item must require review and have execution_allowed=false.
+
+After that, inspect the actual Series 2026 result-processing and retired publication files to define the finalized-result handoff into NWANA Engine. The result-publication path must target NWANA Engine as the future single publisher. Do not enable sending yet.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 

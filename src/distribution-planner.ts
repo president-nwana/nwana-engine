@@ -46,6 +46,7 @@ export interface DistributionAction {
 	execution_mode: string;
 	priority: number;
 	enabled: number;
+	metadata: string | null;
 }
 
 export function matchesDistributionRule(
@@ -64,6 +65,25 @@ export function matchesDistributionRule(
 		(rule.match_capability_type === null ||
 			capabilities.has(rule.match_capability_type))
 	);
+}
+
+interface DistributionActionMetadata {
+	purpose?: string;
+	deliverable?: string;
+	call_to_action?: string;
+	content_scope?: string;
+}
+
+function parseActionMetadata(value: string | null): DistributionActionMetadata {
+	if (!value) return {};
+	try {
+		const parsed = JSON.parse(value);
+		return parsed && typeof parsed === "object"
+			? parsed as DistributionActionMetadata
+			: {};
+	} catch {
+		return {};
+	}
 }
 
 export function buildDistributionPlan(params: {
@@ -101,13 +121,28 @@ export function buildDistributionPlan(params: {
 								action.audience_id === audience.audience_id,
 						)
 						.sort((left, right) => left.priority - right.priority)
-						.map((action) => ({
-							action_id: action.action_id,
-							action_type: action.action_type,
-							channel: action.channel,
-							destination: action.destination,
-							execution_mode: action.execution_mode,
-						})),
+						.map((action) => {
+							const metadata = parseActionMetadata(action.metadata);
+							return {
+								action_id: action.action_id,
+								action_type: action.action_type,
+								channel: action.channel,
+								destination: action.destination,
+								execution_mode: action.execution_mode,
+								work_item: {
+									work_item_id: `WORK-${action.action_id}`,
+									status: "DRAFT" as const,
+									object_id: params.object.object_id,
+									audience_id: audience.audience_id,
+									purpose: metadata.purpose ?? `${action.action_type} for ${audience.audience_type}`,
+									deliverable: metadata.deliverable ?? action.action_type,
+									call_to_action: metadata.call_to_action ?? null,
+									content_scope: metadata.content_scope ?? null,
+									requires_review: true as const,
+									execution_allowed: false as const,
+								},
+							};
+						}),
 				}));
 
 			return {

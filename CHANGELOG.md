@@ -6,6 +6,14 @@ It is not a substitute for Git history, SYSTEM_STATE.md, or Architecture Decisio
 
 ## 2026-09-17
 
+### Reviewable Series 2026 Work Items
+
+- Added deterministic DRAFT work items to distribution-plan actions.
+- Each work item carries a business purpose, deliverable, call to action, and content scope.
+- Added migration 0013 with instructions for all 10 Series 2026 hub actions.
+- Every work item requires review and has execution_allowed=false.
+- No jobs, database writes from the endpoint, publication, or channel delivery were enabled.
+
 ### Series 2026 Result Publication Ownership
 
 - Recorded the project-owner decision that legacy result processing/level assignment and legacy Meta publication are independent launches.
