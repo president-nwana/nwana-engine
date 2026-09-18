@@ -12,11 +12,26 @@ If a platform fact is not verified, record it as UNKNOWN rather than guessing.
 
 Read before making changes:
 1. MACHINE_PURPOSE.md
-2. SYSTEM_STATE.md
-3. registry/README.md when Registry facts are relevant
-4. registry/objects.yaml when Registry facts are relevant
-5. relevant docs/adr/
-6. AGENTS.md
+2. OPERATING_PLAN.md — current execution contract; it supersedes conflicting older chronological notes below
+3. SYSTEM_STATE.md
+4. registry/README.md when Registry facts are relevant
+5. registry/objects.yaml when Registry facts are relevant
+6. relevant docs/adr/
+7. AGENTS.md
+
+## CURRENT OPERATING DIRECTIVE — 2026-09-18
+
+The next action is not more speculative backend construction and not more Series 2026 polishing.
+
+Follow `OPERATING_PLAN.md`:
+
+1. verify the actual status of every requested or required integration, beginning with RunSignup/TicketSignup write access, Google Ads Grants/API access, LinkedIn Community Management API, Google Workspace email, RunSignup email/contact access, Moodle, Seat Theory, and Zubie Five;
+2. pursue missing approvals instead of assuming that silence means rejection or approval;
+3. build the owner-facing control page for create/connect/required-result/review/outcomes/errors;
+4. connect existing assets and exact acquisition/distribution channels;
+5. create future Series 2027, Challenges, and Championships through Engine rather than requiring the owner to rebuild them manually.
+
+The definition of done is owner independence from terminal commands and chat sessions for normal operation. The strict $0 operating-cost rule and event/action-trigger rule remain binding.
 
 ## CURRENT STAGE
 
