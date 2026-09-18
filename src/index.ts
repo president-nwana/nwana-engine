@@ -5114,9 +5114,11 @@ interface ResultPublicationHistoryRow {
 
 async function getSeries2026ResultPublicationPreview(
 	env: Env,
+	distance?: string,
 ): Promise<Response> {
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
+		{ distance },
 	);
 	const history = await env.nwana_engine_db
 		.prepare(`
@@ -5164,8 +5166,13 @@ async function getSeries2026ResultCard(
 			error: RESULT_CARD_DESIGN_BLOCKER,
 		}, 409);
 	}
+	const raceId = Number(publicationKey.split(":")[2]);
+	if (!Number.isInteger(raceId)) {
+		return json({ ok: false, error: "Invalid result publication key" }, 400);
+	}
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
+		{ raceId },
 	);
 	const draft = preview.drafts.find(
 		(value) => value.publication_key === publicationKey,
@@ -5234,9 +5241,11 @@ async function getSeries2026ResultCard(
 
 async function establishSeries2026ResultPublicationBaseline(
 	env: Env,
+	distance?: string,
 ): Promise<Response> {
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
+		{ distance },
 	);
 	const readyDrafts = preview.drafts.filter(
 		(draft) => draft.ready_for_editorial_review,
@@ -5397,7 +5406,14 @@ async function publishSeries2026Result(
 		return json({ ok: true, already_published: true, publication_key: body.publication_key });
 	}
 
-	const preview = await previewSeries2026ResultPublications(env.RUNSIGNUP_ACCESS_TOKEN);
+	const raceId = Number(body.publication_key.split(":")[2]);
+	if (!Number.isInteger(raceId)) {
+		return json({ ok: false, error: "Invalid result publication key" }, 400);
+	}
+	const preview = await previewSeries2026ResultPublications(
+		env.RUNSIGNUP_ACCESS_TOKEN,
+		{ raceId },
+	);
 	const draft = preview.drafts.find((value) => value.publication_key === body.publication_key);
 	if (!draft || !draft.ready_for_editorial_review || !draft.editorial_draft.ready_for_approval) {
 		return json({ ok: false, error: "Publication draft is missing or not ready" }, 409);
@@ -5606,7 +5622,10 @@ export default {
 			url.pathname === "/sources/runsignup/series-2026/results-baseline"
 		) {
 			try {
-				return await establishSeries2026ResultPublicationBaseline(env);
+				return await establishSeries2026ResultPublicationBaseline(
+					env,
+					url.searchParams.get("distance") ?? undefined,
+				);
 			} catch (error) {
 				console.error(error);
 				return json(
@@ -5627,7 +5646,10 @@ export default {
 			url.pathname === "/sources/runsignup/series-2026/results-preview"
 		) {
 			try {
-				return await getSeries2026ResultPublicationPreview(env);
+				return await getSeries2026ResultPublicationPreview(
+					env,
+					url.searchParams.get("distance") ?? undefined,
+				);
 			} catch (error) {
 				console.error(error);
 				return json(
