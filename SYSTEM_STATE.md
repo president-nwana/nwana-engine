@@ -354,6 +354,30 @@ For Series 2026, preserve the legacy result-processing and speed-level component
 
 After the read-only Stage 8 gap audit, propose the smallest working end-to-end improvement. Do not mass-populate registry/objects.yaml.
 
+
+## LIVE SERIES 2026 PUBLICATION AND ZERO-COST EVENT RULE
+
+Verified on 2026-09-18:
+
+- publication key `runsignup:series-2026:210000:1178567:666098` was published successfully;
+- the approved result card and congratulatory caption reached Facebook NWANA, Instagram nwana.official, Facebook Nordic Walking Sport, and Instagram n_w_sport;
+- all four delivery IDs were recorded and the publication status became `PUBLISHED`;
+- duplicate delivery protection remains active per destination.
+
+A five-minute Cloudflare cron (`*/5 * * * *`) was found still deployed. It invoked the Worker and checked the D1 job queue 288 times per day even when no NWANA event occurred. It did not poll RunSignup, but it was still unnecessary polling and violated the project's strict $0 operating-cost rule.
+
+The cron trigger and scheduled handler were removed on 2026-09-18.
+
+Binding rule for all future automation:
+
+- do not use periodic polling to discover NWANA changes;
+- do not add cron schedules merely to check whether something happened;
+- execution must begin only from a verified explicit event signal or an intentional user/system action;
+- if the external platform cannot emit a usable event, keep the operation explicit/manual until a $0 event-driven path is verified;
+- any design capable of creating operating charges above $0 is excluded unless the project owner explicitly changes this rule.
+
+No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event signal is currently implemented in this repository. Do not describe result publication as automatic until a real $0 event source and end-to-end handler are implemented and verified.
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.
