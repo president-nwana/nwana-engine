@@ -8,7 +8,7 @@
 - Added all five Series 2026 levels and the verified threshold for every distance.
 - Added NO RESULT THIS STAGE for levels without a winner so every post teaches the complete NWANA level system.
 - Added series-record detection across finalized official results, separated by distance and gender.
-- Added MEN'S/WOMEN'S SERIES RECORD rendering support.
+- Added MEN'S/WOMEN'S SERIES RECORD rendering support and passed the verified series_record flag through the card request path after explicit owner approval.
 - Added regression tests for the 3K level ladder, record detection, background presence, dominant time sizing, and empty-level display.
 - No Meta publication was requested or performed.
 
