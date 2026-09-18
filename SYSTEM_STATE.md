@@ -316,7 +316,7 @@ The project owner then confirmed that the September 12, 2026 3K result was not p
 
 The owner approved the visual direction of the first photographic Nordic walking background. That background is now bundled locally with Engine, so rendering has no runtime AI/API cost. The card renderer makes the athlete name and official time dominant and includes all five Series 2026 performance levels, their verified distance-specific thresholds, and NO RESULT THIS STAGE for empty levels.
 
-Series-wide record detection now compares finalized official results by distance and gender. It marks only the fastest verified time as the current series record. The completed-card renderer supports a MEN'S/WOMEN'S SERIES RECORD label, but the final handoff of that record flag through the main request path still requires a narrowly reviewed change to src/index.ts.
+Series-wide record detection now compares finalized official results by distance and gender. It marks only the fastest verified time as the current series record. The completed-card renderer supports a MEN'S/WOMEN'S SERIES RECORD label. After explicit owner approval, the main request path now passes only the verified series_record flag into the card renderer; the reviewed diff added exactly one property and changed no Registry, RunSignup, scheduling, or publication behavior.
 
 Next, run the tests and type check, then render and inspect the September 12 controlled card. Do not invoke the publish endpoint. The first real card and first real delivery require owner review; ordinary finalized results may become automatic only after that controlled run succeeds. Do not publish a historical result for testing.
 
