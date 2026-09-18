@@ -1,4 +1,5 @@
 import { RESULT_BACKGROUND_01_JPEG_BASE64 } from "./assets/result-background-01";
+import { RESULT_BACKGROUND_MEN_01_JPEG_BASE64 } from "./assets/result-background-men-01";
 import { getSeries2026LevelDefinitions } from "./series-2026-results";
 
 export interface ResultCardWinner {
@@ -34,7 +35,8 @@ export const RESULT_CARD_PUBLICATION_BLOCKER =
 	"Owner approval of the completed result card is required";
 
 export function isResultCardDesignReady(): boolean {
-	return RESULT_BACKGROUND_01_JPEG_BASE64.length > 0;
+	return RESULT_BACKGROUND_01_JPEG_BASE64.length > 0 &&
+		RESULT_BACKGROUND_MEN_01_JPEG_BASE64.length > 0;
 }
 
 function escapeXml(value: string): string {
@@ -109,6 +111,9 @@ export function buildResultCardSvg(input: ResultCardInput): string {
 	const athlete = primary?.athlete ?? "OFFICIAL RESULTS";
 	const time = primary?.time ?? "";
 	const logo = input.logoUrl ?? NWANA_LOGO_URL;
+	const background = primary && genderLabel(primary.gender) === "WOMEN"
+		? RESULT_BACKGROUND_01_JPEG_BASE64
+		: RESULT_BACKGROUND_MEN_01_JPEG_BASE64;
 	const levels = input.levels ?? getSeries2026LevelDefinitions(input.distance).map(
 		(level) => ({
 			...level,
@@ -132,7 +137,7 @@ export function buildResultCardSvg(input: ResultCardInput): string {
 				<stop offset="1" stop-color="#061b34" stop-opacity=".94"/>
 			</linearGradient>
 		</defs>
-		<image href="data:image/jpeg;base64,${RESULT_BACKGROUND_01_JPEG_BASE64}" width="1080" height="1080" preserveAspectRatio="xMidYMid slice"/>
+		<image href="data:image/jpeg;base64,${background}" width="1080" height="1080" preserveAspectRatio="xMidYMid slice"/>
 		<rect width="820" height="1080" fill="url(#readability)"/>
 		<rect y="485" width="1080" height="595" fill="url(#lower-readability)"/>
 		<image href="${escapeXml(logo)}" x="70" y="52" width="122" height="122" preserveAspectRatio="xMidYMid meet"/>
