@@ -318,7 +318,13 @@ The owner approved the visual direction of the first photographic Nordic walking
 
 Series-wide record detection now compares finalized official results by distance and gender. It marks only the fastest verified time as the current series record. The completed-card renderer supports a MEN'S/WOMEN'S SERIES RECORD label. After explicit owner approval, the main request path now passes only the verified series_record flag into the card renderer; the reviewed diff added exactly one property and changed no Registry, RunSignup, scheduling, or publication behavior.
 
-Next, run the tests and type check, then render and inspect the September 12 controlled card. Do not invoke the publish endpoint. The first real card and first real delivery require owner review; ordinary finalized results may become automatic only after that controlled run succeeds. Do not publish a historical result for testing.
+The owner also approved a third male-and-female background for future result sets containing both genders. It is not yet bundled or selected by Engine; ordinary mixed results should use one combined post rather than two duplicate stage posts. Separate posts remain available for exceptional achievements such as a new record.
+
+The Worker was first deployed publicly at https://nwana-engine.nwana-engine.workers.dev. Remote migrations 0014 and 0015 were applied before deployment. The first remote baseline attempt returned a transient RunSignup 522; the retry exposed the actual issue: one all-Series preview exceeds the free Cloudflare Worker subrequest limit. No baseline row or Meta post was created. NWANA_META_TOKEN is still absent remotely, so live Meta delivery is unavailable.
+
+After explicit owner approval, Series 2026 preview and baseline endpoints now accept a distance filter, and card/publication requests load only the race encoded in the publication key. This keeps each request inside the free Worker limit without changing Registry, level formulas, scheduling, or Meta delivery.
+
+Next, pull, test, type-check, and redeploy this bounded-request change. Then establish the remote historical baseline one distance at a time, verify the total is 22, apply migration 0016 remotely to reopen only September 12 3K, add and verify the remote Meta token, inspect the public card, and perform the first controlled delivery. Do not invoke publication before those checks.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 
