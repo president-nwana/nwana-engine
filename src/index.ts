@@ -5187,6 +5187,7 @@ async function getSeries2026ResultCard(
 					: row.gender ?? "Division",
 			time: row.time,
 			performance_level: row.performance_level,
+			series_record: row.series_record,
 		}));
 	let logoUrl: string | undefined;
 	if (format === "jpeg") {
