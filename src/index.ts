@@ -6085,29 +6085,6 @@ if (
 			404,
 		);
 	},
-        async scheduled(
-                _controller: ScheduledController,
-                env: Env,
-        ): Promise<void> {
-                try {
-                        const response =
-                                await processNextGenericJob(env);
-
-                        const result =
-                                await response.clone().text();
-
-                        console.log(
-                                "Scheduled NWANA Engine job run:",
-                                response.status,
-                                result,
-                        );
-                } catch (error) {
-                        console.error(
-                                "Scheduled NWANA Engine job run failed:",
-                                error,
-                        );
-                }
-        },
 };
 export {
         classifyRunSignupContainer,
