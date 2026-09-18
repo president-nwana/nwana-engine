@@ -2,7 +2,8 @@
 
 ## 2026-09-18 — Add approved result background, full level ladder, and record detection
 
-- Added the owner-approved photographic Nordic walking background as a bundled Engine asset with no runtime AI/API cost.
+- Added owner-approved male and female photographic Nordic walking backgrounds as bundled Engine assets with no runtime AI/API cost.
+- Added automatic background selection from the primary result gender so a men's record is not paired with a female athlete image, or vice versa.
 - Restored result-card rendering for controlled preview while retaining the exact PUBLISH confirmation requirement.
 - Made athlete name and official time the dominant visual elements.
 - Added all five Series 2026 levels and the verified threshold for every distance.
