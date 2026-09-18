@@ -277,9 +277,24 @@ async function getJson(url: URL, accessToken: string): Promise<UnknownRecord> {
 	return await response.json() as UnknownRecord;
 }
 
-export async function previewSeries2026ResultPublications(accessToken: string) {
+export interface Series2026PreviewOptions {
+	distance?: string;
+	raceId?: number;
+}
+
+export async function previewSeries2026ResultPublications(
+	accessToken: string,
+	options: Series2026PreviewOptions = {},
+) {
 	const drafts = [];
-	for (const source of SERIES_2026_SOURCES) {
+	const sources = SERIES_2026_SOURCES.filter((source) =>
+		(options.distance === undefined || source.distance === options.distance) &&
+		(options.raceId === undefined || source.raceId === options.raceId)
+	);
+	if (sources.length === 0) {
+		throw new Error("Unknown Series 2026 source filter");
+	}
+	for (const source of sources) {
 		const raceUrl = new URL(`https://api.runsignup.com/rest/race/${source.raceId}`);
 		raceUrl.searchParams.set("format", "json");
 		raceUrl.searchParams.set("events", "T");
