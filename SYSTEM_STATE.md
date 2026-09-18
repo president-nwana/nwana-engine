@@ -314,7 +314,11 @@ Google Workspace for Nonprofits access does not imply free Gemini Developer API 
 
 The project owner then confirmed that the September 12, 2026 3K result was not published by the legacy publisher. Migration 0016 removes only publication key `runsignup:series-2026:210000:1178567:666098` from LEGACY_BASELINE. This exact result is the first controlled card and publication candidate; every other baseline record remains excluded. The migration itself publishes nothing.
 
-Next, create and approve the Gemini background family, install it in Engine, and implement the exact-data overlay with explicit readability tests for athlete name and finishing time. Then inspect the September 12 controlled card before any live Meta delivery. The first real card and first real delivery require owner review; ordinary finalized results may become automatic only after that controlled run succeeds. Do not publish a historical result for testing.
+The owner approved the visual direction of the first photographic Nordic walking background. That background is now bundled locally with Engine, so rendering has no runtime AI/API cost. The card renderer makes the athlete name and official time dominant and includes all five Series 2026 performance levels, their verified distance-specific thresholds, and NO RESULT THIS STAGE for empty levels.
+
+Series-wide record detection now compares finalized official results by distance and gender. It marks only the fastest verified time as the current series record. The completed-card renderer supports a MEN'S/WOMEN'S SERIES RECORD label, but the final handoff of that record flag through the main request path still requires a narrowly reviewed change to src/index.ts.
+
+Next, run the tests and type check, then render and inspect the September 12 controlled card. Do not invoke the publish endpoint. The first real card and first real delivery require owner review; ordinary finalized results may become automatic only after that controlled run succeeds. Do not publish a historical result for testing.
 
 After that validation, continue the Stage 8 audit against MACHINE_PURPOSE.md.
 
