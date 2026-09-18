@@ -33,4 +33,33 @@ describe("Series 2026 result cards", () => {
 		expect(svg).toContain("font-size: 112px");
 		expect(svg).toContain("data:image/jpeg;base64,");
 	});
+	it("selects different approved backgrounds for men's and women's results", () => {
+		const base = {
+			publicationKey: "result-background-selection",
+			title: "2026 NWANA Open 3K Series - September 12, 2026 — Official Results",
+			distance: "3K",
+		};
+		const men = buildResultCardSvg({
+			...base,
+			winners: [{
+				athlete: "Alex Walker",
+				gender: "Men",
+				time: "18:25",
+				performance_level: "Elite (< 20:00)",
+			}],
+		});
+		const women = buildResultCardSvg({
+			...base,
+			winners: [{
+				athlete: "Taylor Walker",
+				gender: "Women",
+				time: "19:10",
+				performance_level: "Elite (< 20:00)",
+			}],
+		});
+		expect(men).not.toBe(women);
+		expect(men).toContain("ALEX WALKER");
+		expect(women).toContain("TAYLOR WALKER");
+	});
+
 });
