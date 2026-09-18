@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySeries2026PublicationHistory, buildSeries2026PublicationDraft } from "../src/series-2026-results";
+import { annotateSeries2026Records, applySeries2026PublicationHistory, buildSeries2026PublicationDraft, getSeries2026LevelDefinitions } from "../src/series-2026-results";
 
 const source = {
 	distance: "5K",
@@ -116,4 +116,44 @@ describe("Series 2026 result publication handoff", () => {
 			execution_allowed: false,
 		});
 	});
+	it("exposes the complete verified level ladder and finds the series record", () => {
+		expect(getSeries2026LevelDefinitions("3K")).toEqual([
+		{ name: "Elite", threshold: "< 20:00" },
+		{ name: "High Performance", threshold: "< 21:00" },
+		{ name: "Performance", threshold: "< 22:00" },
+		{ name: "Competitive", threshold: "< 23:00" },
+		{ name: "Open", threshold: "23:00+" },
+	]);
+
+		const makeDraft = (eventId: number, time: string) =>
+			buildSeries2026PublicationDraft({
+				source: { ...source, distance: "3K" },
+				eventId,
+				eventName: "3K Stage",
+				resultSetId: eventId,
+				resultsPageUrl: "https://runsignup.com/results",
+				resultSet: {
+					results_headers: {
+						"custom-field-10": "Performance Level",
+						"custom-field-11": "Level Place",
+					},
+					results: [{
+						first_name: "Albert",
+						last_name: "Fatikhov",
+						gender: "M",
+						chip_time: time,
+						"custom-field-10": "Elite (< 20:00)",
+						"custom-field-11": "1",
+					}],
+				},
+			});
+
+		const [earlier, record] = annotateSeries2026Records([
+			makeDraft(1, "19:05"),
+			makeDraft(2, "18:25"),
+		]);
+		expect(earlier.content.results[0].series_record).toBe(false);
+		expect(record.content.results[0].series_record).toBe(true);
+	});
+
 });
