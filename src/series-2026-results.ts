@@ -245,26 +245,58 @@ export function annotateSeries2026Records(
 		}
 	}
 
-	return drafts.map((draft) => ({
-		...draft,
-		content: {
-			...draft.content,
-			results: draft.content.results.map((row) => {
-				const seconds = resultTimeSeconds(row.time);
-				const key = row.gender
-					? `${draft.source.distance}:${row.gender.toUpperCase()}`
-					: null;
-				return {
-					...row,
-					series_record:
-						draft.ready_for_editorial_review &&
-						seconds !== null &&
-						key !== null &&
-						fastest.get(key) === seconds,
-				};
-			}),
-		},
-	}));
+	return drafts.map((draft) => {
+		const results = draft.content.results.map((row) => {
+			const seconds = resultTimeSeconds(row.time);
+			const key = row.gender
+				? `${draft.source.distance}:${row.gender.toUpperCase()}`
+				: null;
+			return {
+				...row,
+				series_record:
+					draft.ready_for_editorial_review &&
+					seconds !== null &&
+					key !== null &&
+					fastest.get(key) === seconds,
+			};
+		});
+		const winners = results.filter((row) => row.level_place === "1");
+		const winnerNames = [...new Set(winners.map((row) => row.athlete).filter(Boolean))];
+		const eventTitle = draft.content.title.replace(/\\s+— Results$/, "");
+		const congratulations = winnerNames.length === 1
+			? `Congratulations to ${winnerNames[0]} on an outstanding performance in the ${eventTitle}!`
+			: winnerNames.length > 1
+				? `Congratulations to ${winnerNames.join(", ")} on their outstanding performances in the ${eventTitle}!`
+				: `Congratulations to everyone who completed the ${eventTitle}!`;
+		const recordLines = winners
+			.filter((row) => row.series_record)
+			.map((row) =>
+				`${genderLabel(row.gender)}'s Series Record: ${row.athlete}${row.time ? ` — ${row.time}` : ""}`
+			);
+		const winnerLines = winners.map((row) =>
+			`${row.performance_level} — ${genderLabel(row.gender)}: ${row.athlete}${row.time ? ` — ${row.time}` : ""}`
+		);
+		const postText = [
+			congratulations,
+			...(recordLines.length > 0 ? ["", ...recordLines] : []),
+			...(winnerLines.length > 0 ? ["", "Level winners:", ...winnerLines] : []),
+			...(draft.editorial_draft.link_url
+				? ["", `Full results: ${draft.editorial_draft.link_url}`]
+				: []),
+		].join("\\n");
+
+		return {
+			...draft,
+			editorial_draft: {
+				...draft.editorial_draft,
+				post_text: postText,
+			},
+			content: {
+				...draft.content,
+				results,
+			},
+		};
+	});
 }
 
 async function getJson(url: URL, accessToken: string): Promise<UnknownRecord> {
