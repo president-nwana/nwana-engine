@@ -1,5 +1,16 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-18 — Bound RunSignup requests to the free Worker limit
+
+- Recorded the first public deployment at https://nwana-engine.nwana-engine.workers.dev.
+- Confirmed that the all-Series preview exceeds Cloudflare's per-invocation subrequest limit; no payment or higher limit is required.
+- Added optional distance/race filtering to Series 2026 retrieval.
+- Made card rendering and publication load only the race encoded in the publication key.
+- Made preview and historical-baseline endpoints accept a distance query so the six distances can be processed separately.
+- Added source-filter validation before any RunSignup request.
+- No remote historical baseline row or Meta post was created during the failed requests.
+- NWANA_META_TOKEN remains absent remotely; live delivery is still unavailable.
+
 ## 2026-09-18 — Add approved result background, full level ladder, and record detection
 
 - Added owner-approved male and female photographic Nordic walking backgrounds as bundled Engine assets with no runtime AI/API cost.
