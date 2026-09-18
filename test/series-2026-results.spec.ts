@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { annotateSeries2026Records, applySeries2026PublicationHistory, buildSeries2026PublicationDraft, getSeries2026LevelDefinitions } from "../src/series-2026-results";
+import { annotateSeries2026Records, applySeries2026PublicationHistory, buildSeries2026PublicationDraft, getSeries2026LevelDefinitions, previewSeries2026ResultPublications } from "../src/series-2026-results";
 
 const source = {
 	distance: "5K",
@@ -154,6 +154,12 @@ describe("Series 2026 result publication handoff", () => {
 		]);
 		expect(earlier.content.results[0].series_record).toBe(false);
 		expect(record.content.results[0].series_record).toBe(true);
+	});
+
+	it("rejects an unknown bounded source before making RunSignup requests", async () => {
+		await expect(
+			previewSeries2026ResultPublications("unused", { distance: "2K" }),
+		).rejects.toThrow("Unknown Series 2026 source filter");
 	});
 
 });
