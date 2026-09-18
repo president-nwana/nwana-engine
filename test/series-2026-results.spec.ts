@@ -154,6 +154,12 @@ describe("Series 2026 result publication handoff", () => {
 		]);
 		expect(earlier.content.results[0].series_record).toBe(false);
 		expect(record.content.results[0].series_record).toBe(true);
+		expect(record.editorial_draft.post_text).toContain(
+			"Congratulations to Albert Fatikhov on an outstanding performance",
+		);
+		expect(record.editorial_draft.post_text).toContain(
+			"Men's Series Record: Albert Fatikhov — 18:25",
+		);
 	});
 
 	it("rejects an unknown bounded source before making RunSignup requests", async () => {
