@@ -1,4 +1,5 @@
 import { RESULT_BACKGROUND_01_JPEG_BASE64 } from "./assets/result-background-01";
+import { getSeries2026LevelDefinitions } from "./series-2026-results";
 
 export interface ResultCardWinner {
 	athlete: string;
@@ -19,7 +20,7 @@ export interface ResultCardInput {
 	title: string;
 	distance: string;
 	winners: ResultCardWinner[];
-	levels: ResultCardLevel[];
+	levels?: ResultCardLevel[];
 	logoUrl?: string;
 }
 
@@ -28,6 +29,9 @@ const NWANA_LOGO_URL =
 
 export const RESULT_CARD_DESIGN_BLOCKER =
 	"Approved NWANA result-card background is not installed";
+
+export const RESULT_CARD_PUBLICATION_BLOCKER =
+	"Owner approval of the completed result card is required";
 
 export function isResultCardDesignReady(): boolean {
 	return RESULT_BACKGROUND_01_JPEG_BASE64.length > 0;
@@ -105,6 +109,14 @@ export function buildResultCardSvg(input: ResultCardInput): string {
 	const athlete = primary?.athlete ?? "OFFICIAL RESULTS";
 	const time = primary?.time ?? "";
 	const logo = input.logoUrl ?? NWANA_LOGO_URL;
+	const levels = input.levels ?? getSeries2026LevelDefinitions(input.distance).map(
+		(level) => ({
+			...level,
+			winners: input.winners.filter((winner) =>
+				winner.performance_level?.startsWith(level.name)
+			),
+		}),
+	);
 
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
 		<defs>
@@ -131,7 +143,7 @@ export function buildResultCardSvg(input: ResultCardInput): string {
 		<text x="106" y="293" class="athlete">${escapeXml(compact(athlete.toUpperCase(), 25))}</text>
 		<text x="103" y="411" class="time">${escapeXml(time)}</text>
 		<text x="70" y="541" class="ladder-title">PERFORMANCE LEVELS · ${escapeXml(input.distance)}</text>
-		${levelRows(input.levels)}
+		${levelRows(levels)}
 		<text x="70" y="1040" class="footer">OFFICIAL NWANA SERIES RESULTS</text>
 		<style>
 			text { font-family: Arial, Helvetica, sans-serif; fill: #fff; }
