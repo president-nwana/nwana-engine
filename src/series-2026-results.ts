@@ -14,6 +14,34 @@ export const SERIES_2026_SOURCES: readonly Series2026Source[] = [
 	{ distance: "20K", raceId: 210020, raceSeriesId: 1450, raceSeriesYearId: 2115 },
 ] as const;
 
+export interface Series2026LevelDefinition {
+	name: "Elite" | "High Performance" | "Performance" | "Competitive" | "Open";
+	threshold: string;
+}
+
+const SERIES_2026_THRESHOLDS: Readonly<Record<string, readonly string[]>> = {
+	"1K": ["6:00", "6:30", "7:00", "7:30"],
+	"3K": ["20:00", "21:00", "22:00", "23:00"],
+	"5K": ["33:00", "35:00", "37:00", "40:00"],
+	"10K": ["1:05:00", "1:10:00", "1:15:00", "1:20:00"],
+	"15K": ["1:40:00", "1:50:00", "2:00:00", "2:10:00"],
+	"20K": ["2:20:00", "2:30:00", "2:40:00", "2:50:00"],
+};
+
+export function getSeries2026LevelDefinitions(
+	distance: string,
+): readonly Series2026LevelDefinition[] {
+	const thresholds = SERIES_2026_THRESHOLDS[distance];
+	if (!thresholds) throw new Error(`Unknown Series 2026 distance: ${distance}`);
+	return [
+		{ name: "Elite", threshold: `< ${thresholds[0]}` },
+		{ name: "High Performance", threshold: `< ${thresholds[1]}` },
+		{ name: "Performance", threshold: `< ${thresholds[2]}` },
+		{ name: "Competitive", threshold: `< ${thresholds[3]}` },
+		{ name: "Open", threshold: `${thresholds[3]}+` },
+	];
+}
+
 type UnknownRecord = Record<string, unknown>;
 
 export interface Series2026ResultSetInput {
@@ -190,6 +218,55 @@ export function buildSeries2026PublicationDraft(input: Series2026ResultSetInput)
 	};
 }
 
+function resultTimeSeconds(value: string | null): number | null {
+	if (!value) return null;
+	const parts = value.split(":").map(Number);
+	if (
+		(parts.length !== 2 && parts.length !== 3) ||
+		parts.some((part) => !Number.isFinite(part) || part < 0)
+	) return null;
+	return parts.length === 2
+		? parts[0] * 60 + parts[1]
+		: parts[0] * 3600 + parts[1] * 60 + parts[2];
+}
+
+export function annotateSeries2026Records(
+	drafts: ReturnType<typeof buildSeries2026PublicationDraft>[],
+) {
+	const fastest = new Map<string, number>();
+	for (const draft of drafts) {
+		if (!draft.ready_for_editorial_review) continue;
+		for (const row of draft.content.results) {
+			const seconds = resultTimeSeconds(row.time);
+			if (seconds === null || !row.gender) continue;
+			const key = `${draft.source.distance}:${row.gender.toUpperCase()}`;
+			const current = fastest.get(key);
+			if (current === undefined || seconds < current) fastest.set(key, seconds);
+		}
+	}
+
+	return drafts.map((draft) => ({
+		...draft,
+		content: {
+			...draft.content,
+			results: draft.content.results.map((row) => {
+				const seconds = resultTimeSeconds(row.time);
+				const key = row.gender
+					? `${draft.source.distance}:${row.gender.toUpperCase()}`
+					: null;
+				return {
+					...row,
+					series_record:
+						draft.ready_for_editorial_review &&
+						seconds !== null &&
+						key !== null &&
+						fastest.get(key) === seconds,
+				};
+			}),
+		},
+	}));
+}
+
 async function getJson(url: URL, accessToken: string): Promise<UnknownRecord> {
 	const response = await fetch(url, {
 		headers: { Authorization: `Bearer ${accessToken}` },
@@ -257,15 +334,16 @@ export async function previewSeries2026ResultPublications(accessToken: string) {
 		}
 	}
 
+	const draftsWithRecords = annotateSeries2026Records(drafts);
 	return {
 		ok: true,
 		mode: "PLAN_ONLY" as const,
 		execution_allowed: false as const,
 		legacy_publisher_allowed: false as const,
-		drafts,
+		drafts: draftsWithRecords,
 		summary: {
-			result_sets: drafts.length,
-			ready_for_editorial_review: drafts.filter((draft) => draft.ready_for_editorial_review).length,
+			result_sets: draftsWithRecords.length,
+			ready_for_editorial_review: draftsWithRecords.filter((draft) => draft.ready_for_editorial_review).length,
 		},
 	};
 }
