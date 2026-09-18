@@ -1,5 +1,17 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-18 — Add approved result background, full level ladder, and record detection
+
+- Added the owner-approved photographic Nordic walking background as a bundled Engine asset with no runtime AI/API cost.
+- Restored result-card rendering for controlled preview while retaining the exact PUBLISH confirmation requirement.
+- Made athlete name and official time the dominant visual elements.
+- Added all five Series 2026 levels and the verified threshold for every distance.
+- Added NO RESULT THIS STAGE for levels without a winner so every post teaches the complete NWANA level system.
+- Added series-record detection across finalized official results, separated by distance and gender.
+- Added MEN'S/WOMEN'S SERIES RECORD rendering support.
+- Added regression tests for the 3K level ladder, record detection, background presence, dominant time sizing, and empty-level display.
+- No Meta publication was requested or performed.
+
 ## 2026-09-17 — Reject placeholder result-card design
 
 - Recorded the owner review: the geometric card is not publication quality.
