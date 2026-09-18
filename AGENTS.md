@@ -3,11 +3,12 @@
 Before changing code, Registry data, D1, adapters, processing logic, distribution rules, or architecture:
 
 1. Read `MACHINE_PURPOSE.md`.
-2. Read `SYSTEM_STATE.md`.
-3. Read `registry/README.md` only when Registry or external-object facts are relevant.
-4. Read `registry/objects.yaml` only when Registry or external-object facts are relevant.
-5. Read relevant files in `docs/adr/`.
-6. Then read the technical instructions below.
+2. Read `OPERATING_PLAN.md`. Its current execution contract supersedes older chronological progress notes when they conflict.
+3. Read `SYSTEM_STATE.md`.
+4. Read `registry/README.md` only when Registry or external-object facts are relevant.
+5. Read `registry/objects.yaml` only when Registry or external-object facts are relevant.
+6. Read relevant files in `docs/adr/`.
+7. Then read the technical instructions below.
 
 ## Product Direction Rule
 
@@ -16,6 +17,12 @@ Before changing code, Registry data, D1, adapters, processing logic, distributio
 Registry reconciliation is supporting work, not the product goal. Do not mass-populate Registry objects unless they are required by a real processing, rule, distribution, revenue, sponsorship, funding, or next-object path.
 
 Before committing, explain in plain language how the change advances the machine's operating loop.
+
+The owner-facing definition of done is binding: the project owner must be able to create or connect an object, choose a required business result, approve consequential actions, and observe outcomes from a normal control page without terminal commands or dependence on a chat session.
+
+Do not substitute backend endpoints, Registry entries, plans, drafts, or generic architecture for that operational result. Do not omit participants, Academy students, instructors, donors, sponsors, sellers, partners, press, Google Ads Grants, email, or verified free distribution channels from the operating design.
+
+Before new integration code, verify the actual access status, permissions, cost, and limitations recorded in `OPERATING_PLAN.md`. An application submission is not proof of approval.
 
 ## Canonical Truth Rule
 
