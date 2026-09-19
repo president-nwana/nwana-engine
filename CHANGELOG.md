@@ -4,10 +4,11 @@
 
 - Recorded Google Ads API Explorer approval for project 440660818183 with 2,880 free production operations per day.
 - Added an owner-initiated OAuth connection for admin@nwaofna.org using the exact deployed callback URI.
-- Added encrypted D1 storage for the long-lived refresh token; the encryption key, OAuth client credentials, and developer token remain Worker secrets.
+- Added encrypted D1 storage for the long-lived refresh token; the encryption key and OAuth client credentials remain Worker secrets.
 - Added a read-only status check that lists only directly accessible Google Ads customer resource names.
 - Kept Google Ads campaign execution disabled and added no polling, cron, paid advertising, or background requests.
 - Added OAuth configuration and missing-secret regression tests.
+- Removed the obsolete developer-token requirement after verifying Google's September 9, 2026 project-based access change.
 
 
 ## 2026-09-18 — Bound RunSignup requests to the free Worker limit
