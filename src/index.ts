@@ -26,7 +26,6 @@ interface Env {
         NWANA_META_TOKEN: string;
         GOOGLE_ADS_CLIENT_ID?: string;
         GOOGLE_ADS_CLIENT_SECRET?: string;
-        GOOGLE_ADS_DEVELOPER_TOKEN?: string;
         GOOGLE_ADS_TOKEN_KEY?: string;
         IMAGES: ImagesBinding;
 }
