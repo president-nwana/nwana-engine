@@ -31,7 +31,11 @@ Read before making changes:
 - Google retired developer-token enforcement for this workflow on September 9, 2026; access is determined by the OAuth client's Cloud project, so Engine does not request or store a developer token.
 - Campaign creation or mutation remains disabled.
 - No recurring polling, cron trigger, paid advertising, or billable Google Cloud service was added.
-- Remaining one-time setup: deploy migration 0017; set OAuth client ID, client secret, and token-encryption key as Worker secrets; deploy; authorize once as admin@nwaofna.org; confirm the accessible customer list.
+- Live OAuth authorization completed successfully as admin@nwaofna.org.
+- Read-only status verification returned connected=true, configured=true, access_level=EXPLORER.
+- Verified accessible production customer: customers/6758500147.
+- The encrypted refresh token is stored in remote D1; OAuth client ID, client secret, and encryption key are Worker secrets.
+- Google Ads connection setup is complete. Campaign creation and mutation remain disabled until an owner-approved workflow is implemented.
 
 ## CURRENT OPERATING DIRECTIVE — 2026-09-18
 
