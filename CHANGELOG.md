@@ -1,5 +1,15 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-19 — Verify NWANA Email Marketing dashboard directly
+
+- Inspected the authenticated NWANA Email Marketing Dashboard (ID `513494`) without creating or changing data.
+- Verified that its recipient selector is already connected to NWANA RunSignup/TicketSignup objects and exposes participants, donors, fundraisers, volunteers, ticket purchasers, custom contacts/lists, and include/exclude segmentation.
+- Verified marketing/transactional classifications, deduplication, templates, scheduling/automation, unsubscribe controls, and delivery/open/click/bounce/spam reporting.
+- Recorded the current counts: 0 custom contacts, 0 custom lists, and 0 sent emails.
+- Corrected the next step: do not ask support merely to repeat the audit. Engine should prepare an exact dashboard handoff and track outcomes; it must not invent private endpoints or scrape the dashboard.
+- Created, changed, scheduled, and sent no email; changed no contact, list, setting, or unsubscribe record.
+
+
 ## 2026-09-19 — Audit RunSignup/TicketSignup Email V2 access
 
 - Verified from official RunSignup documentation that Email V2 is free and includes recipient selection, custom lists, templates, scheduling, automated emails, and performance reporting.
