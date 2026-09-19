@@ -1,5 +1,16 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-19 — Implement operating center foundation
+
+- Added D1 structures for initiatives, Board meetings, Board submissions, Board decisions, decision requests, and work items.
+- Added the first owner-facing operating-center page with verified counts, initiative intake, Board-item intake, and visible queues.
+- Added APIs to create and list initiatives and Board submissions and to read the operating overview.
+- Made unavailable calendar, sponsorship, and donation feeds explicit instead of inventing dashboard data.
+- Kept all external execution disabled and added no timer, polling, cron, paid service, email, publication, or remote data mutation.
+- Kept the new routes disabled until owner and Board access protection is configured.
+- Verified locally: migration 0018 executed successfully, six tables exist, Vitest passed 25/25, and TypeScript passed.
+
+
 ## 2026-09-19 — Define operating center, initiatives, and Board workflow
 
 - Expanded the owner interface from an action screen to an operating center with Overview, Actions, Initiatives, Board, Decisions and Approvals, and Results and History.

@@ -40,6 +40,18 @@ Read before making changes:
 - Meeting preparation is owner-requested or event-triggered. The normal weekly meeting pattern does not authorize timers, polling, cron, or recurring background work.
 - See `docs/adr/ADR-0006-operating-center-initiatives-board.md`.
 
+## OPERATING CENTER FOUNDATION — IMPLEMENTED LOCALLY 2026-09-19
+
+- Added migration `0018-add-operating-center.sql` with initiatives, Board meetings, Board submissions, Board decisions, decision requests, and work items.
+- Added `/operating-center` with a verified-state overview, initiative intake, Board-item intake, and visible queues.
+- Added JSON endpoints for the overview, initiatives, and Board submissions.
+- Initiative intake accepts a thought, problem, opportunity, task, or source-material description. Actual binary file storage and document analysis are not implemented yet.
+- Any authorized Board member can submit any number of questions, proposals, reports, decision requests, discussion items, or requests to speak; the implementation does not use timers or polling.
+- The overview reports verified counts and explicitly marks competition calendar, sponsor pipeline, and donation outcomes unavailable until their data feeds are connected.
+- The operating-center routes remain disabled unless `OPERATING_CENTER_ENABLED=true`. Do not enable or deploy the interface until owner and Board access protection is configured.
+- No remote D1 migration, deployment, external publication, email, paid service, cron, or recurring job was performed.
+- Local verification passed: migration 0018 executed 13 commands, all six tables exist, Vitest passed 25/25, and `npx tsc --noEmit` passed.
+
 ## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
 
 - The authenticated NWANA Email Marketing Dashboard exists at dashboard ID `513494` and is connected to `Nordic Walking Association of North America NWANA`.

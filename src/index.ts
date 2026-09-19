@@ -19,6 +19,14 @@ import {
         googleAdsAuthorizationUrl,
         handleGoogleAdsCallback,
 } from "./google-ads";
+import {
+	createBoardSubmission,
+	createInitiative,
+	getOperatingCenterOverview,
+	listBoardSubmissions,
+	listInitiatives,
+	renderOperatingCenterHtml,
+} from "./operating-center";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -26,10 +34,11 @@ interface Env {
         RUNSIGNUP_API_REG?: string;
         RUNSIGNUP_API_REG_SECRET?: string;
         NWANA_META_TOKEN: string;
-        GOOGLE_ADS_CLIENT_ID?: string;
-        GOOGLE_ADS_CLIENT_SECRET?: string;
-        GOOGLE_ADS_TOKEN_KEY?: string;
-        IMAGES: ImagesBinding;
+	GOOGLE_ADS_CLIENT_ID?: string;
+	GOOGLE_ADS_CLIENT_SECRET?: string;
+	GOOGLE_ADS_TOKEN_KEY?: string;
+	OPERATING_CENTER_ENABLED?: string;
+	IMAGES: ImagesBinding;
 }
 
 interface CreateObjectRequest {
@@ -5571,6 +5580,70 @@ export default {
 		}
 
 		const url = new URL(request.url);
+		const operatingCenterRoute =
+			url.pathname === "/operating-center" ||
+			url.pathname.startsWith("/api/operating-center/") ||
+			url.pathname === "/api/initiatives" ||
+			url.pathname.startsWith("/api/board/");
+
+		if (operatingCenterRoute && env.OPERATING_CENTER_ENABLED !== "true") {
+			return json({
+				ok: false,
+				error: "Operating center is not enabled until owner and Board access protection is configured",
+			}, 503);
+		}
+
+		if (request.method === "GET" && url.pathname === "/operating-center") {
+			return new Response(renderOperatingCenterHtml(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/overview") {
+			try {
+				return await getOperatingCenterOverview(env.nwana_engine_db);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Operating center overview failed" }, 500);
+			}
+		}
+
+		if (url.pathname === "/api/initiatives" && request.method === "GET") {
+			try {
+				return await listInitiatives(env.nwana_engine_db);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Initiative list failed" }, 500);
+			}
+		}
+
+		if (url.pathname === "/api/initiatives" && request.method === "POST") {
+			try {
+				return await createInitiative(request, env.nwana_engine_db);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Initiative submission failed" }, 400);
+			}
+		}
+
+		if (url.pathname === "/api/board/submissions" && request.method === "GET") {
+			try {
+				return await listBoardSubmissions(env.nwana_engine_db);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Board queue failed" }, 500);
+			}
+		}
+
+		if (url.pathname === "/api/board/submissions" && request.method === "POST") {
+			try {
+				return await createBoardSubmission(request, env.nwana_engine_db);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Board submission failed" }, 400);
+			}
+		}
 
 		if (
 			request.method === "GET" &&
