@@ -299,10 +299,20 @@ export function annotateSeries2026Records(
 	});
 }
 
-async function getJson(url: URL, accessToken: string): Promise<UnknownRecord> {
-	const response = await fetch(url, {
-		headers: { Authorization: `Bearer ${accessToken}` },
-	});
+async function getJson(
+	url: URL,
+	accessToken: string,
+	apiCallerToken?: string,
+	apiCallerSecret?: string,
+): Promise<UnknownRecord> {
+	const headers: Record<string, string> = {
+		Authorization: `Bearer ${accessToken}`,
+	};
+	if (apiCallerToken && apiCallerSecret) {
+		url.searchParams.set("rsu_api_reg", apiCallerToken);
+		headers["X-RSU-API-REG-SECRET"] = apiCallerSecret;
+	}
+	const response = await fetch(url, { headers });
 	if (!response.ok) {
 		throw new Error(`RunSignup request failed: ${response.status} ${response.statusText}`);
 	}
@@ -312,6 +322,8 @@ async function getJson(url: URL, accessToken: string): Promise<UnknownRecord> {
 export interface Series2026PreviewOptions {
 	distance?: string;
 	raceId?: number;
+	apiCallerToken?: string;
+	apiCallerSecret?: string;
 }
 
 export async function previewSeries2026ResultPublications(
@@ -330,7 +342,7 @@ export async function previewSeries2026ResultPublications(
 		const raceUrl = new URL(`https://api.runsignup.com/rest/race/${source.raceId}`);
 		raceUrl.searchParams.set("format", "json");
 		raceUrl.searchParams.set("events", "T");
-		const raceResponse = await getJson(raceUrl, accessToken);
+		const raceResponse = await getJson(raceUrl, accessToken, options.apiCallerToken, options.apiCallerSecret);
 		const race = asRecord(raceResponse.race);
 		const events = race && Array.isArray(race.events) ? race.events : [];
 		const raceResultsPageUrl = text(race?.url)
@@ -345,7 +357,7 @@ export async function previewSeries2026ResultPublications(
 			const setsUrl = new URL(`https://api.runsignup.com/rest/race/${source.raceId}/results/get-result-sets`);
 			setsUrl.searchParams.set("format", "json");
 			setsUrl.searchParams.set("event_id", String(eventId));
-			const setsResponse = await getJson(setsUrl, accessToken);
+			const setsResponse = await getJson(setsUrl, accessToken, options.apiCallerToken, options.apiCallerSecret);
 			const sets = Array.isArray(setsResponse.individual_results_sets)
 				? setsResponse.individual_results_sets
 				: [];
@@ -360,7 +372,7 @@ export async function previewSeries2026ResultPublications(
 				resultsUrl.searchParams.set("event_id", String(eventId));
 				resultsUrl.searchParams.set("individual_result_set_id", String(resultSetId));
 				resultsUrl.searchParams.set("results_per_page", "1000");
-				const resultsResponse = await getJson(resultsUrl, accessToken);
+				const resultsResponse = await getJson(resultsUrl, accessToken, options.apiCallerToken, options.apiCallerSecret);
 				const resultSets = Array.isArray(resultsResponse.individual_results_sets)
 					? resultsResponse.individual_results_sets
 					: [];
