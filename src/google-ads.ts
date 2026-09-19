@@ -143,8 +143,6 @@ export async function googleAdsAuthorizationUrl(
 	url.searchParams.set("scope", SCOPE);
 	url.searchParams.set("access_type", "offline");
 	url.searchParams.set("prompt", "consent");
-	url.searchParams.set("include_granted_scopes", "true");
-	url.searchParams.set("login_hint", "admin@nwaofna.org");
 	url.searchParams.set("state", await createState(env.GOOGLE_ADS_TOKEN_KEY!));
 	return url.toString();
 }
