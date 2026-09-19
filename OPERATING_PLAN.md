@@ -137,7 +137,7 @@ Physical creation inside RunSignup/TicketSignup depends on verified write API ac
 | Meta | Connected; one live Series 2026 result delivered successfully to four accounts | Confirm durable credential lifecycle and retain per-destination duplicate protection |
 | RunSignup/TicketSignup read | Working for verified Series 2026 sources | Preserve bounded requests under free Worker limits |
 | RunSignup/TicketSignup write / expanded API | Requested; current grant status unknown | Check account/developer portal and correspondence; follow up firmly if absent |
-| Google Ads Grants | NWANA nonprofit grant exists; developer/API access not confirmed complete | Check Ads account, manager account, developer token, and API access status |
+| Google Ads Grants | NWANA Google Ads / Ad Grants account is under `admin@nwaofna.org`; developer/API access is not confirmed complete | Sign in as `admin@nwaofna.org`; check the Google Cloud project, Google Ads API access level, Ads/Ad Grants account linkage, and whether a new application is required after the September 9, 2026 access-process change |
 | LinkedIn | App created and Page verified; Community Management API was requested | Check developer portal for approval and available scopes |
 | Google Workspace | Google Workspace for Nonprofits exists | Verify a $0 organization-email sending path and required admin/API permissions |
 | RunSignup/TicketSignup email/contact access | Unknown | Verify exact API capabilities and permissions |
