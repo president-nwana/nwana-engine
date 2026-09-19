@@ -2,7 +2,6 @@ export interface GoogleAdsEnv {
 	nwana_engine_db: D1Database;
 	GOOGLE_ADS_CLIENT_ID?: string;
 	GOOGLE_ADS_CLIENT_SECRET?: string;
-	GOOGLE_ADS_DEVELOPER_TOKEN?: string;
 	GOOGLE_ADS_TOKEN_KEY?: string;
 }
 
@@ -126,7 +125,6 @@ function missingConfiguration(env: GoogleAdsEnv): string[] {
 	const missing: string[] = [];
 	if (!env.GOOGLE_ADS_CLIENT_ID) missing.push("GOOGLE_ADS_CLIENT_ID");
 	if (!env.GOOGLE_ADS_CLIENT_SECRET) missing.push("GOOGLE_ADS_CLIENT_SECRET");
-	if (!env.GOOGLE_ADS_DEVELOPER_TOKEN) missing.push("GOOGLE_ADS_DEVELOPER_TOKEN");
 	if (!env.GOOGLE_ADS_TOKEN_KEY) missing.push("GOOGLE_ADS_TOKEN_KEY");
 	return missing;
 }
@@ -219,7 +217,6 @@ async function listAccessibleCustomers(
 		{
 			headers: {
 				Authorization: `Bearer ${accessToken}`,
-				"developer-token": env.GOOGLE_ADS_DEVELOPER_TOKEN!,
 			},
 		},
 	);
