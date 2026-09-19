@@ -85,11 +85,12 @@ If a future verified task cannot be performed through RunSignup/TicketSignup, ev
 
 Verified product/API distinction:
 
-- Email V2 is available in the RunSignup/TicketSignup dashboard at no additional cost.
-- The dashboard supports current and past participants, individual contacts, include/exclude recipient selection, custom lists, reusable templates, scheduled and automated emails, and delivery/open/click reporting.
-- The published RunSignup API catalog currently exposes no Email V2 or contact-list methods.
-- Do not infer a private endpoint or automate the dashboard by scraping.
-- API execution remains UNKNOWN until RunSignup confirms whether the active API Caller has private or expanded email permissions.
+- NWANA has an authenticated central Email Marketing Dashboard (ID `513494`) connected to its RunSignup/TicketSignup objects.
+- Its recipient selector exposes current, last-year, and past participants; donors; fundraisers and team roles; volunteers; ticket purchasers; custom contacts/lists; and include/exclude filters.
+- It supports marketing and transactional email, deduplication, templates, scheduling/automation, unsubscribes, and delivery/open/click/bounce/spam reporting.
+- The dashboard currently contains 0 custom contacts, 0 custom lists, and 0 sent emails.
+- The published RunSignup API catalog exposes no Email V2, contact-list, campaign-send, or email-reporting methods.
+- Do not infer private endpoints or automate the dashboard by scraping. Engine prepares the exact audience selection, message, assets, classification, and follow-up record; the verified dashboard is the current last mile until a documented API becomes available.
 
 ## Seller workflow
 
@@ -160,7 +161,7 @@ Physical creation inside RunSignup/TicketSignup depends on verified write API ac
 | RunSignup/TicketSignup write / expanded API | Requested; current grant status unknown | Check account/developer portal and correspondence; follow up firmly if absent |
 | Google Ads Grants | NWANA Google Ads / Ad Grants account is under `admin@nwaofna.org`; developer/API access is not confirmed complete | Sign in as `admin@nwaofna.org`; check the Google Cloud project, Google Ads API access level, Ads/Ad Grants account linkage, and whether a new application is required after the September 9, 2026 access-process change |
 | LinkedIn | App created and Page verified; Community Management API was requested | Check developer portal for approval and available scopes |
-| RunSignup/TicketSignup Email V2 | Dashboard product verified free; supports recipient selection, custom lists, templates, scheduled/automated emails, and delivery/open/click reporting. No Email V2 or contact-list methods appear in the published API catalog. | Ask RunSignup whether the active API Caller has any private/expanded Email V2 or contact-list endpoints. Until confirmed, API automation is UNKNOWN and dashboard execution remains manual. |
+| RunSignup/TicketSignup Email V2 | Authenticated NWANA dashboard ID `513494` verified; connected object audiences, contacts/lists, templates, automation, unsubscribes, and reporting are available. Published API catalog has no email/contact methods. | Build Engine's exact audience/content/asset/classification handoff and outcome tracking around the verified dashboard last mile. Revisit automation only when a documented authorized API appears; do not scrape or contact support merely to repeat the audit. |
 | Moodle Academy | Existing production asset; API/control access not verified for Engine | Verify web services/API and exact objects to connect |
 | Seat Theory / Zubie Five | Business channels identified; automation/API status unknown | Verify access, cost, and supported handoff |
 | Press/media | Engine prepares the release, verified recipients, and follow-up record; individual email is sent manually by a person | Build the verified media registry and human handoff; do not add Gmail API |
