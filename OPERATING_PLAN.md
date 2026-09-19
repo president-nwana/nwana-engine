@@ -4,18 +4,39 @@ This file is the current execution contract for NWANA Engine. It supersedes olde
 
 ## Owner outcome
 
-NWANA Engine is not complete until the project owner can use a normal control page without terminal commands or a chat assistant to:
+NWANA Engine is not complete until the project owner can use a normal operating center without terminal commands or a chat assistant to:
 
-1. create a new NWANA object or connect an existing one;
-2. choose the required business result;
-3. approve consequential external actions;
-4. see what the machine completed, what response occurred, and what requires attention.
+1. see what is happening across NWANA;
+2. create a new NWANA object or connect an existing one;
+3. submit a thought, problem, opportunity, task, file, or other source material without first knowing the implementation;
+4. choose a required business result or ask Engine to recommend one;
+5. approve consequential external actions;
+6. see what the machine completed, what response occurred, and what requires attention;
+7. prepare, conduct, record, and operationalize Board meetings.
 
 The owner must not be required to recreate Series, Challenges, Championships, Academy campaigns, funds, sponsorship assets, or distribution packages manually across multiple platforms.
 
-## Control page
+## Operating center
 
-The operator interface must provide at least:
+The owner-facing product has six connected work areas.
+
+### Overview
+
+Show the current state of NWANA, including as data becomes connected:
+
+- nearest competitions and calendar items;
+- registrations, recent results, standings, winners, and records;
+- sponsors, sponsorship assets, sellers, negotiations, and next actions;
+- donations, funds, and fundraising outcomes;
+- participants, Academy students, instructors, NW Group leaders, partners, and media responses;
+- Meta, RunSignup/TicketSignup email, Google Ads Grants, and other verified channel outcomes;
+- active initiatives, blocked work, errors, required approvals, and decisions needed from the owner or Board.
+
+Overview data must come from verified system records and connected sources. Do not invent totals to fill an empty dashboard.
+
+### Actions
+
+Provide at least:
 
 - Create Series;
 - Create Challenge;
@@ -31,7 +52,57 @@ The operator interface must provide at least:
 - Distribute to Press;
 - Review Actions, Outcomes, and Errors.
 
-Do not describe backend endpoints, Registry rows, plans, or drafts alone as a finished machine.
+### Initiatives and source materials
+
+Accept an owner-submitted thought, problem, opportunity, task, document, spreadsheet, contact file, or other material. Engine must:
+
+1. identify what it contains and which NWANA objects or goals it may serve;
+2. distinguish verified facts, unsupported claims, outdated statements, missing contacts, and missing decisions;
+3. propose concrete results, audiences, offers, channels, actions, and follow-up;
+4. use an existing verified mechanism when one is available;
+5. present specific options when owner judgment is required;
+6. route strategic, governance, legal, or otherwise consequential questions to the owner or Board;
+7. convert approved proposals into tracked work, objects, campaigns, contact research, or channel actions.
+
+A source file is not automatically a contact list. For example, an organization name may require contact research before a RunSignup/TicketSignup list can be prepared.
+
+### Board workspace
+
+Board work has three phases.
+
+Before a meeting:
+
+- every authorized Board member may add any number of agenda submissions on any day;
+- a submission may be a question, proposal, report, requested decision, discussion item, or request to speak;
+- preserve the author, submission time, desired meeting when supplied, supporting material, and status;
+- show all pending submissions when the meeting is opened;
+- prepare the operational summary, results, unresolved prior decisions, proposed agenda, and decision options from verified Engine state;
+- do not use recurring timers or polling merely because meetings are normally weekly.
+
+During a meeting:
+
+- record attendance, agenda items, discussion, motions or proposals, decisions, votes when applicable, responsible person, due date, and follow-up;
+- let the meeting confirm, defer, reject, amend, or refer each submission;
+- convert every confirmed decision into tracked Engine work immediately;
+- execute only actions already permitted by the approval, integration, cost, and safety boundaries; otherwise create the exact required approval or blocker.
+
+After a meeting:
+
+- produce the meeting minutes;
+- preserve decisions and their evidence;
+- assign and track work;
+- carry unresolved items into future meeting preparation;
+- include completion status in the next requested Board briefing.
+
+### Decisions and approvals
+
+Show actions waiting for owner or Board judgment, the available options, consequences, evidence, cost boundary, and what Engine will do after approval.
+
+### Results and history
+
+Preserve actions, responses, outcomes, failures, decisions, meeting records, follow-up, and the relationship to the originating object or initiative.
+
+Do not describe backend endpoints, Registry rows, plans, drafts, or a static dashboard alone as a finished machine.
 
 ## Complete operating loop
 
@@ -173,7 +244,7 @@ Unknown means unknown. Do not infer approval from an application submission or f
 
 1. Access audit: check every requested Engine API/portal above and record evidence, scopes, cost, and blockers. Google Workspace email is explicitly outside this audit.
 2. Follow-up: pursue missing approvals, especially RunSignup/TicketSignup write, Google Ads, and LinkedIn.
-3. Operator control page: build the owner-facing create/connect/goal/review/error interface.
+3. Operating center foundation: build Overview, Actions, Initiatives, Board workspace, Decisions and Approvals, and Results and History around verified data and explicit action boundaries.
 4. Existing-object connection: connect Academy, Licenses, NW Groups, Instructor Growth Fund, Sponsorship, Partner Network, and the completed Series 2026 publication path.
 5. Real execution: connect Meta, Google Ads Grants, RunSignup/TicketSignup email and contact lists, press handoff, sellers, partners, listings, and verified sponsorship channels one by one with outcome tracking.
 6. Future-object creation: create Series 2027, Challenges, and Championships through Engine using verified platform write capabilities.
@@ -183,4 +254,4 @@ Do not drift into mass Registry cataloguing, generic architecture, speculative a
 
 ## Definition of done
 
-The machine is operationally useful only when the owner can create or connect an object, request a business result, approve consequential actions, and observe outcomes from the control page without terminal commands and without depending on a particular chat session.
+The machine is operationally useful only when the owner can observe NWANA, create or connect an object, submit an unstructured thought or material, request or receive a recommended business result, approve consequential actions, conduct Board work, and observe outcomes from the operating center without terminal commands and without depending on a particular chat session.
