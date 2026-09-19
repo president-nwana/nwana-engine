@@ -19,6 +19,17 @@ Read before making changes:
 6. relevant docs/adr/
 7. AGENTS.md
 
+## RUNSIGNUP API CALLER / 522 DIAGNOSIS — VERIFIED 2026-09-19
+
+- RunSignup API Caller is active.
+- Worker secrets `RUNSIGNUP_API_REG` and `RUNSIGNUP_API_REG_SECRET` are configured; their values were not changed or exposed.
+- Engine sends `rsu_api_reg` and `X-RSU-API-REG-SECRET` on RunSignup requests.
+- Deploy `35b2ef2b-ce77-4563-b602-b1e6df5ee307` initially returned `RunSignup races request failed: 522` from `GET /sources/runsignup/discovery`.
+- A later intentional one-time request to the same deployed endpoint returned `200 OK`, `ok=true`, `container_count=11`, and a 62,477-byte discovery response.
+- This proves the deployed API Caller credentials and request format are accepted. The earlier 522 was a transient upstream connection timeout, not an authentication failure.
+- No code, secret, Registry, D1, schedule, cron, or paid resource was changed.
+- Do not add recurring retries or polling. If 522 recurs, preserve the timestamp and Cloudflare diagnostic headers and perform only an intentional bounded retry.
+
 ## LINKEDIN API — VERIFIED PENDING 2026-09-19
 
 - App: NWANA Publishing.
