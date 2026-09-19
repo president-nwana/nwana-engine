@@ -10,6 +10,9 @@
 - Added OAuth configuration and missing-secret regression tests.
 - Removed the obsolete developer-token requirement after verifying Google's September 9, 2026 project-based access change.
 - Reduced the authorization request to Google's required parameters after the first live consent request returned HTTP 400 for the optional incremental-authorization and login-hint parameters.
+- Completed live OAuth authorization for admin@nwaofna.org.
+- Verified Explorer connection to customer 6758500147 through the deployed read-only status endpoint.
+- Confirmed execution_allowed=false; no campaign was created or changed.
 
 
 ## 2026-09-18 — Bound RunSignup requests to the free Worker limit
