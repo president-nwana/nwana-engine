@@ -23,6 +23,8 @@ import {
 interface Env {
         nwana_engine_db: D1Database;
         RUNSIGNUP_ACCESS_TOKEN: string;
+        RUNSIGNUP_API_REG?: string;
+        RUNSIGNUP_API_REG_SECRET?: string;
         NWANA_META_TOKEN: string;
         GOOGLE_ADS_CLIENT_ID?: string;
         GOOGLE_ADS_CLIENT_SECRET?: string;
@@ -2694,6 +2696,8 @@ async function discoverRunSignup(
 ): Promise<Response> {
         const source = new RunSignupSource({
                 accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                apiCallerToken: env.RUNSIGNUP_API_REG,
+                apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
 
         const discovery =
@@ -3006,6 +3010,8 @@ async function previewRunSignupEvents(
 ): Promise<Response> {
         const source = new RunSignupSource({
                 accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                apiCallerToken: env.RUNSIGNUP_API_REG,
+                apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
 
         const discovery =
@@ -3132,6 +3138,8 @@ async function ingestRunSignupEvents(
 ): Promise<Response> {
         const source = new RunSignupSource({
                 accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                apiCallerToken: env.RUNSIGNUP_API_REG,
+                apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
 
         const discovery =
@@ -3421,6 +3429,8 @@ async function ingestRunSignupDiscovery(
 ): Promise<Response> {
         const source = new RunSignupSource({
                 accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                apiCallerToken: env.RUNSIGNUP_API_REG,
+                apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
 
         const discovery =
@@ -3644,6 +3654,8 @@ async function syncRunSignup(
 ): Promise<Response> {
         const source = new RunSignupSource({
                 accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                apiCallerToken: env.RUNSIGNUP_API_REG,
+                apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
 
         const item = await source.fetchRace(209464);
@@ -4224,6 +4236,8 @@ async function ingestRunSignupRelationships(
 ): Promise<Response> {
         const source = new RunSignupSource({
                 accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                apiCallerToken: env.RUNSIGNUP_API_REG,
+                apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
 
         const discovery =
@@ -5127,7 +5141,7 @@ async function getSeries2026ResultPublicationPreview(
 ): Promise<Response> {
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
-		{ distance },
+		{ distance, apiCallerToken: env.RUNSIGNUP_API_REG, apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET },
 	);
 	const history = await env.nwana_engine_db
 		.prepare(`
@@ -5195,7 +5209,7 @@ async function getSeries2026ResultCard(
 	}
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
-		{ raceId },
+		{ raceId, apiCallerToken: env.RUNSIGNUP_API_REG, apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET },
 	);
 	const draft = preview.drafts.find(
 		(value) => value.publication_key === publicationKey,
@@ -5268,7 +5282,7 @@ async function establishSeries2026ResultPublicationBaseline(
 ): Promise<Response> {
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
-		{ distance },
+		{ distance, apiCallerToken: env.RUNSIGNUP_API_REG, apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET },
 	);
 	const readyDrafts = preview.drafts.filter(
 		(draft) => draft.ready_for_editorial_review,
@@ -5435,7 +5449,7 @@ async function publishSeries2026Result(
 	}
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
-		{ raceId },
+		{ raceId, apiCallerToken: env.RUNSIGNUP_API_REG, apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET },
 	);
 	const draft = preview.drafts.find((value) => value.publication_key === body.publication_key);
 	if (!draft || !draft.ready_for_editorial_review || !draft.editorial_draft.ready_for_approval) {
