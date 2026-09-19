@@ -9,6 +9,7 @@
 - Kept Google Ads campaign execution disabled and added no polling, cron, paid advertising, or background requests.
 - Added OAuth configuration and missing-secret regression tests.
 - Removed the obsolete developer-token requirement after verifying Google's September 9, 2026 project-based access change.
+- Reduced the authorization request to Google's required parameters after the first live consent request returned HTTP 400 for the optional incremental-authorization and login-hint parameters.
 
 
 ## 2026-09-18 — Bound RunSignup requests to the free Worker limit
