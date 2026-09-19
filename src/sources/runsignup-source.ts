@@ -7,6 +7,8 @@ import type {
 
 interface RunSignupSourceOptions {
         accessToken: string;
+        apiCallerToken?: string;
+        apiCallerSecret?: string;
         resultsPerPage?: number;
 }
 
@@ -39,10 +41,14 @@ export class RunSignupSource implements SourceAdapter {
         readonly id = "runsignup";
 
         private readonly accessToken: string;
+        private readonly apiCallerToken?: string;
+        private readonly apiCallerSecret?: string;
         private readonly resultsPerPage: number;
 
         constructor(options: RunSignupSourceOptions) {
                 this.accessToken = options.accessToken;
+                this.apiCallerToken = options.apiCallerToken;
+                this.apiCallerSecret = options.apiCallerSecret;
                 this.resultsPerPage =
                         Math.min(
                                 Math.max(
@@ -51,6 +57,17 @@ export class RunSignupSource implements SourceAdapter {
                                 ),
                                 1000,
                         );
+        }
+
+        private prepareRequest(url: URL): HeadersInit {
+                const headers: Record<string, string> = {
+                        Authorization: `Bearer ${this.accessToken}`,
+                };
+                if (this.apiCallerToken && this.apiCallerSecret) {
+                        url.searchParams.set("rsu_api_reg", this.apiCallerToken);
+                        headers["X-RSU-API-REG-SECRET"] = this.apiCallerSecret;
+                }
+                return headers;
         }
 
         async fetchRace(
@@ -72,10 +89,7 @@ export class RunSignupSource implements SourceAdapter {
                 const response = await fetch(
                         url.toString(),
                         {
-                                headers: {
-                                        Authorization:
-                                                `Bearer ${this.accessToken}`,
-                                },
+                                headers: this.prepareRequest(url),
                         },
                 );
 
@@ -165,10 +179,7 @@ export class RunSignupSource implements SourceAdapter {
                 const response = await fetch(
                         url.toString(),
                         {
-                                headers: {
-                                        Authorization:
-                                                `Bearer ${this.accessToken}`,
-                                },
+                                headers: this.prepareRequest(url),
                         },
                 );
 
