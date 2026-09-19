@@ -14,11 +14,20 @@ import { applySeries2026PublicationHistory, previewSeries2026ResultPublications 
 import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
+import {
+        getGoogleAdsStatus,
+        googleAdsAuthorizationUrl,
+        handleGoogleAdsCallback,
+} from "./google-ads";
 
 interface Env {
         nwana_engine_db: D1Database;
         RUNSIGNUP_ACCESS_TOKEN: string;
         NWANA_META_TOKEN: string;
+        GOOGLE_ADS_CLIENT_ID?: string;
+        GOOGLE_ADS_CLIENT_SECRET?: string;
+        GOOGLE_ADS_DEVELOPER_TOKEN?: string;
+        GOOGLE_ADS_TOKEN_KEY?: string;
         IMAGES: ImagesBinding;
 }
 
@@ -5570,6 +5579,39 @@ export default {
 					"audit",
 				],
 			});
+		}
+
+		if (request.method === "GET" && url.pathname === "/integrations/google-ads/status") {
+			const status = await getGoogleAdsStatus(env);
+			return json(status, status.ok ? 200 : status.configured ? 502 : 503);
+		}
+
+		if (request.method === "GET" && url.pathname === "/integrations/google-ads/connect") {
+			try {
+				return Response.redirect(await googleAdsAuthorizationUrl(env), 302);
+			} catch (error) {
+				return json({
+					ok: false,
+					connected: false,
+					error: error instanceof Error ? error.message : "Google Ads connection could not start",
+				}, 503);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/integrations/google-ads/callback") {
+			try {
+				const connection = await handleGoogleAdsCallback(url, env);
+				return new Response(
+					`<!doctype html><html lang="en"><meta charset="utf-8"><title>NWANA Google Ads connected</title><body style="font:20px system-ui;max-width:720px;margin:80px auto;padding:24px"><h1>Google Ads connected</h1><p>NWANA Engine can access ${connection.customers.length} Google Ads account(s).</p><p>No campaign was created or changed. You may close this tab.</p></body></html>`,
+					{ headers: { "content-type": "text/html; charset=utf-8" } },
+				);
+			} catch (error) {
+				return json({
+					ok: false,
+					connected: false,
+					error: error instanceof Error ? error.message : "Google Ads authorization failed",
+				}, 400);
+			}
 		}
 
 		if (request.method === "GET" && url.pathname === "/integrations/meta/status") {
