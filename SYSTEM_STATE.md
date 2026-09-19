@@ -19,6 +19,15 @@ Read before making changes:
 6. relevant docs/adr/
 7. AGENTS.md
 
+## EMAIL INTEGRATION BOUNDARY — OWNER CORRECTION 2026-09-19
+
+- Google Workspace email is not an NWANA Engine integration.
+- Do not build a Gmail API integration, automated Google Workspace bulk-email system, or duplicate Google Workspace contact database.
+- RunSignup/TicketSignup email and contact lists are the Engine's primary mass-email and contact layer.
+- `admin@nwaofna.org` and `president@nwaofna.org` remain human-operated mailboxes for individual business correspondence, including replies to press, partners, sponsors, and support.
+- If a future verified task cannot be completed through RunSignup/TicketSignup, evaluate that exact task separately before reconsidering Google Workspace integration. No such task is currently verified.
+- This boundary concerns email only. The existing use of the Gemini application included with Google Workspace for Nonprofits to prepare reusable visual backgrounds remains separate and unchanged.
+
 ## RUNSIGNUP API CALLER / 522 DIAGNOSIS — VERIFIED 2026-09-19
 
 - RunSignup API Caller is active.
@@ -67,7 +76,7 @@ The next action is not more speculative backend construction and not more Series
 
 Follow `OPERATING_PLAN.md`:
 
-1. verify the actual status of every requested or required integration, beginning with RunSignup/TicketSignup write access, Google Ads Grants/API access, LinkedIn Community Management API, Google Workspace email, RunSignup email/contact access, Moodle, Seat Theory, and Zubie Five;
+1. verify the actual status of every requested or required Engine integration, beginning with RunSignup/TicketSignup write and email/contact access, Google Ads Grants/API access, LinkedIn Community Management API, Moodle, Seat Theory, and Zubie Five; Google Workspace email is explicitly excluded;
 2. pursue missing approvals instead of assuming that silence means rejection or approval;
 3. build the owner-facing control page for create/connect/required-result/review/outcomes/errors;
 4. connect existing assets and exact acquisition/distribution channels;

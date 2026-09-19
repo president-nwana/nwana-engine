@@ -60,7 +60,6 @@ The implementation must account for the exact applicable channels, not vague “
 - LinkedIn Page;
 - Google Ads Grants;
 - RunSignup/TicketSignup email and contact lists;
-- Google Workspace email;
 - verified sport, health, aging, nonprofit, business, and community media;
 - verified event calendars and free listings;
 - verified DAF and philanthropic directories;
@@ -69,6 +68,20 @@ The implementation must account for the exact applicable channels, not vague “
 - Seat Theory;
 - Zubie Five;
 - additional channels only after their cost, access, and operating role are verified.
+
+## Email boundary
+
+RunSignup/TicketSignup email and contact lists are the Engine's mass-email and contact layer.
+
+Do not create:
+
+- a Gmail API integration;
+- automated bulk sending through Google Workspace;
+- a duplicate contact database for Google Workspace email.
+
+The mailboxes `admin@nwaofna.org` and `president@nwaofna.org` remain human-operated accounts for individual business correspondence, including replies to press, partners, sponsors, and support. They are not Engine channels.
+
+If a future verified task cannot be performed through RunSignup/TicketSignup, evaluate that exact gap separately before reconsidering any Google Workspace integration. No such task is currently verified.
 
 ## Seller workflow
 
@@ -92,8 +105,8 @@ Engine must support:
 - matching a real object or development to relevant media;
 - preparing a factual press release or pitch;
 - selecting exact verified recipients;
-- sending through an approved connected channel;
-- recording replies and follow-up.
+- preparing a human handoff for individual outreach from an existing NWANA mailbox;
+- recording replies and follow-up without connecting Gmail or duplicating the contact database.
 
 ## Google Ads Grants workflow
 
@@ -139,22 +152,21 @@ Physical creation inside RunSignup/TicketSignup depends on verified write API ac
 | RunSignup/TicketSignup write / expanded API | Requested; current grant status unknown | Check account/developer portal and correspondence; follow up firmly if absent |
 | Google Ads Grants | NWANA Google Ads / Ad Grants account is under `admin@nwaofna.org`; developer/API access is not confirmed complete | Sign in as `admin@nwaofna.org`; check the Google Cloud project, Google Ads API access level, Ads/Ad Grants account linkage, and whether a new application is required after the September 9, 2026 access-process change |
 | LinkedIn | App created and Page verified; Community Management API was requested | Check developer portal for approval and available scopes |
-| Google Workspace | Google Workspace for Nonprofits exists | Verify a $0 organization-email sending path and required admin/API permissions |
 | RunSignup/TicketSignup email/contact access | Unknown | Verify exact API capabilities and permissions |
 | Moodle Academy | Existing production asset; API/control access not verified for Engine | Verify web services/API and exact objects to connect |
 | Seat Theory / Zubie Five | Business channels identified; automation/API status unknown | Verify access, cost, and supported handoff |
-| Press/media | No platform signal required | Build verified media registry plus Google Workspace outreach and response tracking |
+| Press/media | Engine prepares the release, verified recipients, and follow-up record; individual email is sent manually by a person | Build the verified media registry and human handoff; do not add Gmail API |
 | NWANA sellers | No external API required | Build internal asset assignment, outreach, deal, commission, and follow-up workflow |
 
 Unknown means unknown. Do not infer approval from an application submission or from absence of an email.
 
 ## Immediate execution order
 
-1. Access audit: check every requested API/portal above and record evidence, scopes, cost, and blockers.
+1. Access audit: check every requested Engine API/portal above and record evidence, scopes, cost, and blockers. Google Workspace email is explicitly outside this audit.
 2. Follow-up: pursue missing approvals, especially RunSignup/TicketSignup write, Google Ads, and LinkedIn.
 3. Operator control page: build the owner-facing create/connect/goal/review/error interface.
 4. Existing-object connection: connect Academy, Licenses, NW Groups, Instructor Growth Fund, Sponsorship, Partner Network, and the completed Series 2026 publication path.
-5. Real execution: connect Meta, Google Ads Grants, email, press, sellers, partners, listings, and verified sponsorship channels one by one with outcome tracking.
+5. Real execution: connect Meta, Google Ads Grants, RunSignup/TicketSignup email and contact lists, press handoff, sellers, partners, listings, and verified sponsorship channels one by one with outcome tracking.
 6. Future-object creation: create Series 2027, Challenges, and Championships through Engine using verified platform write capabilities.
 7. Independence test: the owner completes a real create/connect/distribute cycle without terminal commands or chat assistance.
 

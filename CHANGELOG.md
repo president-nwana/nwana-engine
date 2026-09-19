@@ -1,5 +1,15 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-19 — Remove Google Workspace email from Engine scope
+
+- Removed Google Workspace email from the Engine channel and integration plans.
+- Established RunSignup/TicketSignup email and contact lists as the sole current mass-email and contact layer.
+- Prohibited Gmail API, automated Google Workspace bulk sending, and a duplicate Google Workspace contact database.
+- Kept `admin@nwaofna.org` and `president@nwaofna.org` for human individual correspondence with press, partners, sponsors, and support.
+- Changed press delivery to a prepared human handoff with response tracking.
+- Left the separate approved Gemini Workspace visual-asset workflow unchanged.
+
+
 ## 2026-09-19 — Diagnose transient RunSignup 522
 
 - Rechecked `GET /sources/runsignup/discovery` once against deploy `35b2ef2b-ce77-4563-b602-b1e6df5ee307`.
