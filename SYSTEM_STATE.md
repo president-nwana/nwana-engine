@@ -28,6 +28,16 @@ Read before making changes:
 - If a future verified task cannot be completed through RunSignup/TicketSignup, evaluate that exact task separately before reconsidering Google Workspace integration. No such task is currently verified.
 - This boundary concerns email only. The existing use of the Gemini application included with Google Workspace for Nonprofits to prepare reusable visual backgrounds remains separate and unchanged.
 
+## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
+
+- Official RunSignup documentation confirms Email V2 is available to race directors, event organizers, and ticket-event hosts at no additional cost.
+- Verified dashboard capabilities include current and past participants, specific contacts, include/exclude recipient selection, custom lists, reusable templates, immediate or scheduled sending, automated emails, and delivery/open/click reporting.
+- The official published RunSignup API methods catalog contains no Email V2, email-campaign, custom-contact-list, or email-reporting methods.
+- Therefore dashboard product availability is VERIFIED, but Engine API access is UNKNOWN.
+- Do not guess private endpoints, scrape the dashboard, or claim that Engine can create lists, send email, or retrieve email analytics.
+- Required external verification: ask RunSignup whether the active API Caller has any private or expanded Email V2/contact-list endpoints and request the exact documentation, permissions, and cost.
+- No email was created, scheduled, or sent. No contact or list was read, created, changed, or copied.
+
 ## RUNSIGNUP API CALLER / 522 DIAGNOSIS — VERIFIED 2026-09-19
 
 - RunSignup API Caller is active.

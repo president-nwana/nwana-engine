@@ -83,6 +83,14 @@ The mailboxes `admin@nwaofna.org` and `president@nwaofna.org` remain human-opera
 
 If a future verified task cannot be performed through RunSignup/TicketSignup, evaluate that exact gap separately before reconsidering any Google Workspace integration. No such task is currently verified.
 
+Verified product/API distinction:
+
+- Email V2 is available in the RunSignup/TicketSignup dashboard at no additional cost.
+- The dashboard supports current and past participants, individual contacts, include/exclude recipient selection, custom lists, reusable templates, scheduled and automated emails, and delivery/open/click reporting.
+- The published RunSignup API catalog currently exposes no Email V2 or contact-list methods.
+- Do not infer a private endpoint or automate the dashboard by scraping.
+- API execution remains UNKNOWN until RunSignup confirms whether the active API Caller has private or expanded email permissions.
+
 ## Seller workflow
 
 Engine must track:
@@ -152,7 +160,7 @@ Physical creation inside RunSignup/TicketSignup depends on verified write API ac
 | RunSignup/TicketSignup write / expanded API | Requested; current grant status unknown | Check account/developer portal and correspondence; follow up firmly if absent |
 | Google Ads Grants | NWANA Google Ads / Ad Grants account is under `admin@nwaofna.org`; developer/API access is not confirmed complete | Sign in as `admin@nwaofna.org`; check the Google Cloud project, Google Ads API access level, Ads/Ad Grants account linkage, and whether a new application is required after the September 9, 2026 access-process change |
 | LinkedIn | App created and Page verified; Community Management API was requested | Check developer portal for approval and available scopes |
-| RunSignup/TicketSignup email/contact access | Unknown | Verify exact API capabilities and permissions |
+| RunSignup/TicketSignup Email V2 | Dashboard product verified free; supports recipient selection, custom lists, templates, scheduled/automated emails, and delivery/open/click reporting. No Email V2 or contact-list methods appear in the published API catalog. | Ask RunSignup whether the active API Caller has any private/expanded Email V2 or contact-list endpoints. Until confirmed, API automation is UNKNOWN and dashboard execution remains manual. |
 | Moodle Academy | Existing production asset; API/control access not verified for Engine | Verify web services/API and exact objects to connect |
 | Seat Theory / Zubie Five | Business channels identified; automation/API status unknown | Verify access, cost, and supported handoff |
 | Press/media | Engine prepares the release, verified recipients, and follow-up record; individual email is sent manually by a person | Build the verified media registry and human handoff; do not add Gmail API |

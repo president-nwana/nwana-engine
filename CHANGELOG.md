@@ -1,5 +1,14 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-19 — Audit RunSignup/TicketSignup Email V2 access
+
+- Verified from official RunSignup documentation that Email V2 is free and includes recipient selection, custom lists, templates, scheduling, automated emails, and performance reporting.
+- Verified that the published RunSignup API catalog exposes no Email V2 or contact-list methods.
+- Classified the dashboard product as available and the Engine API path as UNKNOWN pending direct RunSignup confirmation.
+- Prohibited guessing private endpoints or scraping the dashboard.
+- Created, changed, scheduled, and sent no email; read or changed no contact data.
+
+
 ## 2026-09-19 — Remove Google Workspace email from Engine scope
 
 - Removed Google Workspace email from the Engine channel and integration plans.
