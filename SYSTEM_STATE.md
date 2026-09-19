@@ -19,6 +19,19 @@ Read before making changes:
 6. relevant docs/adr/
 7. AGENTS.md
 
+## LINKEDIN API — VERIFIED PENDING 2026-09-19
+
+- App: NWANA Publishing.
+- LinkedIn app ID: 266204158.
+- Client ID: 78qu5nqdombvh5.
+- Created: September 7, 2026.
+- App type: Standalone app.
+- Community Management API tier requested: Development Tier.
+- Current portal status: Review in progress.
+- The access form reports that the survey was already completed or the session expired; this confirms an existing submission and is not a reason to resubmit.
+- LinkedIn publishing is not connected to Engine until approval and granted scopes are verified.
+- Next action: request a status update from LinkedIn Developer Support if no decision email has been received.
+
 ## GOOGLE ADS API — VERIFIED 2026-09-19
 
 - Google approved project 440660818183 for Explorer Access.
