@@ -30,13 +30,15 @@ Read before making changes:
 
 ## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
 
-- Official RunSignup documentation confirms Email V2 is available to race directors, event organizers, and ticket-event hosts at no additional cost.
-- Verified dashboard capabilities include current and past participants, specific contacts, include/exclude recipient selection, custom lists, reusable templates, immediate or scheduled sending, automated emails, and delivery/open/click reporting.
-- The official published RunSignup API methods catalog contains no Email V2, email-campaign, custom-contact-list, or email-reporting methods.
-- Therefore dashboard product availability is VERIFIED, but Engine API access is UNKNOWN.
-- Do not guess private endpoints, scrape the dashboard, or claim that Engine can create lists, send email, or retrieve email analytics.
-- Required external verification: ask RunSignup whether the active API Caller has any private or expanded Email V2/contact-list endpoints and request the exact documentation, permissions, and cost.
-- No email was created, scheduled, or sent. No contact or list was read, created, changed, or copied.
+- The authenticated NWANA Email Marketing Dashboard exists at dashboard ID `513494` and is connected to `Nordic Walking Association of North America NWANA`.
+- The dashboard currently reports 0 custom contacts, 0 custom lists, and 0 sent emails.
+- Its recipient selector already exposes NWANA RunSignup/TicketSignup objects and audience classes including current, last-year, and past participants; donors; fundraisers and team roles; volunteers and volunteer coordinators; ticket purchasers; and include/exclude filters.
+- Verified connected objects include the Series 2026 hub and distance objects, NWANA Instructor Growth Fund, NWANA Partner Network, NWANA Nordic Walking SPORT, Albert Fatikhov | Nordic Walking, and NWANA Clinics and Workshops.
+- The dashboard supports single contacts, custom lists, reusable templates, marketing versus transactional classification, deduplication choices, immediate or scheduled sending, automated emails, unsubscribes, and request/delivery/open/click/bounce/spam reporting.
+- The published RunSignup API catalog exposes no Email V2, contact-list, campaign-send, or email-reporting methods. Engine must not invent private endpoints or depend on browser scraping.
+- Operational conclusion: RunSignup/TicketSignup is the verified mass-email/contact system. The safe Engine boundary is to prepare the exact audience selection, message, assets, classification, and follow-up record; dashboard execution is the current verified last mile until a documented API becomes available.
+- Do not contact support merely to repeat this audit. Revisit API automation only if RunSignup publishes documentation or the provider portal exposes an authorized endpoint.
+- No email was created, scheduled, or sent. No contact, list, setting, or unsubscribe record was created or changed.
 
 ## RUNSIGNUP API CALLER / 522 DIAGNOSIS — VERIFIED 2026-09-19
 
