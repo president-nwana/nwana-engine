@@ -28,9 +28,10 @@ Read before making changes:
 - OAuth web client NWANA Engine Google Ads exists with callback:
   https://nwana-engine.nwana-engine.workers.dev/integrations/google-ads/callback
 - Engine now has owner-initiated connect, callback, encrypted refresh-token storage, and read-only status endpoints.
+- Google retired developer-token enforcement for this workflow on September 9, 2026; access is determined by the OAuth client's Cloud project, so Engine does not request or store a developer token.
 - Campaign creation or mutation remains disabled.
 - No recurring polling, cron trigger, paid advertising, or billable Google Cloud service was added.
-- Remaining one-time setup: deploy migration 0017; set OAuth client ID, client secret, developer token, and token-encryption key as Worker secrets; deploy; authorize once as admin@nwaofna.org; confirm the accessible customer list.
+- Remaining one-time setup: deploy migration 0017; set OAuth client ID, client secret, and token-encryption key as Worker secrets; deploy; authorize once as admin@nwaofna.org; confirm the accessible customer list.
 
 ## CURRENT OPERATING DIRECTIVE — 2026-09-18
 
