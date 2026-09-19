@@ -28,6 +28,18 @@ Read before making changes:
 - If a future verified task cannot be completed through RunSignup/TicketSignup, evaluate that exact task separately before reconsidering Google Workspace integration. No such task is currently verified.
 - This boundary concerns email only. The existing use of the Gemini application included with Google Workspace for Nonprofits to prepare reusable visual backgrounds remains separate and unchanged.
 
+## OPERATING CENTER, INITIATIVES, AND BOARD — OWNER DECISION 2026-09-19
+
+- The owner interface is an operating center, not only an action screen.
+- It must show verified current activity: nearby competitions/calendar, registrations and results, sponsors and negotiations, donations, people and partner pipelines, channel outcomes, blockers, errors, and decisions required.
+- Engine must accept unstructured thoughts, problems, opportunities, tasks, documents, spreadsheets, contact files, and other source material.
+- Engine must explain what can be done with an input, identify unsupported or outdated claims and missing contacts, propose results and actions, and convert owner-approved proposals into tracked work.
+- Simple work may proceed through an already verified and authorized mechanism. Strategic, governance, legal, costly, unsupported, or otherwise consequential work must be presented for owner or Board decision.
+- Board members must be able to submit any number of questions, proposals, reports, requested decisions, discussion items, or requests to speak at any time before a meeting.
+- The meeting workspace must show pending submissions with their author and status, support live minutes, and convert confirmed decisions into tracked Engine work.
+- Meeting preparation is owner-requested or event-triggered. The normal weekly meeting pattern does not authorize timers, polling, cron, or recurring background work.
+- See `docs/adr/ADR-0006-operating-center-initiatives-board.md`.
+
 ## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
 
 - The authenticated NWANA Email Marketing Dashboard exists at dashboard ID `513494` and is connected to `Nordic Walking Association of North America NWANA`.
