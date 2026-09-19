@@ -7,7 +7,6 @@ describe("Google Ads OAuth", () => {
 			nwana_engine_db: {} as D1Database,
 			GOOGLE_ADS_CLIENT_ID: "client-id",
 			GOOGLE_ADS_CLIENT_SECRET: "client-secret",
-			GOOGLE_ADS_DEVELOPER_TOKEN: "developer-token",
 			GOOGLE_ADS_TOKEN_KEY: "test-encryption-key",
 		}));
 		expect(url.origin).toBe("https://accounts.google.com");
