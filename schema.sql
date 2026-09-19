@@ -514,3 +514,14 @@ ON result_publication_deliveries(publication_key, destination);
 
 CREATE INDEX IF NOT EXISTS idx_result_publication_deliveries_status
 ON result_publication_deliveries(status);
+
+
+-- Encrypted long-lived OAuth credentials for owner-connected integrations.
+CREATE TABLE IF NOT EXISTS integration_credentials (
+  provider TEXT PRIMARY KEY,
+  encrypted_refresh_token TEXT NOT NULL,
+  iv TEXT NOT NULL,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
