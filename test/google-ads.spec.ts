@@ -13,8 +13,9 @@ describe("Google Ads OAuth", () => {
 		expect(url.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/adwords");
 		expect(url.searchParams.get("access_type")).toBe("offline");
 		expect(url.searchParams.get("prompt")).toBe("consent");
-		expect(url.searchParams.get("login_hint")).toBe("admin@nwaofna.org");
 		expect(url.searchParams.get("redirect_uri")).toBe(GOOGLE_ADS_REDIRECT_URI);
+		expect(url.searchParams.has("include_granted_scopes")).toBe(false);
+		expect(url.searchParams.has("login_hint")).toBe(false);
 		expect(url.searchParams.get("state")).toContain(".");
 	});
 
