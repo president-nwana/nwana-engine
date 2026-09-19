@@ -1,5 +1,14 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-19 — Diagnose transient RunSignup 522
+
+- Rechecked `GET /sources/runsignup/discovery` once against deploy `35b2ef2b-ce77-4563-b602-b1e6df5ee307`.
+- The deployed Worker returned `200 OK`, `ok=true`, and 11 RunSignup containers.
+- Confirmed the API Caller request format and configured secrets are working; the prior 522 was a transient upstream connection timeout, not an authentication failure.
+- Changed no code, credentials, Registry data, D1 data, schedules, cron triggers, or paid resources.
+- Preserved the strict $0 and no-polling rule; any future retry remains explicit and bounded.
+
+
 ## 2026-09-19 — Verify LinkedIn API application remains under review
 
 - Confirmed the NWANA Publishing LinkedIn app (app ID 266204158, client ID 78qu5nqdombvh5) exists as a Standalone app.
