@@ -1,5 +1,15 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-19 — Define operating center, initiatives, and Board workflow
+
+- Expanded the owner interface from an action screen to an operating center with Overview, Actions, Initiatives, Board, Decisions and Approvals, and Results and History.
+- Added intake for thoughts, problems, opportunities, tasks, documents, spreadsheets, contact files, and other source material.
+- Required Engine to explain what can be done with an input, flag unsupported or outdated claims and missing contacts, and convert approved proposals into tracked work.
+- Added continuous agenda contribution: every authorized Board member may submit any number of questions, proposals, reports, requested decisions, discussion items, or requests to speak before a meeting.
+- Added live meeting minutes that convert confirmed decisions into Engine work, subject to existing approval, integration, safety, and $0 cost boundaries.
+- Kept meeting preparation event-triggered; no weekly timer, polling, cron, or recurring background job was authorized.
+
+
 ## 2026-09-19 — Verify NWANA Email Marketing dashboard directly
 
 - Inspected the authenticated NWANA Email Marketing Dashboard (ID `513494`) without creating or changing data.
