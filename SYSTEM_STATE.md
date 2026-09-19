@@ -19,6 +19,19 @@ Read before making changes:
 6. relevant docs/adr/
 7. AGENTS.md
 
+## GOOGLE ADS API — VERIFIED 2026-09-19
+
+- Google approved project 440660818183 for Explorer Access.
+- Verified free quota: 2,880 production operations per day plus 15,000 test-account operations per day.
+- Google Ads API is enabled in the NWANA ChatGPT Connector project.
+- The Google Auth application is internal to the NWANA Workspace and uses admin@nwaofna.org.
+- OAuth web client NWANA Engine Google Ads exists with callback:
+  https://nwana-engine.nwana-engine.workers.dev/integrations/google-ads/callback
+- Engine now has owner-initiated connect, callback, encrypted refresh-token storage, and read-only status endpoints.
+- Campaign creation or mutation remains disabled.
+- No recurring polling, cron trigger, paid advertising, or billable Google Cloud service was added.
+- Remaining one-time setup: deploy migration 0017; set OAuth client ID, client secret, developer token, and token-encryption key as Worker secrets; deploy; authorize once as admin@nwaofna.org; confirm the accessible customer list.
+
 ## CURRENT OPERATING DIRECTIVE — 2026-09-18
 
 The next action is not more speculative backend construction and not more Series 2026 polishing.
