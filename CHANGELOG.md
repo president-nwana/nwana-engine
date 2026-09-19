@@ -1,5 +1,14 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-19 — Verify LinkedIn API application remains under review
+
+- Confirmed the NWANA Publishing LinkedIn app (app ID 266204158, client ID 78qu5nqdombvh5) exists as a Standalone app.
+- Confirmed Community Management API Development Tier status is `Review in progress`.
+- Confirmed the access form reports an existing completed or expired submission; no duplicate submission should be made.
+- Recorded the next external action: request a status update from LinkedIn Developer Support, then verify granted scopes after approval.
+- No LinkedIn publishing capability was enabled or exercised.
+
+
 ## 2026-09-19 — Add guarded Google Ads OAuth connection
 
 - Recorded Google Ads API Explorer approval for project 440660818183 with 2,880 free production operations per day.
