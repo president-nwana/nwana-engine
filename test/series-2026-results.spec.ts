@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { annotateSeries2026Records, applySeries2026PublicationHistory, buildSeries2026PublicationDraft, getSeries2026LevelDefinitions, previewSeries2026ResultPublications } from "../src/series-2026-results";
 
 const source = {
@@ -9,6 +9,9 @@ const source = {
 };
 
 describe("Series 2026 result publication handoff", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
 	it("creates a review-only draft from finalized RunSignup results", () => {
 		const draft = buildSeries2026PublicationDraft({
 			source,
@@ -160,6 +163,29 @@ describe("Series 2026 result publication handoff", () => {
 		expect(record.editorial_draft.post_text).toContain(
 			"Men's Series Record: Albert Fatikhov — 18:25",
 		);
+	});
+
+	it("sends the registered API Caller identity with RunSignup requests", async () => {
+		const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(JSON.stringify({ race: { events: [] } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+
+		await previewSeries2026ResultPublications("oauth-token", {
+			distance: "5K",
+			apiCallerToken: "caller-token",
+			apiCallerSecret: "caller-secret",
+		});
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		const [requestUrl, init] = fetchMock.mock.calls[0];
+		expect(new URL(String(requestUrl)).searchParams.get("rsu_api_reg")).toBe("caller-token");
+		expect(init?.headers).toMatchObject({
+			Authorization: "Bearer oauth-token",
+			"X-RSU-API-REG-SECRET": "caller-secret",
+		});
 	});
 
 	it("rejects an unknown bounded source before making RunSignup requests", async () => {
