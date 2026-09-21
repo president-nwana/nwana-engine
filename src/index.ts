@@ -23,6 +23,7 @@ import {
 	createBoardSubmission,
 	createInitiative,
 	getOperatingCenterOverview,
+	isOperatingCenterAuthorized,
 	listBoardSubmissions,
 	listInitiatives,
 	renderOperatingCenterHtml,
@@ -38,6 +39,7 @@ interface Env {
 	GOOGLE_ADS_CLIENT_SECRET?: string;
 	GOOGLE_ADS_TOKEN_KEY?: string;
 	OPERATING_CENTER_ENABLED?: string;
+	OPERATING_CENTER_KEY?: string;
 	IMAGES: ImagesBinding;
 }
 
@@ -5589,8 +5591,19 @@ export default {
 		if (operatingCenterRoute && env.OPERATING_CENTER_ENABLED !== "true") {
 			return json({
 				ok: false,
-				error: "Operating center is not enabled until owner and Board access protection is configured",
+				error: "Operating center is not enabled",
 			}, 503);
+		}
+
+		const operatingCenterApiRoute =
+			operatingCenterRoute &&
+			!(request.method === "GET" && url.pathname === "/operating-center");
+
+		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
+			return json({
+				ok: false,
+				error: "Operating center access requires the owner key",
+			}, 401);
 		}
 
 		if (request.method === "GET" && url.pathname === "/operating-center") {

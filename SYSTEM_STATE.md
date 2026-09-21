@@ -52,6 +52,17 @@ Read before making changes:
 - No remote D1 migration, deployment, external publication, email, paid service, cron, or recurring job was performed.
 - Local verification passed: migration 0018 executed 13 commands, all six tables exist, Vitest passed 25/25, and `npx tsc --noEmit` passed.
 
+## OPERATING CENTER ACCESS PROTECTION — IMPLEMENTED LOCALLY 2026-09-21
+
+- Added owner-key protection for every operating-center API route (`/api/operating-center/*`, `/api/initiatives`, `/api/board/*`).
+- The key is accepted as an `Authorization: Bearer <key>` header or a `?key=` query parameter, compared with a constant-time byte comparison.
+- The key lives in the `OPERATING_CENTER_KEY` Worker secret and is never committed. A missing secret fails closed: every API call returns 401.
+- The public page shell at `/operating-center` renders a key-entry gate only; data calls and form submissions send the stored key, and a 401 returns the visitor to the gate.
+- `OPERATING_CENTER_ENABLED=true` is now set in `wrangler.jsonc`, so the interface is live on every deployment.
+- Recorded as `docs/adr/ADR-0007-operating-center-access-protection.md`.
+- Local verification: Vitest 28/28 (4 new auth tests), `npx tsc --noEmit` clean.
+- Still pending: apply migration 0018 to remote D1, set the `OPERATING_CENTER_KEY` secret, deploy, and hand the key to the owner.
+
 ## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
 
 - The authenticated NWANA Email Marketing Dashboard exists at dashboard ID `513494` and is connected to `Nordic Walking Association of North America NWANA`.

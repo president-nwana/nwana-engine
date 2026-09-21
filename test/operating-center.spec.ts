@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+	extractOperatingCenterKey,
+	isOperatingCenterAuthorized,
 	renderOperatingCenterHtml,
 	validateBoardSubmissionInput,
 	validateInitiativeInput,
@@ -54,12 +56,35 @@ describe("Board submission intake", () => {
 	});
 });
 
-describe("operating center page", () => {
-	it("contains initiative and Board entry points", () => {
+describe("operating center access protection", () => {
+	const key = "owner-key-123";
+
+	it("accepts the key from the Authorization header", () => {
+		const request = new Request("https://example.com/api/initiatives", {
+			headers: { authorization: "Bearer owner-key-123" },
+		});
+		expect(isOperatingCenterAuthorized(request, key)).toBe(true);
+	});
+
+	it("accepts the key from the query parameter", () => {
+		const request = new Request("https://example.com/api/initiatives?key=owner-key-123");
+		expect(extractOperatingCenterKey(request)).toBe("owner-key-123");
+		expect(isOperatingCenterAuthorized(request, key)).toBe(true);
+	});
+
+	it("rejects a wrong key, a missing key, and a missing configured key", () => {
+		const wrong = new Request("https://example.com/api/initiatives", {
+			headers: { authorization: "Bearer wrong-key" },
+		});
+		const missing = new Request("https://example.com/api/initiatives");
+		expect(isOperatingCenterAuthorized(wrong, key)).toBe(false);
+		expect(isOperatingCenterAuthorized(missing, key)).toBe(false);
+		expect(isOperatingCenterAuthorized(missing, undefined)).toBe(false);
+	});
+
+	it("serves a key entry gate on the page", () => {
 		const html = renderOperatingCenterHtml();
-		expect(html).toContain("Submit an initiative");
-		expect(html).toContain("Add a Board item");
-		expect(html).toContain("REQUEST_TO_SPEAK");
-		expect(html).toContain("/api/operating-center/overview");
+		expect(html).toContain("Operating center key");
+		expect(html).toContain("nwana_operating_center_key");
 	});
 });

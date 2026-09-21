@@ -134,6 +134,36 @@ async function readBody<T>(request: Request): Promise<T> {
 	}
 }
 
+function timingSafeEqual(a: string, b: string): boolean {
+	const aBytes = new TextEncoder().encode(a);
+	const bBytes = new TextEncoder().encode(b);
+	if (aBytes.length !== bBytes.length) return false;
+	let diff = 0;
+	for (let i = 0; i < aBytes.length; i++) diff |= aBytes[i] ^ bBytes[i];
+	return diff === 0;
+}
+
+export function extractOperatingCenterKey(request: Request): string {
+	const header = request.headers.get("authorization") ?? "";
+	const bearer = header.toLowerCase().startsWith("bearer ")
+		? header.slice(7).trim()
+		: "";
+	if (bearer) return bearer;
+	try {
+		return new URL(request.url).searchParams.get("key") ?? "";
+	} catch {
+		return "";
+	}
+}
+
+export function isOperatingCenterAuthorized(
+	request: Request,
+	expectedKey: string | undefined,
+): boolean {
+	if (!expectedKey) return false;
+	return timingSafeEqual(extractOperatingCenterKey(request), expectedKey);
+}
+
 export async function createInitiative(request: Request, db: D1Database): Promise<Response> {
 	const input = validateInitiativeInput(await readBody<InitiativeInput>(request));
 	const initiativeId = `INIT-${crypto.randomUUID()}`;
@@ -272,6 +302,17 @@ export function renderOperatingCenterHtml(): string {
 <body>
 	<header><h1>NWANA Operating Center</h1><p>What is happening, what needs a decision, and what happens next.</p></header>
 	<main>
+		<section class="panel" id="gate" hidden>
+			<h2>Owner access</h2>
+			<p class="unavailable">This page is private. Enter the operating center key to continue.</p>
+			<form id="key-form">
+				<label for="owner-key">Operating center key</label>
+				<input id="owner-key" name="owner_key" type="password" autocomplete="current-password" required>
+				<button type="submit">Open operating center</button>
+				<div class="message" id="key-message" aria-live="polite"></div>
+			</form>
+		</section>
+		<div id="app" hidden>
 		<section class="stats" id="stats"><div class="stat"><strong>…</strong><span>Loading verified state</span></div></section>
 		<section class="grid">
 			<form class="panel" id="initiative-form"><h2>Submit an initiative</h2>
@@ -293,10 +334,19 @@ export function renderOperatingCenterHtml(): string {
 			</form>
 		</section>
 		<section class="grid queue"><div class="panel"><h2>Initiatives</h2><div id="initiatives">Loading…</div></div><div class="panel"><h2>Board queue</h2><div id="board-items">Loading…</div></div></section>
+		</div>
 	</main>
 	<script>
 		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-		async function api(path,options){const r=await fetch(path,options);const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d}
+		const KEY_STORAGE='nwana_operating_center_key';
+		const gate=document.querySelector('#gate');
+		const app=document.querySelector('#app');
+		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
+		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
+		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
+		function showApp(){gate.hidden=true;app.hidden=false}
+		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
 		function formJson(form){return Object.fromEntries([...new FormData(form)].map(([k,v])=>[k,String(v)]))}
 		async function load(){
 			const [o,i,b]=await Promise.all([api('/api/operating-center/overview'),api('/api/initiatives'),api('/api/board/submissions')]);
@@ -305,8 +355,10 @@ export function renderOperatingCenterHtml(): string {
 			document.querySelector('#initiatives').innerHTML=i.initiatives.length?i.initiatives.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.input_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No initiatives yet.</div>';
 			document.querySelector('#board-items').innerHTML=b.submissions.length?b.submissions.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.submission_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
 		}
+		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
 		for(const [id,path] of [['initiative-form','/api/initiatives'],['board-form','/api/board/submissions']])document.querySelector('#'+id).addEventListener('submit',async e=>{e.preventDefault();const m=e.currentTarget.querySelector('.message');m.textContent='Saving…';try{await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formJson(e.currentTarget))});e.currentTarget.reset();m.textContent='Saved.';await load()}catch(err){m.textContent=err.message}});
-		load().catch(err=>{document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'});
+		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load().catch(renderLoadError)});
+		if(getKey()){showApp();load().catch(renderLoadError)}else{showGate('')}
 	</script>
 </body></html>`;
 }

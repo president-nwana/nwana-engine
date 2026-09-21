@@ -1,5 +1,14 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-21 — Protect and enable the operating center
+
+- Added owner-key access protection for all operating-center API routes: the key is accepted as an `Authorization: Bearer` header or a `?key=` parameter, compared in constant time, and stored as the `OPERATING_CENTER_KEY` Worker secret (never in the repo).
+- The public page shell now shows a key-entry gate; every data call and form submission sends the key from browser local storage, and a 401 returns the page to the gate.
+- Set `OPERATING_CENTER_ENABLED=true` in `wrangler.jsonc`, so the interface is live on deploy. Missing secret fails closed with 401.
+- Added 4 tests for key extraction, authorization, rejection, and the gate. Verified locally: Vitest 28/28, TypeScript clean.
+- Recorded as ADR-0007. Remote D1 migration 0018 and deployment are the remaining steps before the owner can open the page.
+- No timer, polling, cron, paid service, email, or publication was added.
+
 ## 2026-09-19 — Implement operating center foundation
 
 - Added D1 structures for initiatives, Board meetings, Board submissions, Board decisions, decision requests, and work items.
