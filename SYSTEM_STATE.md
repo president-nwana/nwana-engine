@@ -509,6 +509,14 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - The operating-center page now shows a Series 2026 race lifecycle panel: six distances, real current stage, owner action required, prep drafts, write access, and per-distance or bulk sync buttons. The overview `competition_calendar` section points at the lifecycle endpoint instead of reporting unavailable.
 - No polling, cron, timers, Gmail, Meta publication, Email V2 send, or RunSignup write was executed. Recorded as ADR-0008. Verified locally: migration 0019 applied to local D1, Vitest 42/42, TypeScript clean.
 
+## RACE RESULTS PAGE — IMPLEMENTED LOCALLY 2026-09-22
+
+- Added migration `0020-race-event-results.sql` with the `race_event_results` table: per-event snapshot of result rows (athlete, gender, time, performance level, level place), written by the lifecycle sync from RunSignup data. Read-only storage; never writes back to RunSignup.
+- Added page `/operating-center/results`: Series 2026 past races per distance, most recent first, result tables sorted by performance level then level place. Sync buttons ("Sync all distances" and per-distance) live on this page.
+- Main `/operating-center` keeps a clean lifecycle stage overview with a link to the results page; sync buttons removed from the main page. This is the multi-page operating-center pattern.
+- Added API `GET /api/operating-center/race-results` and `flattenEventResults` (dedupe by result_id, sort by level then level place) with regression tests. Verified locally: Vitest 47/47, TypeScript clean.
+- Not deployed yet (no Cloudflare credentials in this session); migration 0020 not applied to remote D1 yet; commits not pushed yet.
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.

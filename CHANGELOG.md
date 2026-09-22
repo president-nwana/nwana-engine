@@ -1,5 +1,14 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-22 — Race results page (separate page, sync moved off the main page)
+
+- Added migration 0020 (`race_event_results` table): per-event snapshot of result rows (athlete, gender, time, performance level, level place), written by the lifecycle sync from RunSignup data. Read-only storage; never writes back to RunSignup.
+- Added page `/operating-center/results`: Series 2026 past races per distance, most recent first, with result tables sorted by performance level then level place. Sync buttons ("Sync all distances" and per-distance) live on this page now.
+- Main `/operating-center` keeps a clean lifecycle stage overview with a link to the results page; sync buttons removed from the main page.
+- Added API `GET /api/operating-center/race-results`. Added `flattenEventResults` (dedupe by result_id, sort by level then level place) with regression tests.
+- Verified locally: Vitest 47/47, TypeScript clean.
+- Not deployed yet: no Cloudflare credentials in this session. Commits not pushed yet: local commits ahead of origin/main, push after deploy verification.
+
 ## 2026-09-22 — Close the Series 2026 race lifecycle loop (phase 1)
 
 - Added migration 0019 (`race_lifecycle` table): one row per distance with the active event, lifecycle stage, prep drafts and confirmation, `write_access` defaulting to `UNKNOWN`, `write_mode` fixed to `dry_run`.
