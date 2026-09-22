@@ -3,9 +3,7 @@ import {
 	extractOperatingCenterKey,
 	findNextBoardMeetingId,
 	isOperatingCenterAuthorized,
-	operatingCenterMenu,
 	renderOperatingCenterHtml,
-	renderRaceResultsHtml,
 	validateBoardSubmissionInput,
 	validateInitiativeInput,
 } from "../src/operating-center";
@@ -154,66 +152,6 @@ describe("operating center main page client script", () => {
 	it("embeds syntactically valid JavaScript so the page can boot (regression: ADR-0022 stray brace blanked the page)", () => {
 		const html = renderOperatingCenterHtml();
 		const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
-		expect(scripts.length).toBeGreaterThan(0);
-		for (const body of scripts) {
-			expect(() => new Function(body)).not.toThrow();
-		}
-	});
-});
-
-function extractScripts(html: string): string[] {
-	return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
-}
-
-describe("operating center button menu (ADR-0023)", () => {
-	it("renders the same three-button menu under the header on all pages", () => {
-		for (const html of [renderOperatingCenterHtml(), renderRaceResultsHtml()]) {
-			expect(html).toContain('class="oc-menu"');
-			expect(html).toContain('href="/operating-center"');
-			expect(html).toContain('href="/operating-center/results"');
-			expect(html).toContain('href="/operating-center/funds"');
-			expect(html).toContain(">Overview<");
-			expect(html).toContain(">Results<");
-			expect(html).toContain(">Funds<");
-		}
-	});
-
-	it("marks the current page on the menu", () => {
-		expect(operatingCenterMenu("overview")).toContain('href="/operating-center" aria-current="page"');
-		expect(operatingCenterMenu("results")).toContain('href="/operating-center/results" aria-current="page"');
-		expect(operatingCenterMenu("funds")).toContain('href="/operating-center/funds" aria-current="page"');
-	});
-
-	it("sits directly under the header", () => {
-		const html = renderOperatingCenterHtml();
-		expect(html).toMatch(/<\/header>\s*<nav class="oc-menu"/);
-	});
-});
-
-describe("operating center main page lifecycle summary card (ADR-0023)", () => {
-	it("shows a compact summary card linking to the results page instead of inline rows", () => {
-		const html = renderOperatingCenterHtml();
-		expect(html).toContain('id="lifecycle-panel"');
-		expect(html).toContain('id="lifecycle-summary"');
-		expect(html).toContain('href="/operating-center/results"');
-		expect(html).not.toContain('id="lifecycle"');
-		expect(html).not.toContain("Confirm prep");
-	});
-});
-
-describe("operating center results page lifecycle (ADR-0023)", () => {
-	it("carries the full per-distance lifecycle rows with working action buttons", () => {
-		const html = renderRaceResultsHtml();
-		expect(html).toContain('id="lifecycle"');
-		expect(html).toContain('id="lifecycle-message"');
-		expect(html).toContain("Series 2026 race lifecycle");
-		expect(html).toContain("Confirm prep");
-		expect(html).toContain("/api/operating-center/race-lifecycle/prep-confirm");
-		expect(html).toContain("/api/operating-center/race-lifecycle");
-	});
-
-	it("embeds syntactically valid JavaScript (regression convention: inline JS in template literals)", () => {
-		const scripts = extractScripts(renderRaceResultsHtml());
 		expect(scripts.length).toBeGreaterThan(0);
 		for (const body of scripts) {
 			expect(() => new Function(body)).not.toThrow();

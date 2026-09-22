@@ -321,31 +321,6 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 	});
 }
 
-export type OperatingCenterPageId = "overview" | "results" | "funds";
-
-/**
- * ADR-0023: shared button menu rendered directly under the header on every
- * operating-center page. Same markup everywhere so the cockpit navigates as one.
- */
-export function operatingCenterMenu(active: OperatingCenterPageId): string {
-	const items: Array<{ id: OperatingCenterPageId; label: string; href: string }> = [
-		{ id: "overview", label: "Overview", href: "/operating-center" },
-		{ id: "results", label: "Results", href: "/operating-center/results" },
-		{ id: "funds", label: "Funds", href: "/operating-center/funds" },
-	];
-	return (
-		'<nav class="oc-menu" aria-label="Operating center">' +
-		items
-			.map((i) =>
-				i.id === active
-					? '<a class="oc-menu-btn oc-menu-active" href="' + i.href + '" aria-current="page">' + i.label + "</a>"
-					: '<a class="oc-menu-btn" href="' + i.href + '">' + i.label + "</a>",
-			)
-			.join("") +
-		"</nav>"
-	);
-}
-
 export function renderOperatingCenterHtml(): string {
 	return `<!doctype html>
 <html lang="en">
@@ -357,16 +332,12 @@ export function renderOperatingCenterHtml(): string {
 		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9}
 		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
 		header{background:var(--brand);color:white;padding:28px clamp(20px,5vw,72px)}header h1{margin:0;font-size:clamp(28px,4vw,44px)}header p{margin:8px 0 0;color:#dce9e2}
-		.oc-menu{background:var(--brand);padding:0 clamp(20px,5vw,72px) 18px;display:flex;flex-wrap:wrap;gap:10px}
-		.oc-menu-btn{display:inline-block;background:#2f6247;color:#fff;font-weight:700;padding:10px 20px;border-radius:9px;text-decoration:none}
-		.oc-menu-btn:hover{background:#3a7455}.oc-menu-active{background:#fff;color:var(--brand)}
 		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.stat,.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px}.stat strong{display:block;font-size:30px}.stat span{color:var(--muted)}
 		.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:20px}h2{margin:0 0 14px;font-size:22px}label{display:block;margin:12px 0 5px;font-weight:650}input,select,textarea,button{width:100%;font:inherit}input,select,textarea{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white}textarea{min-height:105px;resize:vertical}button{margin-top:14px;border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer}.message{min-height:24px;color:var(--muted);margin-top:9px}.queue{margin-top:20px}.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item strong{display:block}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}.followup-due{color:#b35400;font-weight:700}.followup-overdue{color:#b00020;font-weight:700}
 	</style>
 </head>
 <body>
 	<header><h1>NWANA Operating Center</h1><p>What is happening, what needs a decision, and what happens next.</p></header>
-	${operatingCenterMenu("overview")}
 	<main>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>
@@ -381,9 +352,10 @@ export function renderOperatingCenterHtml(): string {
 		<div id="app" hidden>
 		<section class="stats" id="stats"><div class="stat"><strong>…</strong><span>Loading verified state</span></div></section>
 		<section class="panel" id="lifecycle-panel" style="margin-top:20px"><h2>Series 2026 race lifecycle</h2>
-			<p class="meta">One row per distance lives on the results page now.</p>
-			<div id="lifecycle-summary">Loading…</div>
-			<p class="meta"><a href="/operating-center/results">Open results →</a></p>
+			<p class="meta">One row per distance. Stages: registration_open → awaiting_results → verifying (owner) → levels_computed → published → next_race_prep.</p>
+			<p class="meta"><a href="/operating-center/results">Race results →</a></p>
+			<div><span class="message" id="sync-message" aria-live="polite"></span></div>
+			<div id="lifecycle">Loading…</div>
 		</section>
 		<section class="panel" id="fund-card" style="margin-top:20px"><h2>Funds</h2>
 			<p class="meta">Fund objects and prospect pipelines live on their own page now, like race results.</p>
@@ -455,7 +427,7 @@ export function renderOperatingCenterHtml(): string {
 			const labels={pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results'};
 			document.querySelector('#stats').innerHTML=Object.entries(o.counts).map(([k,v])=>'<div class="stat"><strong>'+esc(v)+'</strong><span>'+esc(labels[k]||k)+'</span></div>').join('');
 			document.querySelector('#board-items').innerHTML=b.submissions.length?b.submissions.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.submission_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
-			loadLifecycleSummary();
+			loadLifecycle();
 			loadFundSummary();
 			loadSponsorshipAssets();
 			loadMeetings();
@@ -509,16 +481,23 @@ export function renderOperatingCenterHtml(): string {
 				await loadSponsorshipAssets();
 			}catch(err){m.textContent=err.message}
 		});
-		async function loadLifecycleSummary(){
-			const box=document.querySelector('#lifecycle-summary');
+		async function loadLifecycle(){
+			const box=document.querySelector('#lifecycle');
 			try{
 				const data=await api('/api/operating-center/race-lifecycle');
 				if(!data.distances.length){box.innerHTML='<div class="unavailable">No lifecycle state yet. Open <a href="/operating-center/results">Race results</a>; opening the page runs the first sync automatically.</div>';return}
-				const order=['registration_open','awaiting_results','verifying','levels_computed','published','next_race_prep'];
-				const counts={};data.distances.forEach(d=>{counts[d.stage]=(counts[d.stage]||0)+1});
-				const prep=data.distances.filter(d=>d.stage==='next_race_prep').length;
-				box.innerHTML='<div class="meta">'+order.filter(s=>counts[s]).map(s=>counts[s]+' × '+esc(s)).join(' · ')+'</div>'+
-					(prep?'<div class="meta followup-due">'+prep+' prep'+(prep>1?'s':'')+' need'+(prep>1?'':'s')+' review</div>':'<div class="meta">No prep awaiting review.</div>');
+				box.innerHTML=data.distances.map(d=>{
+					const ev=d.active_event;
+					const action=(d.owner_action&&d.stage!=='next_race_prep')?'<div class="meta">Owner action: '+esc(d.owner_action)+'</div>':'';
+					const prep=(d.stage==='next_race_prep'&&d.prep)?'<div class="meta">'+esc(d.owner_action||'Prep needs review')+'. Drafts ready: announcement + email (Send stays manual). <button data-prep="'+esc(d.distance)+'" style="width:auto">Confirm prep</button></div>':'';
+					return '<div class="item"><strong>'+esc(d.distance)+' — '+esc(d.stage)+'</strong>'+
+						'<div class="meta">'+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||'')+' · ':'')+'write: '+esc(d.write_access)+' (dry_run)'+(d.synced_at?' · synced '+esc(d.synced_at):'')+'</div>'+
+						action+prep+'</div>';
+				}).join('');
+				box.querySelectorAll('[data-prep]').forEach(btn=>btn.addEventListener('click',async()=>{
+					const m=document.querySelector('#sync-message');m.textContent='Confirming prep…';
+					try{await api('/api/operating-center/race-lifecycle/prep-confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:btn.dataset.prep})});m.textContent='Prep confirmed.';await loadLifecycle()}catch(err){m.textContent=err.message}
+				}));
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		let selectedMeetingId=null;
@@ -666,9 +645,6 @@ export function renderRaceResultsHtml(): string {
 		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9;--ok:#1c6b3a;--err:#a3322b}
 		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
 		header{background:var(--brand);color:white;padding:28px clamp(20px,5vw,72px)}header h1{margin:0;font-size:clamp(28px,4vw,44px)}header p{margin:8px 0 0;color:#dce9e2}header a{color:#dce9e2}
-		.oc-menu{background:var(--brand);padding:0 clamp(20px,5vw,72px) 18px;display:flex;flex-wrap:wrap;gap:10px}
-		.oc-menu-btn{display:inline-block;background:#2f6247;color:#fff;font-weight:700;padding:10px 20px;border-radius:9px;text-decoration:none}
-		.oc-menu-btn:hover{background:#3a7455}.oc-menu-active{background:#fff;color:var(--brand)}
 		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px}
 		h2{margin:0 0 14px;font-size:22px}h3{margin:18px 0 8px;font-size:18px}h4{margin:14px 0 4px;font-size:16px}
 		label{display:block;margin:12px 0 5px;font-weight:650}input,button{font:inherit}input{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%}
@@ -684,8 +660,8 @@ export function renderRaceResultsHtml(): string {
 </head>
 <body>
 	<header><h1>Series 2026 race results</h1><p>Past races only, newest first. Results refresh automatically every time this page is opened or reloaded. No buttons, no timers.</p></header>
-	${operatingCenterMenu("results")}
 	<main>
+		<div class="nav"><a href="/operating-center">← Back to Operating Center</a></div>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>
 			<p class="unavailable">This page is private. Enter the operating center key to continue.</p>
@@ -697,12 +673,6 @@ export function renderRaceResultsHtml(): string {
 			</form>
 		</section>
 		<div id="app" hidden>
-			<section class="panel">
-				<h2>Series 2026 race lifecycle</h2>
-				<p class="meta">One row per distance. Stages: registration_open → awaiting_results → verifying (owner) → levels_computed → published → next_race_prep.</p>
-				<div><span class="message" id="lifecycle-message" aria-live="polite"></span></div>
-				<div id="lifecycle">Loading…</div>
-			</section>
 			<section class="panel">
 				<h2>Sync status</h2>
 				<div class="message" id="sync-message" aria-live="polite">Refreshing results from RunSignup…</div>
@@ -755,25 +725,6 @@ export function renderRaceResultsHtml(): string {
 					events+'</section>';
 			}).join('');
 		}
-		async function loadLifecycle(){
-			const box=document.querySelector('#lifecycle');
-			try{
-				const data=await api('/api/operating-center/race-lifecycle');
-				if(!data.distances.length){box.innerHTML='<div class="unavailable">No lifecycle state yet.</div>';return}
-				box.innerHTML=data.distances.map(d=>{
-					const ev=d.active_event;
-					const action=(d.owner_action&&d.stage!=='next_race_prep')?'<div class="meta">Owner action: '+esc(d.owner_action)+'</div>':'';
-					const prep=(d.stage==='next_race_prep'&&d.prep)?'<div class="meta">'+esc(d.owner_action||'Prep needs review')+'. Drafts ready: announcement + email (Send stays manual). <button data-prep="'+esc(d.distance)+'" style="width:auto">Confirm prep</button></div>':'';
-					return '<div class="item"><strong>'+esc(d.distance)+' — '+esc(d.stage)+'</strong>'+
-						'<div class="meta">'+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||'')+' · ':'')+'write: '+esc(d.write_access)+' (dry_run)'+(d.synced_at?' · synced '+esc(d.synced_at):'')+'</div>'+
-						action+prep+'</div>';
-				}).join('');
-				box.querySelectorAll('[data-prep]').forEach(btn=>btn.addEventListener('click',async()=>{
-					const m=document.querySelector('#lifecycle-message');m.textContent='Confirming prep…';
-					try{await api('/api/operating-center/race-lifecycle/prep-confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:btn.dataset.prep})});m.textContent='Prep confirmed.';await loadLifecycle()}catch(err){m.textContent=err.message}
-				}));
-			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
-		}
 		async function refresh(){
 			const m=document.querySelector('#sync-message');
 			m.textContent='Refreshing results from RunSignup…';
@@ -792,8 +743,8 @@ export function renderRaceResultsHtml(): string {
 			try{renderResults(await api('/api/operating-center/race-results'))}
 			catch(err){document.querySelector('#results').innerHTML='<div class="panel"><div class="unavailable">'+esc(err.message)+'</div></div>'}
 		}
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();refresh();loadLifecycle()});
-		if(getKey()){showApp();refresh();loadLifecycle()}else{showGate('')}
+		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();refresh()});
+		if(getKey()){showApp();refresh()}else{showGate('')}
 	</script>
 </body></html>`;
 }
