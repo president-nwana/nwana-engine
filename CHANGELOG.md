@@ -1,5 +1,12 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — Unified Board intake and next-meeting-first layout (ADR-0020)
+
+- The two intake windows ("Submit an initiative" and "Add a Board item") are merged into one "Submit to the Board" form. Initiative is now one item type in the dropdown, alongside THOUGHT, PROBLEM, OPPORTUNITY, TASK and SOURCE_MATERIAL (owner: an initiative usually appears as a question anyway). The separate Initiatives queue panel is removed from the page; the backend table and endpoints stay untouched.
+- New submissions without an explicit requested meeting date auto-attach to the nearest upcoming Draft/Open meeting agenda (`findNextBoardMeetingId`), so the protocol fills during the week on its own. Dated submissions stay PENDING for manual triage. No D1 migration: `submission_type` has no CHECK constraint.
+- Board meetings panel reordered: the "Next meeting" card (title, date, status, protocol list, pending queue count) renders at the top, the meetings list follows, and "Schedule a meeting" moved to the bottom of the panel.
+- Verified: Vitest 165/165 (7 new tests), TypeScript clean.
+
 ## 2026-09-22 — Board meeting loop (ADR-0019)
 
 - The Board workspace finally has a machine loop: new `src/board.ts` (pure state machines + D1 functions, following the fund/sponsorship-asset pattern) reuses the existing tables from migration 0018 with no schema change, no migration, no seeding.

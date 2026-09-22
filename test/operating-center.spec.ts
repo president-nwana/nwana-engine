@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	extractOperatingCenterKey,
+	findNextBoardMeetingId,
 	isOperatingCenterAuthorized,
 	renderOperatingCenterHtml,
 	validateBoardSubmissionInput,
@@ -53,6 +54,64 @@ describe("Board submission intake", () => {
 			submitted_by: "Board Member",
 			requested_meeting_date: "next week",
 		})).toThrow("YYYY-MM-DD");
+	});
+
+	it("accepts the merged intake types: initiative and the initiative-style inputs", () => {
+		for (const submission_type of ["INITIATIVE", "THOUGHT", "PROBLEM", "OPPORTUNITY", "TASK", "SOURCE_MATERIAL"]) {
+			expect(validateBoardSubmissionInput({
+				submission_type,
+				title: "Something for the Board",
+				description: "Details here.",
+				submitted_by: "Board Member",
+			})).toMatchObject({ submission_type });
+		}
+	});
+});
+
+describe("next Board meeting lookup", () => {
+	function stubDb(firstResult: { meeting_id: string } | null) {
+		return {
+			prepare(_sql: string) {
+				return { first: async () => firstResult };
+			},
+		} as unknown as D1Database;
+	}
+
+	it("returns the nearest upcoming meeting id", async () => {
+		expect(await findNextBoardMeetingId(stubDb({ meeting_id: "MEET-1" }))).toBe("MEET-1");
+	});
+
+	it("returns null when no Draft/Open meeting exists", async () => {
+		expect(await findNextBoardMeetingId(stubDb(null))).toBeNull();
+	});
+});
+
+describe("unified Board intake page", () => {
+	const html = renderOperatingCenterHtml();
+
+	it("renders one Board intake form and no separate initiative form", () => {
+		expect(html).toContain('id="board-form"');
+		expect(html).not.toContain('id="initiative-form"');
+		expect(html).not.toContain('id="initiatives"');
+	});
+
+	it("offers INITIATIVE as one of the item types", () => {
+		expect(html).toContain("<option>INITIATIVE</option>");
+	});
+
+	it("shows the next-meeting card above the meetings list", () => {
+		const nextPos = html.indexOf('id="next-meeting"');
+		const listPos = html.indexOf('id="meetings"');
+		expect(nextPos).toBeGreaterThan(-1);
+		expect(listPos).toBeGreaterThan(-1);
+		expect(nextPos).toBeLessThan(listPos);
+	});
+
+	it("places the create-meeting form below the meetings list", () => {
+		const listPos = html.indexOf('id="meetings"');
+		const formPos = html.indexOf('id="meeting-create-form"');
+		expect(formPos).toBeGreaterThan(-1);
+		expect(formPos).toBeGreaterThan(listPos);
 	});
 });
 

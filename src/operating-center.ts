@@ -7,11 +7,17 @@ type InitiativeInputType =
 
 type BoardSubmissionType =
 	| "QUESTION"
+	| "INITIATIVE"
 	| "PROPOSAL"
+	| "THOUGHT"
+	| "PROBLEM"
+	| "OPPORTUNITY"
+	| "TASK"
 	| "REPORT"
-	| "DECISION_REQUEST"
 	| "DISCUSSION"
-	| "REQUEST_TO_SPEAK";
+	| "DECISION_REQUEST"
+	| "REQUEST_TO_SPEAK"
+	| "SOURCE_MATERIAL";
 
 export interface InitiativeInput {
 	input_type?: string;
@@ -41,11 +47,17 @@ const INITIATIVE_TYPES = new Set<InitiativeInputType>([
 
 const BOARD_SUBMISSION_TYPES = new Set<BoardSubmissionType>([
 	"QUESTION",
+	"INITIATIVE",
 	"PROPOSAL",
+	"THOUGHT",
+	"PROBLEM",
+	"OPPORTUNITY",
+	"TASK",
 	"REPORT",
-	"DECISION_REQUEST",
 	"DISCUSSION",
+	"DECISION_REQUEST",
 	"REQUEST_TO_SPEAK",
+	"SOURCE_MATERIAL",
 ]);
 
 function clean(value: unknown, maximumLength: number): string {
@@ -205,33 +217,58 @@ export async function listInitiatives(db: D1Database): Promise<Response> {
 	return response({ ok: true, initiatives: result.results });
 }
 
+export async function findNextBoardMeetingId(db: D1Database): Promise<string | null> {
+	const next = await db.prepare(`
+		SELECT meeting_id FROM board_meetings
+		WHERE status IN ('DRAFT', 'OPEN')
+		ORDER BY
+			CASE WHEN scheduled_for IS NOT NULL AND substr(scheduled_for, 1, 10) >= date('now') THEN 0 ELSE 1 END,
+			scheduled_for ASC,
+			created_at DESC
+		LIMIT 1
+	`).first<{ meeting_id: string }>();
+	return next ? next.meeting_id : null;
+}
+
 export async function createBoardSubmission(request: Request, db: D1Database): Promise<Response> {
 	const input = validateBoardSubmissionInput(await readBody<BoardSubmissionInput>(request));
 	const submissionId = `BOARD-SUB-${crypto.randomUUID()}`;
 	const auditId = `AUDIT-${crypto.randomUUID()}`;
 
+	// The protocol fills during the week on its own: a submission without an
+	// explicit requested meeting date joins the nearest upcoming Draft/Open
+	// meeting agenda immediately. Items with an explicit date stay PENDING for
+	// manual triage.
+	let attachedMeetingId: string | null = null;
+	if (!input.requested_meeting_date) {
+		attachedMeetingId = await findNextBoardMeetingId(db);
+	}
+	const status = attachedMeetingId ? "AGENDA" : "PENDING";
+
 	await db.batch([
 		db.prepare(`
 			INSERT INTO board_submissions (
-				submission_id, submission_type, title, description,
+				submission_id, meeting_id, submission_type, title, description,
 				requested_outcome, submitted_by, requested_meeting_date, status
-			) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`).bind(
 			submissionId,
+			attachedMeetingId,
 			input.submission_type,
 			input.title,
 			input.description,
 			input.requested_outcome,
 			input.submitted_by,
 			input.requested_meeting_date,
+			status,
 		),
 		db.prepare(`
 			INSERT INTO audit_events (audit_id, object_id, action, module, status, details)
 			VALUES (?, ?, 'BOARD_SUBMISSION_ADDED', 'BOARD', 'SUCCESS', ?)
-		`).bind(auditId, submissionId, JSON.stringify({ submission_type: input.submission_type })),
+		`).bind(auditId, submissionId, JSON.stringify({ submission_type: input.submission_type, meeting_id: attachedMeetingId })),
 	]);
 
-	return response({ ok: true, submission_id: submissionId, status: "PENDING" }, 201);
+	return response({ ok: true, submission_id: submissionId, status, meeting_id: attachedMeetingId, auto_attached: attachedMeetingId !== null }, 201);
 }
 
 export async function listBoardSubmissions(db: D1Database): Promise<Response> {
@@ -339,41 +376,36 @@ export function renderOperatingCenterHtml(): string {
 			<div id="sponsorship-assets">Loading…</div>
 		</section>
 		<section class="panel" id="board-meetings-panel" style="margin-top:20px"><h2>Board meetings</h2>
-			<p class="meta">The weekly meeting loop. Stages: Draft → Open → Closed. Triage pending items into the agenda, record each decision with a responsible person and due date; a confirmed decision immediately becomes tracked work. Unresolved agenda items return to the queue when the meeting closes.</p>
-			<form id="meeting-create-form" style="margin-bottom:12px">
+			<p class="meta">The weekly meeting loop. New items join the nearest upcoming meeting protocol automatically as they arrive during the week. Stages: Draft → Open → Closed. Record each decision with a responsible person and due date; a confirmed decision immediately becomes tracked work. Unresolved agenda items return to the queue when the meeting closes.</p>
+			<div id="next-meeting" style="margin-bottom:16px">Loading…</div>
+			<div id="meetings">Loading…</div>
+			<div id="meeting-detail" style="margin-top:16px"></div>
+			<form id="meeting-create-form" style="margin-top:16px">
+				<h3 style="margin:0 0 8px;font-size:18px">Schedule a meeting</h3>
 				<label for="meeting-title">Meeting title</label><input id="meeting-title" name="title" required maxlength="200" placeholder="Weekly Board meeting">
 				<label for="meeting-date">Scheduled date</label><input id="meeting-date" name="scheduled_for" type="date">
 				<button type="submit">Create meeting</button>
 				<div class="message" id="meeting-create-message" aria-live="polite"></div>
 			</form>
-			<div id="meetings">Loading…</div>
-			<div id="meeting-detail" style="margin-top:16px"></div>
 		</section>
 		<section class="panel" id="work-items-panel" style="margin-top:20px"><h2>Work items</h2>
 			<p class="meta">Tracked work from Board decisions. Stages: Ready → In progress → Done (Blocked allowed).</p>
 			<div><span class="message" id="workitem-message" aria-live="polite"></span></div>
 			<div id="work-items">Loading…</div>
 		</section>
-		<section class="grid">
-			<form class="panel" id="initiative-form"><h2>Submit an initiative</h2>
-				<label for="initiative-type">Input type</label><select id="initiative-type" name="input_type"><option>THOUGHT</option><option>PROBLEM</option><option>OPPORTUNITY</option><option>TASK</option><option>SOURCE_MATERIAL</option></select>
-				<label for="initiative-title">Title</label><input id="initiative-title" name="title" required maxlength="200">
-				<label for="initiative-description">Thought, task, or material</label><textarea id="initiative-description" name="description" required></textarea>
-				<label for="initiative-result">Desired result, if known</label><textarea id="initiative-result" name="desired_result"></textarea>
-				<label for="initiative-author">Submitted by</label><input id="initiative-author" name="submitted_by" required>
-				<button type="submit">Save initiative</button><div class="message" aria-live="polite"></div>
-			</form>
-			<form class="panel" id="board-form"><h2>Add a Board item</h2>
-				<label for="board-type">Item type</label><select id="board-type" name="submission_type"><option>QUESTION</option><option>PROPOSAL</option><option>REPORT</option><option>DECISION_REQUEST</option><option>DISCUSSION</option><option>REQUEST_TO_SPEAK</option></select>
+		<section class="panel" id="board-intake-panel" style="margin-top:20px">
+			<form id="board-form"><h2>Submit to the Board</h2>
+				<p class="meta">One intake for everything: a question, an initiative, a proposal, a thought, a problem, an opportunity, a task, a report, or a request to speak. Items without a requested meeting date join the nearest upcoming meeting protocol automatically.</p>
+				<label for="board-type">Item type</label><select id="board-type" name="submission_type"><option>QUESTION</option><option>INITIATIVE</option><option>PROPOSAL</option><option>THOUGHT</option><option>PROBLEM</option><option>OPPORTUNITY</option><option>TASK</option><option>DISCUSSION</option><option>REPORT</option><option>DECISION_REQUEST</option><option>REQUEST_TO_SPEAK</option><option>SOURCE_MATERIAL</option></select>
 				<label for="board-title">Title</label><input id="board-title" name="title" required maxlength="200">
 				<label for="board-description">Description</label><textarea id="board-description" name="description" required></textarea>
-				<label for="board-outcome">Requested outcome</label><textarea id="board-outcome" name="requested_outcome"></textarea>
+				<label for="board-outcome">Requested outcome or desired result</label><textarea id="board-outcome" name="requested_outcome"></textarea>
 				<label for="board-author">Board member</label><input id="board-author" name="submitted_by" required>
-				<label for="board-date">Requested meeting date</label><input id="board-date" name="requested_meeting_date" type="date">
-				<button type="submit">Add to Board queue</button><div class="message" aria-live="polite"></div>
+				<label for="board-date">Requested meeting date (optional)</label><input id="board-date" name="requested_meeting_date" type="date">
+				<button type="submit">Submit to the Board</button><div class="message" aria-live="polite"></div>
 			</form>
 		</section>
-		<section class="grid queue"><div class="panel"><h2>Initiatives</h2><div id="initiatives">Loading…</div></div><div class="panel"><h2>Board queue</h2><div id="board-items">Loading…</div></div></section>
+		<section class="grid queue"><div class="panel"><h2>Board queue</h2><div id="board-items">Loading…</div></div></section>
 		</div>
 	</main>
 	<script>
@@ -390,19 +422,10 @@ export function renderOperatingCenterHtml(): string {
 		function formJson(form){return Object.fromEntries([...new FormData(form)].map(([k,v])=>[k,String(v)]))}
 		let pendingSubmissionsCache=[];
 		async function load(){
-			const [o,i,b]=await Promise.all([api('/api/operating-center/overview'),api('/api/initiatives'),api('/api/board/submissions')]);
+			const [o,b]=await Promise.all([api('/api/operating-center/overview'),api('/api/board/submissions')]);
 			pendingSubmissionsCache=b.submissions||[];
-			const labels={active_initiatives:'Active initiatives',pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results'};
+			const labels={pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results'};
 			document.querySelector('#stats').innerHTML=Object.entries(o.counts).map(([k,v])=>'<div class="stat"><strong>'+esc(v)+'</strong><span>'+esc(labels[k]||k)+'</span></div>').join('');
-			const INIT_NEXT={NEW:['UNDER_REVIEW'],PROPOSED:['UNDER_REVIEW'],UNDER_REVIEW:['APPROVED','DECLINED'],APPROVED:['CONVERTED']};
-			document.querySelector('#initiatives').innerHTML=i.initiatives.length?i.initiatives.map(x=>{
-				const nexts=INIT_NEXT[x.status]||[];
-				const btns=nexts.map(n=>'<button data-initiative-advance="'+esc(x.initiative_id)+'" data-to="'+n+'" style="width:auto">Move to '+n.toLowerCase().replace(/_/g,' ')+'</button>').join(' ');
-				return '<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.input_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div>'+(btns?'<div>'+btns+'</div>':'')+'</div>';
-			}).join(''):'<div class="unavailable">No initiatives yet.</div>';
-			document.querySelector('#initiatives').querySelectorAll('[data-initiative-advance]').forEach(btn=>btn.addEventListener('click',async()=>{
-				try{await api('/api/initiatives/advance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initiative_id:btn.dataset.initiativeAdvance,to_status:btn.dataset.to})});await load()}catch(err){alert(err.message)}
-			}));
 			document.querySelector('#board-items').innerHTML=b.submissions.length?b.submissions.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.submission_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
 			loadLifecycle();
 			loadFund();
@@ -500,16 +523,46 @@ export function renderOperatingCenterHtml(): string {
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		let selectedMeetingId=null;
+		function pickNextMeeting(meetings){
+			const today=new Date().toISOString().slice(0,10);
+			const open=(meetings||[]).filter(m=>m.status==='DRAFT'||m.status==='OPEN');
+			const dated=open.filter(m=>m.scheduled_for&&String(m.scheduled_for).slice(0,10)>=today)
+				.sort((a,b)=>String(a.scheduled_for).localeCompare(String(b.scheduled_for)));
+			if(dated.length)return dated[0];
+			const undated=open.filter(m=>!m.scheduled_for);
+			if(undated.length)return undated[0];
+			return null;
+		}
+		async function renderNextMeeting(meetings){
+			const box=document.querySelector('#next-meeting');
+			const next=pickNextMeeting(meetings);
+			if(!next){box.innerHTML='<div class="unavailable">No upcoming meeting scheduled yet. Use the form below to schedule one.</div>';return}
+			try{
+				const d=await api('/api/board/meetings/'+encodeURIComponent(next.meeting_id));
+				const m=d.meeting;
+				const agenda=d.agenda||[];
+				const pending=(pendingSubmissionsCache||[]).filter(s=>s.status==='PENDING').length;
+				const label={DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed'};
+				let html='<div class="item"><strong>Next meeting: '+esc(m.title)+'</strong>'+
+					'<div class="meta">'+(m.scheduled_for?esc(String(m.scheduled_for).slice(0,10))+' · ':'')+esc(label[m.status]||m.status)+' · protocol: '+agenda.length+' items'+(pending?' · '+pending+' waiting in the queue':'')+'</div>'+
+					'<div class="meta" style="margin-top:8px">Protocol (fills during the week):</div>';
+				html+=agenda.length?agenda.map(a=>'<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.submission_type)+' · '+esc(a.submitted_by)+' · '+esc(a.status)+'</div></div>').join(''):'<div class="unavailable">No items yet. New submissions join this protocol automatically.</div>';
+				html+='<div style="margin-top:8px"><button data-meeting="'+esc(m.meeting_id)+'" style="width:auto">Open meeting workspace</button></div></div>';
+				box.innerHTML=html;
+				box.querySelectorAll('[data-meeting]').forEach(btn=>btn.addEventListener('click',()=>selectMeeting(btn.dataset.meeting)));
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
 		async function loadMeetings(){
 			const box=document.querySelector('#meetings');
 			try{
 				const data=await api('/api/board/meetings');
-				if(!data.meetings.length){box.innerHTML='<div class="unavailable">No meetings yet. Create one above.</div>';return}
+				if(!data.meetings.length){box.innerHTML='<div class="unavailable">No meetings yet. Create one below.</div>';document.querySelector('#next-meeting').innerHTML='<div class="unavailable">No upcoming meeting scheduled yet. Use the form below to schedule one.</div>';return}
 				const label={DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed'};
 				box.innerHTML=data.meetings.map(m=>'<div class="item"><strong>'+esc(m.title)+'</strong>'+
 					'<div class="meta">'+(m.scheduled_for?esc(String(m.scheduled_for).slice(0,10))+' · ':'')+esc(label[m.status]||m.status)+' · agenda '+m.agenda_count+' · decisions '+m.decision_count+'</div>'+
 					'<div><button data-meeting="'+esc(m.meeting_id)+'" style="width:auto">Open workspace</button></div></div>').join('');
 				box.querySelectorAll('[data-meeting]').forEach(btn=>btn.addEventListener('click',()=>selectMeeting(btn.dataset.meeting)));
+				await renderNextMeeting(data.meetings);
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function selectMeeting(id){
@@ -596,7 +649,7 @@ export function renderOperatingCenterHtml(): string {
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
-		for(const [id,path] of [['initiative-form','/api/initiatives'],['board-form','/api/board/submissions'],['meeting-create-form','/api/board/meetings']])document.querySelector('#'+id).addEventListener('submit',async e=>{e.preventDefault();const m=e.currentTarget.querySelector('.message');m.textContent='Saving…';try{await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formJson(e.currentTarget))});e.currentTarget.reset();m.textContent='Saved.';await load()}catch(err){m.textContent=err.message}});
+		for(const [id,path] of [['board-form','/api/board/submissions'],['meeting-create-form','/api/board/meetings']])document.querySelector('#'+id).addEventListener('submit',async e=>{e.preventDefault();const m=e.currentTarget.querySelector('.message');m.textContent='Saving…';try{await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formJson(e.currentTarget))});e.currentTarget.reset();m.textContent='Saved.';await load()}catch(err){m.textContent=err.message}});
 		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load().catch(renderLoadError)});
 		if(getKey()){showApp();load().catch(renderLoadError)}else{showGate('')}
 	</script>
