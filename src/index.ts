@@ -27,6 +27,11 @@ import {
         handleGoogleAdsCallback,
 } from "./google-ads";
 import {
+	advanceFundProspect,
+	getFundView,
+	seedBridgeSprintFund,
+} from "./fund";
+import {
 	createBoardSubmission,
 	createInitiative,
 	getOperatingCenterOverview,
@@ -5794,6 +5799,38 @@ export default {
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Write test failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/fund/seed") {
+			try {
+				return json(await seedBridgeSprintFund(env.nwana_engine_db));
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Fund seed failed" }, 500);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/fund") {
+			try {
+				return json(await getFundView(env.nwana_engine_db));
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Fund view failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/fund/prospect/advance") {
+			try {
+				const body = await request.json() as { prospect_id?: string; to_stage?: string };
+				if (!body.prospect_id || !body.to_stage) {
+					return json({ ok: false, error: "prospect_id and to_stage are required" }, 400);
+				}
+				const result = await advanceFundProspect(env.nwana_engine_db, body.prospect_id, body.to_stage);
+				if (!result.ok) {
+					return json(result, 400);
+				}
+				return json(result);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Prospect advance failed" }, 500);
 			}
 		}
 
