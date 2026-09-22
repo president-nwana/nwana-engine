@@ -1,5 +1,10 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — Hotfix: operating-center blank page (ADR-0022 regression)
+
+- The ADR-0022 deploy shipped a stray closing brace in the main page's inline `<script>` (after `loadFundSummary()`), a SyntaxError that stopped all client JS: the page showed only the header. Fixed with a one-line removal; `/operating-center/funds` untouched. Added a regression test that syntax-checks the embedded page script (`new Function`), which TypeScript and the markup tests cannot catch.
+- Verified: Vitest 170/170 (1 new test), TypeScript clean, live script parses, `/operating-center` and `/operating-center/funds` return 200, API endpoints still 401 without the owner key.
+
 ## 2026-09-22 — Funds on their own page (ADR-0022)
 
 - The Funds list moved off the main operating-center page onto a dedicated page at `/operating-center/funds`, following the race-results pattern. The new page shows the full existing functionality unchanged: fund objects with goal/raised and per-stage counts, every prospect with stage, ask tier, sent date, follow-up state (upcoming / due / overdue) and next action, plus one-click stage-advance buttons posting to `/api/operating-center/fund/prospect/advance`. A back link returns to `/operating-center`. The page uses the same stored owner key, so no re-entry is needed.
