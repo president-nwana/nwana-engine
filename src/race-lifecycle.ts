@@ -563,10 +563,15 @@ async function runSignupGetJson(
 	}
 	const response = await fetch(url, { headers });
 	if (!response.ok) {
-		throw new Error(`RunSignup request failed: ${response.status} ${response.statusText}`);
+		const body = await response.text().catch(() => "");
+		throw new Error(
+			`RunSignup request failed: ${response.status} ${response.statusText} for ${url.pathname}${url.search} :: ${body.slice(0, 500)}`,
+		);
 	}
 	return (await response.json()) as Record<string, unknown>;
 }
+
+// Shared with write-test flow below.
 
 async function postRunSignupForm(
 	url: string,
