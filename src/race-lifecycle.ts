@@ -614,11 +614,10 @@ export async function syncRaceLifecycleDistance(
 		(entry) => entry.distance === input.distance,
 	);
 	if (!source) throw new Error(`Unknown Series 2026 distance: ${input.distance}`);
-	const callEnv: RunSignupCallEnv = {
-		accessToken: input.accessToken,
-		apiCallerToken: input.apiCallerToken,
-		apiCallerSecret: input.apiCallerSecret,
-	};
+	// Bearer-only auth, matching the proven NWANA-FINAL.ps1. The API-caller
+	// (rsu_api_reg) layer is rejected by RunSignup on some race endpoints
+	// (error 17 "Invalid API caller credentials") and is not needed for reads.
+	const callEnv: RunSignupCallEnv = { accessToken: input.accessToken };
 
 	const raceUrl = new URL(`https://api.runsignup.com/rest/race/${source.raceId}`);
 	raceUrl.searchParams.set("format", "json");
@@ -631,8 +630,6 @@ export async function syncRaceLifecycleDistance(
 
 	const preview = await previewSeries2026ResultPublications(input.accessToken, {
 		distance: input.distance,
-		apiCallerToken: input.apiCallerToken,
-		apiCallerSecret: input.apiCallerSecret,
 	});
 
 	const history = await input.db
