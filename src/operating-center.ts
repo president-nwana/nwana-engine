@@ -952,3 +952,199 @@ export async function backfillRaceEventFirstSeen(
 	const changes = (result as { meta?: { changes?: unknown } }).meta?.changes;
 	return { marked: typeof changes === "number" ? changes : 0 };
 }
+
+// ---------------------------------------------------------------------------
+// Next-race promo auto-publish (ADR-0013)
+//
+// Mirror of the winner-announcement flow for the END of the competition
+// lifecycle: when a result publication is confirmed with an explicit PUBLISH,
+// the engine also writes one "next race" promo row into site_news. The
+// publication celebrates the past; the promo points the reader at the
+// future: the next not-yet-run event of the same series and distance, by
+// date. This closes the publication -> next event loop: every published
+// result advertises the next registration. Internal D1 writes only; the
+// owner's explicit PUBLISH confirmation is the authorization; nothing is
+// sent externally and nothing is written back to RunSignup.
+//
+// kind is 'news' (same choice as ADR-0012): the site_news CHECK constraint
+// only allows 'news' and 'winner_announcement', and a promo is not a winner
+// announcement. The slug prefix 'next-race-' and created_by
+// 'engine:auto-publish' identify these rows. Idempotency is per publication
+// key via a deterministic slug. When there is no upcoming event, nothing is
+// written and the publish response reports the skip reason.
+
+export interface NextRacePromoInput {
+	publicationKey: string;
+	series: string;
+	raceId: number;
+	eventId: number;
+	// YYYY-MM-DD "today" for the past/future comparison; defaults to today
+	// UTC. Tests pass this explicitly so they do not depend on the clock.
+	nowDate?: string;
+}
+
+export interface NextRacePromoDetails {
+	eventId: number;
+	eventName: string | null;
+	eventDate: string | null;
+	distance: string;
+	registrationUrl: string | null;
+}
+
+export interface NextRacePromoNews {
+	title: string;
+	body_html: string;
+	slug: string;
+}
+
+// Normalizes the date formats the engine stores into YYYY-MM-DD so a
+// past/future comparison never depends on RunSignup's format. This is the
+// same logic as normalizeRunSignupDate in race-lifecycle.ts, duplicated
+// here because that module imports this one (a shared import would be
+// circular).
+function normalizePromoEventDate(value: string | null): string | null {
+	if (value === null || value === undefined) return null;
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+	const usMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(trimmed);
+	if (usMatch) {
+		const month = Number(usMatch[1]);
+		const day = Number(usMatch[2]);
+		const year = Number(usMatch[3]);
+		if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+		return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+	}
+	const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+	if (isoMatch) {
+		const month = Number(isoMatch[2]);
+		const day = Number(isoMatch[3]);
+		if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+		return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+	}
+	return null;
+}
+
+// Pure: builds the promo. Factual only: name, date, distance, and the
+// registration link the lifecycle sync observed, nothing invented.
+export function buildNextRacePromoNews(input: {
+	publicationKey: string;
+	next: NextRacePromoDetails;
+}): NextRacePromoNews {
+	const distanceLabel = (input.next.distance ?? "").trim();
+	const eventLabel =
+		(input.next.eventName ?? "").trim() || `NWANA ${distanceLabel || "race"}`;
+	const dateLabel = (input.next.eventDate ?? "").trim();
+	const title = `Next race: ${eventLabel}`;
+
+	const lines: string[] = [];
+	lines.push(
+		`<p>The next ${escapeNewsHtml(eventLabel)}` +
+			(dateLabel ? ` is scheduled for ${escapeNewsHtml(dateLabel)}` : " is coming up") +
+			`.</p>`,
+	);
+	if (distanceLabel) {
+		lines.push(`<p>Distance: ${escapeNewsHtml(distanceLabel)}.</p>`);
+	}
+	const regUrl = (input.next.registrationUrl ?? "").trim();
+	if (regUrl) {
+		lines.push(
+			`<p><a href="${escapeNewsHtml(regUrl)}">Register on RunSignup</a></p>`,
+		);
+	}
+	lines.push(
+		`<p>Results from the latest race are published in the <a href="/results">results section</a>.</p>`,
+	);
+
+	return {
+		title,
+		body_html: lines.join("\n"),
+		slug: nextRacePromoSlug(input.publicationKey),
+	};
+}
+
+export function nextRacePromoSlug(publicationKey: string): string {
+	const safe = publicationKey
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 100);
+	return `next-race-${safe || "news"}`;
+}
+
+// Server-side: promotes the next upcoming not-yet-run event of the same
+// series and distance, by date. "Not-yet-run" follows the engine's own
+// convention: event_date strictly after today (today counts as past, like
+// the results page). Idempotent per publication key.
+export async function autoPublishNextRacePromo(
+	db: D1Database,
+	params: NextRacePromoInput,
+): Promise<AutoPublishNewsOutcome> {
+	const slug = nextRacePromoSlug(params.publicationKey);
+	const existing = await db
+		.prepare("SELECT id FROM site_news WHERE slug = ?")
+		.bind(slug)
+		.first<{ id: number }>();
+	if (existing) return { published: false, skipped: "already_exists" };
+
+	// The published event's distance, using the engine's series/distance
+	// grouping (race_event_results is keyed by series, distance, event_id).
+	const self = await db
+		.prepare(
+			`SELECT distance FROM race_event_results
+			 WHERE series = ? AND race_id = ? AND event_id = ?
+			 LIMIT 1`,
+		)
+		.bind(params.series, params.raceId, params.eventId)
+		.first<{ distance: string | null }>();
+	const distance = (self?.distance ?? "").trim();
+	if (!distance) return { published: false, skipped: "no_results_snapshot" };
+
+	const today = params.nowDate ?? new Date().toISOString().slice(0, 10);
+	const candidates = await db
+		.prepare(
+			`SELECT event_id, event_name, event_date, distance, registration_url
+			 FROM race_event_results
+			 WHERE series = ? AND distance = ?`,
+		)
+		.bind(params.series, distance)
+		.all<{
+			event_id: number;
+			event_name: string | null;
+			event_date: string | null;
+			distance: string;
+			registration_url: string | null;
+		}>();
+
+	let next: { date: string; row: NextRacePromoDetails } | null = null;
+	for (const row of candidates.results) {
+		const date = normalizePromoEventDate(row.event_date);
+		if (!date || date <= today) continue;
+		if (!next || date < next.date) {
+			next = {
+				date,
+				row: {
+					eventId: row.event_id,
+					eventName: row.event_name,
+					eventDate: row.event_date,
+					distance: row.distance,
+					registrationUrl: row.registration_url,
+				},
+			};
+		}
+	}
+	if (!next) return { published: false, skipped: "no_upcoming_race" };
+
+	const news = buildNextRacePromoNews({
+		publicationKey: params.publicationKey,
+		next: next.row,
+	});
+	await db
+		.prepare(
+			`INSERT INTO site_news (slug, title, body_html, published_at, kind, created_by)
+			 VALUES (?, ?, ?, ?, 'news', 'engine:auto-publish')`,
+		)
+		.bind(news.slug, news.title, news.body_html, new Date().toISOString())
+		.run();
+
+	return { published: true, slug: news.slug };
+}

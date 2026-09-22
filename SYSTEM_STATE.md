@@ -87,6 +87,13 @@ Read before making changes:
 - The sync response now carries an `announcements` outcome array per event.
 - Live path runs on the next sync that observes a genuinely new event.
 
+## NEXT-RACE PROMO AUTO-PUBLISH ON RESULT PUBLICATION — ADR-0013 (2026-09-22)
+
+- Closes the publication -> next event gap: `publishSeries2026Result` now writes one "next race" promo row into `site_news` (kind `news`, created_by `engine:auto-publish`) immediately after a publication confirmed with explicit `PUBLISH`. The promo names the next not-yet-run event of the same series and distance by date (race name, date, distance, registration link, factual only). Internal D1 write only; the PUBLISH confirmation is the authorization; nothing external is sent, nothing written back to RunSignup.
+- Migration 0024 adds `registration_url` to `race_event_results`; the lifecycle sync persists the race-level URL (`race.url`) it observes from RunSignup onto every snapshot row. The promo reads the link from stored D1 data (never constructed).
+- Idempotent per publication key via deterministic slug `next-race-<key>`; the publish response now includes a `next_race_news` outcome object (skips with a reported reason when there is no upcoming event). kind stays `news` deliberately (site_news CHECK allows only news/winner_announcement). Slug prefix `next-race-` identifies the rows.
+- Local verification: Vitest 85/85 (10 new), TypeScript clean. The authenticated end-to-end publication path (owner key + Meta token) is not testable in this environment; the promo runs on the next real publication.
+
 ## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
 
 - The authenticated NWANA Email Marketing Dashboard exists at dashboard ID `513494` and is connected to `Nordic Walking Association of North America NWANA`.

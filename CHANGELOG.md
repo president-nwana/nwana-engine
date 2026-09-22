@@ -1,5 +1,12 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — Next-race promo auto-publish on result publication (ADR-0013)
+
+- Closes the last gap in the competition lifecycle loop (series -> registration -> results -> levels -> standings -> publication -> next event): `publishSeries2026Result` now writes one "next race" promo row into `site_news` (kind `news`, created_by `engine:auto-publish`) right after a publication confirmed with explicit `PUBLISH`. The promo points at the next not-yet-run event of the same series and distance, by date: race name, date, distance, and the registration link, factual only. Internal D1 write only; the explicit PUBLISH confirmation is the authorization; nothing external is sent and nothing is written back to RunSignup.
+- Migration 0024 adds `registration_url` to `race_event_results`; the lifecycle sync persists the race-level URL (`race.url`) it already observes from RunSignup onto every event snapshot row, so the promo reads the link from stored D1 data (never constructed).
+- New pure builder `buildNextRacePromoNews` and slug `next-race-<publicationKey>` in operating-center.ts; user text HTML-escaped in `body_html`; title stored raw (public site escapes at render, same contract as `publishSiteNews`). Idempotent per publication key; the publish response now carries a `next_race_news` outcome next to `site_news`, skipping with a reported reason (`no_upcoming_race`, `no_results_snapshot`) instead of failing the publication. "Not-yet-run" follows the engine's convention: event_date strictly after today.
+- Verified locally: Vitest 85/85 (10 new tests), TypeScript clean. The authenticated end-to-end publication path needs the owner key and Meta token, so the live auto-publish path runs on the next real publication.
+
 ## 2026-09-22 — News auto-publish on first sight of a race event (ADR-0012)
 
 - Mirror of ADR-0011 for the START of the competition lifecycle: `syncRaceLifecycleDistance` now writes one "new race announced" row into `site_news` (kind `news`, created_by `engine:auto-publish`) the first time it observes a race event. Content is factual only: race name, date, distance, and the registration link the sync observed. Internal D1 write only; the owner's explicit sync trigger is the authorization; nothing external is sent and nothing is written back to RunSignup. Generic engine machinery, independent of any specific series.

@@ -878,8 +878,8 @@ export async function syncRaceLifecycleDistance(
 				INSERT INTO race_event_results (
 					series, distance, race_id, event_id, event_name, event_date,
 					result_count, finalized, results_json, results_url,
-					publication_status, synced_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					publication_status, registration_url, synced_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT(series, distance, event_id) DO UPDATE SET
 					event_name = excluded.event_name,
 					event_date = excluded.event_date,
@@ -888,6 +888,7 @@ export async function syncRaceLifecycleDistance(
 					results_json = excluded.results_json,
 					results_url = excluded.results_url,
 					publication_status = excluded.publication_status,
+					registration_url = excluded.registration_url,
 					synced_at = excluded.synced_at
 				`,
 			)
@@ -903,6 +904,7 @@ export async function syncRaceLifecycleDistance(
 				JSON.stringify(rows),
 				eventInput.resultsUrl,
 				eventInput.publication,
+				eventInput.registrationUrl,
 				syncedAt,
 			)
 			.run();

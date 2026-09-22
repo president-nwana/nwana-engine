@@ -35,6 +35,7 @@ import {
 	listInitiatives,
 	publishSiteNews,
 	autoPublishWinnerNews,
+	autoPublishNextRacePromo,
 	renderOperatingCenterHtml,
 	renderRaceResultsHtml,
 } from "./operating-center";
@@ -5575,12 +5576,25 @@ async function publishSeries2026Result(
 		eventId: draft.source.event_id,
 	});
 
+	// Next-race promo auto-publish (ADR-0013): the same PUBLISH confirmation
+	// authorizes one promo for the next not-yet-run event of the same
+	// series and distance, closing the publication -> next event loop.
+	// Internal D1 write only; skips with a reported reason when there is
+	// no upcoming event, never failing the publication.
+	const nextRaceNews = await autoPublishNextRacePromo(env.nwana_engine_db, {
+		publicationKey: draft.publication_key,
+		series: "SERIES_2026",
+		raceId: draft.source.race_id,
+		eventId: draft.source.event_id,
+	});
+
 	return json({
 		ok: true,
 		publication_key: draft.publication_key,
 		status: "PUBLISHED",
 		deliveries: result,
 		site_news: siteNews,
+		next_race_news: nextRaceNews,
 	});
 }
 
