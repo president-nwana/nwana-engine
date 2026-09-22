@@ -382,6 +382,71 @@ export function buildNextRacePrep(input: {
 	};
 }
 
+export interface LifecycleResultRow {
+	result_id: string | null;
+	athlete: string;
+	gender: string | null;
+	time: string | null;
+	performance_level: string | null;
+	level_place: string | null;
+}
+
+export interface LifecycleEventResults {
+	event_id: number;
+	event_name: string | null;
+	event_date: string | null;
+	finalized: boolean;
+	result_count: number;
+	results: LifecycleResultRow[];
+}
+
+const RESULT_LEVEL_ORDER = [
+	"Elite",
+	"High Performance",
+	"Performance",
+	"Competitive",
+	"Open",
+] as const;
+
+function resultLevelOrder(value: string | null): number {
+	if (!value) return RESULT_LEVEL_ORDER.length;
+	const index = RESULT_LEVEL_ORDER.findIndex((level) =>
+		value.startsWith(level),
+	);
+	return index === -1 ? RESULT_LEVEL_ORDER.length : index;
+}
+
+// Pure: merges result rows from every result set of one event, dedupes by
+// result_id, and sorts by performance level then level place, so the owner
+// sees each race the way NWANA ranks it: fair contest inside each level.
+export function flattenEventResults(
+	drafts: ReadonlyArray<{
+		content: { results: ReadonlyArray<LifecycleResultRow> };
+	}>,
+): LifecycleResultRow[] {
+	const seen = new Set<string>();
+	const rows: LifecycleResultRow[] = [];
+	for (const draft of drafts) {
+		for (const row of draft.content.results) {
+			const key = row.result_id ?? `${row.athlete}|${row.time}|${row.performance_level}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			rows.push(row);
+		}
+	}
+	return rows.sort((a, b) => {
+		const levelDiff =
+			resultLevelOrder(a.performance_level) - resultLevelOrder(b.performance_level);
+		if (levelDiff !== 0) return levelDiff;
+		const placeA = Number(a.level_place);
+		const placeB = Number(b.level_place);
+		if (Number.isFinite(placeA) && Number.isFinite(placeB) && placeA !== placeB) {
+			return placeA - placeB;
+		}
+		return (a.time ?? "").localeCompare(b.time ?? "");
+	});
+}
+
 export interface LifecycleEventView {
 	event_id: number;
 	event_name: string | null;
@@ -748,6 +813,43 @@ export async function syncRaceLifecycleDistance(
 		)
 		.run();
 
+	// Snapshot per-event result rows for the operating center results page.
+	// Read-only: this stores what RunSignup returned during sync; it never
+	// writes back to RunSignup.
+	for (const eventInput of eventInputs) {
+		const drafts = draftsByEvent.get(eventInput.eventId) ?? [];
+		const rows = flattenEventResults(drafts);
+		await input.db
+			.prepare(
+				`
+				INSERT INTO race_event_results (
+					series, distance, race_id, event_id, event_name, event_date,
+					result_count, finalized, results_json, synced_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(series, distance, event_id) DO UPDATE SET
+					event_name = excluded.event_name,
+					event_date = excluded.event_date,
+					result_count = excluded.result_count,
+					finalized = excluded.finalized,
+					results_json = excluded.results_json,
+					synced_at = excluded.synced_at
+				`,
+			)
+			.bind(
+				RACE_LIFECYCLE_SERIES,
+				input.distance,
+				source.raceId,
+				eventInput.eventId,
+				eventInput.eventName,
+				eventInput.eventDate,
+				rows.length,
+				eventInput.finalized ? 1 : 0,
+				JSON.stringify(rows),
+				syncedAt,
+			)
+			.run();
+	}
+
 	return { ...state, synced_at: syncedAt };
 }
 
@@ -832,6 +934,76 @@ export async function getRaceLifecycleView(db: D1Database): Promise<{
 			events: row.events_json
 				? (JSON.parse(row.events_json) as LifecycleEventView[])
 				: [],
+		})),
+	};
+}
+
+// Read-only view for the operating center results page: per-distance events
+// with their synced result rows, most recent event first.
+export async function getRaceResultsView(db: D1Database): Promise<{
+	ok: true;
+	series: string;
+	generated_at: string;
+	distances: Array<{
+		distance: string;
+		race_id: number;
+		stage: string;
+		synced_at: string | null;
+		events: LifecycleEventResults[];
+	}>;
+}> {
+	const lifecycle = await db
+		.prepare(
+			`SELECT distance, race_id, stage, synced_at FROM race_lifecycle WHERE series = ? ORDER BY distance`,
+		)
+		.bind(RACE_LIFECYCLE_SERIES)
+		.all<{
+			distance: string;
+			race_id: number;
+			stage: string;
+			synced_at: string | null;
+		}>();
+
+	const results = await db
+		.prepare(
+			`SELECT distance, event_id, event_name, event_date, result_count, finalized, results_json
+			 FROM race_event_results WHERE series = ? ORDER BY distance, event_date DESC`,
+		)
+		.bind(RACE_LIFECYCLE_SERIES)
+		.all<{
+			distance: string;
+			event_id: number;
+			event_name: string | null;
+			event_date: string | null;
+			result_count: number;
+			finalized: number;
+			results_json: string;
+		}>();
+
+	const byDistance = new Map<string, LifecycleEventResults[]>();
+	for (const row of results.results) {
+		const list = byDistance.get(row.distance) ?? [];
+		list.push({
+			event_id: row.event_id,
+			event_name: row.event_name,
+			event_date: row.event_date,
+			finalized: row.finalized === 1,
+			result_count: row.result_count,
+			results: JSON.parse(row.results_json) as LifecycleResultRow[],
+		});
+		byDistance.set(row.distance, list);
+	}
+
+	return {
+		ok: true,
+		series: RACE_LIFECYCLE_SERIES,
+		generated_at: new Date().toISOString(),
+		distances: lifecycle.results.map((row) => ({
+			distance: row.distance,
+			race_id: row.race_id,
+			stage: row.stage,
+			synced_at: row.synced_at,
+			events: byDistance.get(row.distance) ?? [],
 		})),
 	};
 }

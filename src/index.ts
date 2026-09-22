@@ -14,6 +14,7 @@ import { applySeries2026PublicationHistory, previewSeries2026ResultPublications 
 import {
 	confirmRaceLifecyclePrep,
 	getRaceLifecycleView,
+	getRaceResultsView,
 	syncRaceLifecycleDistance,
 	testSeries2026WriteAccess,
 } from "./race-lifecycle";
@@ -33,6 +34,7 @@ import {
 	listBoardSubmissions,
 	listInitiatives,
 	renderOperatingCenterHtml,
+	renderRaceResultsHtml,
 } from "./operating-center";
 
 interface Env {
@@ -5590,6 +5592,7 @@ export default {
 		const url = new URL(request.url);
 		const operatingCenterRoute =
 			url.pathname === "/operating-center" ||
+			url.pathname.startsWith("/operating-center/") ||
 			url.pathname.startsWith("/api/operating-center/") ||
 			url.pathname === "/api/initiatives" ||
 			url.pathname.startsWith("/api/board/");
@@ -5603,7 +5606,11 @@ export default {
 
 		const operatingCenterApiRoute =
 			operatingCenterRoute &&
-			!(request.method === "GET" && url.pathname === "/operating-center");
+			!(
+				request.method === "GET" &&
+				(url.pathname === "/operating-center" ||
+					url.pathname === "/operating-center/results")
+			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
 			return json({
@@ -5619,6 +5626,24 @@ export default {
 					"cache-control": "no-store",
 				},
 			});
+		}
+
+		if (request.method === "GET" && url.pathname === "/operating-center/results") {
+			return new Response(renderRaceResultsHtml(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/race-results") {
+			try {
+				return json(await getRaceResultsView(env.nwana_engine_db));
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Race results view failed" }, 500);
+			}
 		}
 
 		if (request.method === "GET" && url.pathname === "/api/operating-center/overview") {

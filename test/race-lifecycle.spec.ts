@@ -7,6 +7,7 @@ import {
 	computeSeries2026Levels,
 	confirmRaceLifecyclePrep,
 	deriveEventStage,
+	flattenEventResults,
 	getRaceLifecycleView,
 	parseNwanaTime,
 	series2026LevelDisplayName,
@@ -357,5 +358,46 @@ describe("lifecycle persistence (in-memory D1 stub)", () => {
 			write_mode: "dry_run",
 		});
 		expect(view.distances[0].active_event?.event_id).toBe(2);
+	});
+});
+
+describe("flattenEventResults (results page rows)", () => {
+	const row = (overrides: Record<string, unknown>) => ({
+		result_id: null,
+		athlete: "Athlete",
+		gender: "M",
+		time: "10:00",
+		performance_level: null,
+		level_place: null,
+		...overrides,
+	});
+
+	it("dedupes rows by result_id across result sets", () => {
+		const drafts = [
+			{ content: { results: [row({ result_id: "a", athlete: "Ann" }), row({ result_id: "b", athlete: "Bob" })] } },
+			{ content: { results: [row({ result_id: "b", athlete: "Bob" }), row({ result_id: "c", athlete: "Cat" })] } },
+		];
+		expect(flattenEventResults(drafts).map((r) => r.athlete)).toEqual(["Ann", "Bob", "Cat"]);
+	});
+
+	it("sorts by performance level then level place", () => {
+		const drafts = [
+			{
+				content: {
+					results: [
+						row({ athlete: "Open1", performance_level: "Open (All Levels)", level_place: "2" }),
+						row({ athlete: "Elite1", performance_level: "Elite", level_place: "1" }),
+						row({ athlete: "Open0", performance_level: "Open (All Levels)", level_place: "1" }),
+						row({ athlete: "Perf1", performance_level: "Performance", level_place: "1" }),
+					],
+				},
+			},
+		];
+		expect(flattenEventResults(drafts).map((r) => r.athlete)).toEqual([
+			"Elite1",
+			"Perf1",
+			"Open0",
+			"Open1",
+		]);
 	});
 });

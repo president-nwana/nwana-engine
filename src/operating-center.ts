@@ -315,8 +315,9 @@ export function renderOperatingCenterHtml(): string {
 		<div id="app" hidden>
 		<section class="stats" id="stats"><div class="stat"><strong>…</strong><span>Loading verified state</span></div></section>
 		<section class="panel" id="lifecycle-panel" style="margin-top:20px"><h2>Series 2026 race lifecycle</h2>
-			<p class="meta">One row per distance. Sync is manual, one distance at a time, and never runs on a timer. Stages: registration_open → awaiting_results → verifying (owner) → levels_computed → published → next_race_prep.</p>
-			<div><button id="sync-all" style="width:auto">Sync all distances</button> <span class="message" id="sync-message" aria-live="polite"></span></div>
+			<p class="meta">One row per distance. Stages: registration_open → awaiting_results → verifying (owner) → levels_computed → published → next_race_prep.</p>
+			<p class="meta"><a href="/operating-center/results">Race results and sync →</a></p>
+			<div><span class="message" id="sync-message" aria-live="polite"></span></div>
 			<div id="lifecycle">Loading…</div>
 		</section>
 		<section class="grid">
@@ -361,44 +362,125 @@ export function renderOperatingCenterHtml(): string {
 			document.querySelector('#board-items').innerHTML=b.submissions.length?b.submissions.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.submission_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
 			loadLifecycle();
 		}
-		const DISTANCES=['1K','3K','5K','10K','15K','20K'];
 		async function loadLifecycle(){
 			const box=document.querySelector('#lifecycle');
 			try{
 				const data=await api('/api/operating-center/race-lifecycle');
-				if(!data.distances.length){box.innerHTML='<div class="unavailable">No lifecycle state yet. Press "Sync all distances".</div>';return}
+				if(!data.distances.length){box.innerHTML='<div class="unavailable">No lifecycle state yet. Open <a href="/operating-center/results">Race results and sync</a> and press "Sync all distances".</div>';return}
 				box.innerHTML=data.distances.map(d=>{
 					const ev=d.active_event;
 					const action=d.owner_action?'<div class="meta">Owner action: '+esc(d.owner_action)+'</div>':'';
 					const prep=(d.stage==='next_race_prep'&&d.prep)?'<div class="meta">Prep drafts ready: announcement + email (Send stays manual). <button data-prep="'+esc(d.distance)+'" style="width:auto">Confirm prep</button></div>':'';
 					return '<div class="item"><strong>'+esc(d.distance)+' — '+esc(d.stage)+'</strong>'+
 						'<div class="meta">'+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||'')+' · ':'')+'write: '+esc(d.write_access)+' (dry_run)'+(d.synced_at?' · synced '+esc(d.synced_at):'')+'</div>'+
-						action+prep+
-						'<div style="margin-top:6px"><button data-sync="'+esc(d.distance)+'" style="width:auto">Sync '+esc(d.distance)+'</button></div></div>';
+						action+prep+'</div>';
 				}).join('');
-				box.querySelectorAll('[data-sync]').forEach(btn=>btn.addEventListener('click',async()=>{
-					const m=document.querySelector('#sync-message');m.textContent='Syncing '+btn.dataset.sync+'…';
-					try{await api('/api/operating-center/race-lifecycle/sync?distance='+encodeURIComponent(btn.dataset.sync),{method:'POST'});m.textContent='Synced.';await loadLifecycle()}catch(err){m.textContent=err.message}
-				}));
 				box.querySelectorAll('[data-prep]').forEach(btn=>btn.addEventListener('click',async()=>{
 					const m=document.querySelector('#sync-message');m.textContent='Confirming prep…';
 					try{await api('/api/operating-center/race-lifecycle/prep-confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:btn.dataset.prep})});m.textContent='Prep confirmed.';await loadLifecycle()}catch(err){m.textContent=err.message}
 				}));
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
+		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
+		for(const [id,path] of [['initiative-form','/api/initiatives'],['board-form','/api/board/submissions']])document.querySelector('#'+id).addEventListener('submit',async e=>{e.preventDefault();const m=e.currentTarget.querySelector('.message');m.textContent='Saving…';try{await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formJson(e.currentTarget))});e.currentTarget.reset();m.textContent='Saved.';await load()}catch(err){m.textContent=err.message}});
+		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load().catch(renderLoadError)});
+		if(getKey()){showApp();load().catch(renderLoadError)}else{showGate('')}
+	</script>
+</body></html>`;
+}
+
+export function renderRaceResultsHtml(): string {
+	return `<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1">
+	<title>Series 2026 race results — NWANA Operating Center</title>
+	<style>
+		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9}
+		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
+		header{background:var(--brand);color:white;padding:28px clamp(20px,5vw,72px)}header h1{margin:0;font-size:clamp(28px,4vw,44px)}header p{margin:8px 0 0;color:#dce9e2}header a{color:#dce9e2}
+		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px}
+		h2{margin:0 0 14px;font-size:22px}h3{margin:18px 0 8px;font-size:18px}
+		label{display:block;margin:12px 0 5px;font-weight:650}input,button{font:inherit}input{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%}
+		button{border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer;width:auto;margin-top:14px}
+		.message{min-height:24px;color:var(--muted);margin-top:9px}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}
+		table{width:100%;border-collapse:collapse;margin-top:8px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--muted);font-weight:650}
+		.event{border-top:1px solid var(--line);padding:14px 0}.event:first-of-type{border-top:0}
+		.nav{margin-bottom:18px}.nav a{color:var(--brand);font-weight:650}
+	</style>
+</head>
+<body>
+	<header><h1>Series 2026 race results</h1><p>Past races, synced from RunSignup. Sync runs only when you press a button. Never on a timer.</p></header>
+	<main>
+		<div class="nav"><a href="/operating-center">← Back to Operating Center</a></div>
+		<section class="panel" id="gate" hidden>
+			<h2>Owner access</h2>
+			<p class="unavailable">This page is private. Enter the operating center key to continue.</p>
+			<form id="key-form">
+				<label for="owner-key">Operating center key</label>
+				<input id="owner-key" name="owner_key" type="password" autocomplete="current-password" required>
+				<button type="submit">Open results</button>
+				<div class="message" id="key-message" aria-live="polite"></div>
+			</form>
+		</section>
+		<div id="app" hidden>
+			<section class="panel">
+				<h2>Sync</h2>
+				<p class="meta">Sync reads RunSignup and stores the latest results. RunSignup occasionally returns a temporary error (522); if a sync fails, wait a minute and press the button again.</p>
+				<button id="sync-all">Sync all distances</button>
+				<div class="message" id="sync-message" aria-live="polite"></div>
+			</section>
+			<div id="results">Loading…</div>
+		</div>
+	</main>
+	<script>
+		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+		const KEY_STORAGE='nwana_operating_center_key';
+		const gate=document.querySelector('#gate');
+		const app=document.querySelector('#app');
+		const DISTANCES=['1K','3K','5K','10K','15K','20K'];
+		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
+		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
+		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
+		function showApp(){gate.hidden=true;app.hidden=false}
+		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
+		function renderResults(data){
+			const box=document.querySelector('#results');
+			if(!data.distances.length){box.innerHTML='<div class="panel"><div class="unavailable">No results yet. Press "Sync all distances".</div></div>';return}
+			box.innerHTML=data.distances.map(d=>{
+				const events=d.events.length?d.events.map(e=>{
+					const rows=e.results.length?'<table><thead><tr><th>Athlete</th><th>Gender</th><th>Time</th><th>Performance level</th><th>Level place</th></tr></thead><tbody>'+
+						e.results.map(r=>'<tr><td>'+esc(r.athlete)+'</td><td>'+esc(r.gender)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.performance_level)+'</td><td>'+esc(r.level_place)+'</td></tr>').join('')+'</tbody></table>'
+						:'<div class="unavailable">No results synced for this event yet.</div>';
+					return '<div class="event"><h3>'+esc(e.event_name||('Event '+e.event_id))+' · '+esc(e.event_date||'')+'</h3>'+
+						'<div class="meta">'+esc(String(e.result_count))+' results'+(e.finalized?' · finalized':'')+'</div>'+rows+'</div>';
+				}).join(''):'<div class="unavailable">No events synced yet.</div>';
+				return '<section class="panel"><h2>'+esc(d.distance)+' — '+esc(d.stage)+'</h2>'+
+					'<div class="meta">'+(d.synced_at?'Synced '+esc(d.synced_at):'Never synced')+' · <button data-sync="'+esc(d.distance)+'" style="margin-top:6px">Sync '+esc(d.distance)+'</button></div>'+
+					events+'</section>';
+			}).join('');
+			box.querySelectorAll('[data-sync]').forEach(btn=>btn.addEventListener('click',async()=>{
+				const m=document.querySelector('#sync-message');m.textContent='Syncing '+btn.dataset.sync+'…';
+				try{await api('/api/operating-center/race-lifecycle/sync?distance='+encodeURIComponent(btn.dataset.sync),{method:'POST'});m.textContent='Synced.';await load()}catch(err){m.textContent=err.message}
+			}));
+		}
+		async function load(){
+			try{const data=await api('/api/operating-center/race-results');renderResults(data)}
+			catch(err){document.querySelector('#results').innerHTML='<div class="panel"><div class="unavailable">'+esc(err.message)+'</div></div>'}
+		}
 		document.querySelector('#sync-all').addEventListener('click',async()=>{
 			const m=document.querySelector('#sync-message');
 			for(const d of DISTANCES){
 				m.textContent='Syncing '+d+'…';
 				try{await api('/api/operating-center/race-lifecycle/sync?distance='+d,{method:'POST'})}
-				catch(err){m.textContent='Failed at '+d+': '+err.message;await loadLifecycle();return}
+				catch(err){m.textContent='Failed at '+d+': '+err.message;await load();return}
 			}
-			m.textContent='All synced.';await loadLifecycle();
+			m.textContent='All synced.';await load();
 		});
-		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
-		for(const [id,path] of [['initiative-form','/api/initiatives'],['board-form','/api/board/submissions']])document.querySelector('#'+id).addEventListener('submit',async e=>{e.preventDefault();const m=e.currentTarget.querySelector('.message');m.textContent='Saving…';try{await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formJson(e.currentTarget))});e.currentTarget.reset();m.textContent='Saved.';await load()}catch(err){m.textContent=err.message}});
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load().catch(renderLoadError)});
-		if(getKey()){showApp();load().catch(renderLoadError)}else{showGate('')}
+		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load()});
+		if(getKey()){showApp();load()}else{showGate('')}
 	</script>
 </body></html>`;
 }
