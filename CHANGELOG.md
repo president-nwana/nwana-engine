@@ -1,5 +1,15 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-22 — Close the Series 2026 race lifecycle loop (phase 1)
+
+- Added migration 0019 (`race_lifecycle` table): one row per distance with the active event, lifecycle stage, prep drafts and confirmation, `write_access` defaulting to `UNKNOWN`, `write_mode` fixed to `dry_run`.
+- Added `src/race-lifecycle.ts`: verified NWANA-FINAL.ps1 level logic ported (per-distance thresholds, strict below-threshold comparison, Level Place within Level + Gender, 1000/999/998 points); stage derivation from RunSignup events, result drafts, and the publication ledger; owner-triggered sync; prep-draft generation for announcements and Email V2 (Send stays manual, dashboard ID `513494`, MARKETING classification); and a dry-run levels write plan that never executes.
+- Stages: `registration_open → awaiting_results → verifying → levels_computed → published → next_race_prep`. Human boundaries stay manual: verification (GPX/Strava/Garmin, pole requirement), Meta PUBLISH, Email V2 send, and any RunSignup write test.
+- Added owner-gated operating-center routes: lifecycle view, per-distance sync, prep confirm, and a write test that requires an explicit `TEST_WRITE` confirmation and performs at most one additive custom-field creation before recording CONFIRMED or DENIED.
+- The operating-center page now shows a Series 2026 race lifecycle panel with the real stage per distance, the owner action required, prep drafts, write access, and sync buttons; no timers, polling, or cron were added.
+- Verified locally: migration 0019 applied to local D1, Vitest 42/42, TypeScript clean. Recorded as ADR-0008.
+- Not deployed: no Cloudflare credentials in this session. No push: no GitHub credentials in this session. Nothing was published, sent, or written to RunSignup.
+
 ## 2026-09-21 — Deploy the operating center live
 
 - Applied migration 0018 to remote D1 `nwana-engine-db` (all six operating-center tables verified present; journal backfilled for 0001-0017 which had been applied by raw SQL).

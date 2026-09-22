@@ -275,7 +275,7 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 			published_results: publishedResults,
 		},
 		sections: {
-			competition_calendar: { available: false, reason: "Verified scheduled-date feed is not connected yet" },
+			competition_calendar: { available: true, endpoint: "/api/operating-center/race-lifecycle" },
 			sponsors: { available: false, reason: "Sponsor pipeline is not connected yet" },
 			donations: { available: false, reason: "Donation outcome feed is not connected yet" },
 			google_ads: { available: true, endpoint: "/integrations/google-ads/status" },
@@ -314,6 +314,11 @@ export function renderOperatingCenterHtml(): string {
 		</section>
 		<div id="app" hidden>
 		<section class="stats" id="stats"><div class="stat"><strong>…</strong><span>Loading verified state</span></div></section>
+		<section class="panel" id="lifecycle-panel" style="margin-top:20px"><h2>Series 2026 race lifecycle</h2>
+			<p class="meta">One row per distance. Sync is manual, one distance at a time, and never runs on a timer. Stages: registration_open → awaiting_results → verifying (owner) → levels_computed → published → next_race_prep.</p>
+			<div><button id="sync-all" style="width:auto">Sync all distances</button> <span class="message" id="sync-message" aria-live="polite"></span></div>
+			<div id="lifecycle">Loading…</div>
+		</section>
 		<section class="grid">
 			<form class="panel" id="initiative-form"><h2>Submit an initiative</h2>
 				<label for="initiative-type">Input type</label><select id="initiative-type" name="input_type"><option>THOUGHT</option><option>PROBLEM</option><option>OPPORTUNITY</option><option>TASK</option><option>SOURCE_MATERIAL</option></select>
@@ -354,7 +359,42 @@ export function renderOperatingCenterHtml(): string {
 			document.querySelector('#stats').innerHTML=Object.entries(o.counts).map(([k,v])=>'<div class="stat"><strong>'+esc(v)+'</strong><span>'+esc(labels[k]||k)+'</span></div>').join('');
 			document.querySelector('#initiatives').innerHTML=i.initiatives.length?i.initiatives.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.input_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No initiatives yet.</div>';
 			document.querySelector('#board-items').innerHTML=b.submissions.length?b.submissions.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.submission_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
+			loadLifecycle();
 		}
+		const DISTANCES=['1K','3K','5K','10K','15K','20K'];
+		async function loadLifecycle(){
+			const box=document.querySelector('#lifecycle');
+			try{
+				const data=await api('/api/operating-center/race-lifecycle');
+				if(!data.distances.length){box.innerHTML='<div class="unavailable">No lifecycle state yet. Press "Sync all distances".</div>';return}
+				box.innerHTML=data.distances.map(d=>{
+					const ev=d.active_event;
+					const action=d.owner_action?'<div class="meta">Owner action: '+esc(d.owner_action)+'</div>':'';
+					const prep=(d.stage==='next_race_prep'&&d.prep)?'<div class="meta">Prep drafts ready: announcement + email (Send stays manual). <button data-prep="'+esc(d.distance)+'" style="width:auto">Confirm prep</button></div>':'';
+					return '<div class="item"><strong>'+esc(d.distance)+' — '+esc(d.stage)+'</strong>'+
+						'<div class="meta">'+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||'')+' · ':'')+'write: '+esc(d.write_access)+' (dry_run)'+(d.synced_at?' · synced '+esc(d.synced_at):'')+'</div>'+
+						action+prep+
+						'<div style="margin-top:6px"><button data-sync="'+esc(d.distance)+'" style="width:auto">Sync '+esc(d.distance)+'</button></div></div>';
+				}).join('');
+				box.querySelectorAll('[data-sync]').forEach(btn=>btn.addEventListener('click',async()=>{
+					const m=document.querySelector('#sync-message');m.textContent='Syncing '+btn.dataset.sync+'…';
+					try{await api('/api/operating-center/race-lifecycle/sync?distance='+encodeURIComponent(btn.dataset.sync),{method:'POST'});m.textContent='Synced.';await loadLifecycle()}catch(err){m.textContent=err.message}
+				}));
+				box.querySelectorAll('[data-prep]').forEach(btn=>btn.addEventListener('click',async()=>{
+					const m=document.querySelector('#sync-message');m.textContent='Confirming prep…';
+					try{await api('/api/operating-center/race-lifecycle/prep-confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:btn.dataset.prep})});m.textContent='Prep confirmed.';await loadLifecycle()}catch(err){m.textContent=err.message}
+				}));
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		document.querySelector('#sync-all').addEventListener('click',async()=>{
+			const m=document.querySelector('#sync-message');
+			for(const d of DISTANCES){
+				m.textContent='Syncing '+d+'…';
+				try{await api('/api/operating-center/race-lifecycle/sync?distance='+d,{method:'POST'})}
+				catch(err){m.textContent='Failed at '+d+': '+err.message;await loadLifecycle();return}
+			}
+			m.textContent='All synced.';await loadLifecycle();
+		});
 		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
 		for(const [id,path] of [['initiative-form','/api/initiatives'],['board-form','/api/board/submissions']])document.querySelector('#'+id).addEventListener('submit',async e=>{e.preventDefault();const m=e.currentTarget.querySelector('.message');m.textContent='Saving…';try{await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formJson(e.currentTarget))});e.currentTarget.reset();m.textContent='Saved.';await load()}catch(err){m.textContent=err.message}});
 		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load().catch(renderLoadError)});

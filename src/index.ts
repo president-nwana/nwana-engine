@@ -11,6 +11,12 @@ import {
         type DistributionRule,
 } from "./distribution-planner";
 import { applySeries2026PublicationHistory, previewSeries2026ResultPublications } from "./series-2026-results";
+import {
+	confirmRaceLifecyclePrep,
+	getRaceLifecycleView,
+	syncRaceLifecycleDistance,
+	testSeries2026WriteAccess,
+} from "./race-lifecycle";
 import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
@@ -5655,6 +5661,73 @@ export default {
 				return await createBoardSubmission(request, env.nwana_engine_db);
 			} catch (error) {
 				return json({ ok: false, error: error instanceof Error ? error.message : "Board submission failed" }, 400);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/race-lifecycle") {
+			try {
+				return json(await getRaceLifecycleView(env.nwana_engine_db));
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Race lifecycle view failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/race-lifecycle/sync") {
+			try {
+				const distance = url.searchParams.get("distance");
+				if (!distance) {
+					return json({ ok: false, error: "A distance query parameter is required (one distance per sync keeps each request inside the Worker limit)" }, 400);
+				}
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const state = await syncRaceLifecycleDistance({
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					apiCallerToken: env.RUNSIGNUP_API_REG,
+					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+					distance,
+				});
+				return json({ ok: true, ...state });
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Race lifecycle sync failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/race-lifecycle/prep-confirm") {
+			try {
+				const body = await request.json() as { distance?: string };
+				if (!body.distance) {
+					return json({ ok: false, error: "distance is required" }, 400);
+				}
+				return json(await confirmRaceLifecyclePrep(env.nwana_engine_db, body.distance));
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Prep confirmation failed" }, 400);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/race-lifecycle/write-test") {
+			try {
+				const body = await request.json() as { distance?: string; confirm?: string };
+				if (!body.distance) {
+					return json({ ok: false, error: "distance is required" }, 400);
+				}
+				if (body.confirm !== "TEST_WRITE") {
+					return json({ ok: false, error: 'Explicit confirm: "TEST_WRITE" is required before any RunSignup write attempt' }, 400);
+				}
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const result = await testSeries2026WriteAccess({
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					distance: body.distance,
+				});
+				return json({ ok: true, ...result });
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Write test failed" }, 500);
 			}
 		}
 

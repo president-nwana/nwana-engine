@@ -500,6 +500,15 @@ Binding rule for all future automation:
 
 No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event signal is currently implemented in this repository. Do not describe result publication as automatic until a real $0 event source and end-to-end handler are implemented and verified.
 
+## RACE LIFECYCLE — IMPLEMENTED LOCALLY 2026-09-22
+
+- Added migration `0019-add-race-lifecycle.sql` with the `race_lifecycle` table (one row per Series 2026 distance): active event, six lifecycle stages, prep drafts and confirmation, `write_access` defaulting to `UNKNOWN`, `write_mode` fixed to `dry_run`.
+- Added `src/race-lifecycle.ts`: a direct port of the verified NWANA-FINAL.ps1 level logic (thresholds per distance, strict below-threshold comparison, Level Place inside Level + Gender, 1000/999/998 points), stage derivation from RunSignup events, result drafts, and the publication ledger, owner-triggered sync, prep-draft generation, and a dry-run levels write plan that never executes.
+- Stages: `registration_open → awaiting_results → verifying → levels_computed → published → next_race_prep`. `verifying` waits on the owner (GPX/Strava/Garmin and pole requirement); `next_race_prep` produces announcement and Email V2 drafts only, with Send staying manual in the Email Marketing dashboard (ID `513494`, MARKETING classification).
+- Added owner-gated operating-center routes: `GET /api/operating-center/race-lifecycle` (view), `POST /api/operating-center/race-lifecycle/sync?distance=X` (owner-triggered sync, one distance per request), `POST /api/operating-center/race-lifecycle/prep-confirm` (owner prep confirmation), `POST /api/operating-center/race-lifecycle/write-test` (requires explicit `TEST_WRITE` body field; performs at most one additive "Performance Level" custom-field creation and records CONFIRMED or DENIED).
+- The operating-center page now shows a Series 2026 race lifecycle panel: six distances, real current stage, owner action required, prep drafts, write access, and per-distance or bulk sync buttons. The overview `competition_calendar` section points at the lifecycle endpoint instead of reporting unavailable.
+- No polling, cron, timers, Gmail, Meta publication, Email V2 send, or RunSignup write was executed. Recorded as ADR-0008. Verified locally: migration 0019 applied to local D1, Vitest 42/42, TypeScript clean.
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.
