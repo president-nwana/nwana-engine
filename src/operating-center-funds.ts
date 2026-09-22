@@ -2,6 +2,9 @@
 // The main operating center keeps only a compact summary card so the
 // screen stays informational instead of becoming a warehouse of lists.
 
+// ADR-0023: shared button menu under the header.
+import { operatingCenterMenu } from "./operating-center";
+
 export function renderFundsHtml(): string {
 	return `<!doctype html>
 <html lang="en">
@@ -13,6 +16,9 @@ export function renderFundsHtml(): string {
 		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9}
 		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
 		header{background:var(--brand);color:white;padding:28px clamp(20px,5vw,72px)}header h1{margin:0;font-size:clamp(28px,4vw,44px)}header p{margin:8px 0 0;color:#dce9e2}
+		.oc-menu{background:var(--brand);padding:0 clamp(20px,5vw,72px) 18px;display:flex;flex-wrap:wrap;gap:10px}
+		.oc-menu-btn{display:inline-block;background:#2f6247;color:#fff;font-weight:700;padding:10px 20px;border-radius:9px;text-decoration:none}
+		.oc-menu-btn:hover{background:#3a7455}.oc-menu-active{background:#fff;color:var(--brand)}
 		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px}
 		.nav{margin-bottom:18px}.nav a{color:var(--brand);font-weight:650}
 		h2{margin:0 0 14px;font-size:22px}label{display:block;margin:12px 0 5px;font-weight:650}input,select,textarea,button{font:inherit}
@@ -24,8 +30,8 @@ export function renderFundsHtml(): string {
 </head>
 <body>
 	<header><h1>Funds</h1><p>Fund objects and their prospect pipelines. Stages: prospect → verified → drafted → sent → follow-up → committed → stewardship → public recognition. The owner still presses Send and signs; the machine tracks state and routes what comes next.</p></header>
+	${operatingCenterMenu("funds")}
 	<main>
-		<div class="nav"><a href="/operating-center">← Back to Operating Center</a></div>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>
 			<p class="unavailable">This page is private. Enter the operating center key to continue.</p>

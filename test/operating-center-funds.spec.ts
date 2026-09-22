@@ -37,3 +37,22 @@ describe("operating center main page funds card (ADR-0022)", () => {
 		expect(html).not.toContain("fund-message");
 	});
 });
+
+describe("funds page button menu and script (ADR-0023)", () => {
+	it("renders the shared three-button menu under the header", () => {
+		const html = renderFundsHtml();
+		expect(html).toMatch(/<\/header>\s*<nav class="oc-menu"/);
+		expect(html).toContain('href="/operating-center"');
+		expect(html).toContain('href="/operating-center/results"');
+		expect(html).toContain('href="/operating-center/funds" aria-current="page"');
+	});
+
+	it("embeds syntactically valid JavaScript (regression convention: inline JS in template literals)", () => {
+		const html = renderFundsHtml();
+		const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+		expect(scripts.length).toBeGreaterThan(0);
+		for (const body of scripts) {
+			expect(() => new Function(body)).not.toThrow();
+		}
+	});
+});
