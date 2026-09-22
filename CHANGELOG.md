@@ -8,7 +8,7 @@
 - Main `/operating-center` stays compact: summary, initiatives, Board queue, lifecycle overview, navigation.
 - Verified locally: Vitest 60/60, TypeScript clean.
 - Deployed 2026-09-22: migration 0021 applied to remote D1 (direct execute + journal entry), Worker deployed (version 6cbe2275-0efa-4cfe-bb1e-305298d99686). Verified live: /operating-center 200, /operating-center/results 200 with the key gate and the new auto-sync copy, /api/operating-center/race-results and sync return 401 without the key, zero manual sync buttons in the live HTML of either page. Authenticated check (auto-sync run) pending: the owner key is held only by Albert Fatikhov.
-- Commits not pushed yet: no GitHub credentials in this session.
+- Commits not pushed yet (GitHub credential connected later on 2026-09-22; push pending after the authenticated live check).
 
 ## 2026-09-22 — Race results page (separate page, sync moved off the main page)
 
@@ -18,7 +18,7 @@
 - Added API `GET /api/operating-center/race-results`. Added `flattenEventResults` (dedupe by result_id, sort by level then level place) with regression tests.
 - Verified locally: Vitest 47/47, TypeScript clean.
 - Deployed 2026-09-22: migration 0020 applied to remote D1 (direct execute + journal entry; wrangler `migrations apply` tried to re-apply all migrations, so it was bypassed for 0020), Worker deployed to https://nwana-engine.nwana-engine.workers.dev. Verified live: /operating-center/results returns 200 with the key gate, /api/operating-center/race-results returns 401 without the key.
-- Commits not pushed yet: no GitHub credentials in this session.
+- Commits not pushed yet (GitHub credential connected later on 2026-09-22; push pending after the authenticated live check).
 
 ## 2026-09-22 — Close the Series 2026 race lifecycle loop (phase 1)
 
@@ -28,7 +28,7 @@
 - Added owner-gated operating-center routes: lifecycle view, per-distance sync, prep confirm, and a write test that requires an explicit `TEST_WRITE` confirmation and performs at most one additive custom-field creation before recording CONFIRMED or DENIED.
 - The operating-center page now shows a Series 2026 race lifecycle panel with the real stage per distance, the owner action required, prep drafts, write access, and sync buttons; no timers, polling, or cron were added.
 - Verified locally: migration 0019 applied to local D1, Vitest 42/42, TypeScript clean. Recorded as ADR-0008.
-- Not deployed: no Cloudflare credentials in this session. No push: no GitHub credentials in this session. Nothing was published, sent, or written to RunSignup.
+- Not deployed: no Cloudflare credentials in this session (deployed later the same day). No push: GitHub credential connected later on 2026-09-22. Nothing was published, sent, or written to RunSignup.
 
 ## 2026-09-21 — Deploy the operating center live
 
