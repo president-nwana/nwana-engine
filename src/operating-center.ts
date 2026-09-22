@@ -788,3 +788,167 @@ export async function autoPublishWinnerNews(
 
 	return { published: true, slug: news.slug };
 }
+
+// ---------------------------------------------------------------------------
+// Race-announced auto-publish (ADR-0012)
+//
+// Mirror of the winner-announcement flow for the START of the competition
+// lifecycle: when the engine first sees a new race event during a lifecycle
+// sync, it writes one "new race announced" row into site_news. Creating the
+// object starts its public life immediately: name, date, distance, and the
+// registration link, factual only. No owner key is needed at this point:
+// the owner's explicit sync trigger is the authorization, the write is
+// internal to the engine's own D1, nothing is sent externally, and nothing
+// is written back to RunSignup.
+//
+// New events only: race_event_first_seen records every event the engine has
+// observed. Events that existed before this feature deployed were backfilled
+// into that table, so the first sync after deploy announces nothing
+// retroactively. Idempotency is per (series, distance, event_id) via the
+// first-seen marker plus a deterministic slug.
+//
+// kind is 'news' (not a new kind value): the site_news CHECK constraint only
+// allows 'news' and 'winner_announcement', and the public site renders every
+// kind in the feed without filtering, so a new kind would require a risky
+// D1 table rebuild for no rendering benefit. The slug prefix
+// 'race-announced-' and created_by 'engine:auto-publish' identify these rows.
+
+export interface RaceAnnouncementInput {
+	series: string;
+	distance: string;
+	raceId: number;
+	eventId: number;
+	eventName: string | null;
+	eventDate: string | null;
+	registrationUrl: string | null;
+}
+
+export interface RaceAnnouncementNews {
+	title: string;
+	body_html: string;
+	slug: string;
+}
+
+export interface RaceAnnouncementOutcome {
+	event_id: number;
+	published: boolean;
+	slug?: string;
+	skipped?: string;
+}
+
+// Pure: builds the announcement. Always returns an item: every first-seen
+// event is announced, with factual fallbacks for missing fields. Nothing is
+// invented: only the name, date, distance, and registration link the sync
+// actually observed.
+export function buildRaceAnnouncementNews(
+	input: RaceAnnouncementInput,
+): RaceAnnouncementNews {
+	const distanceLabel = (input.distance ?? "").trim();
+	const eventLabel = (input.eventName ?? "").trim() ||
+		`NWANA ${distanceLabel || "race"}`;
+	const dateLabel = (input.eventDate ?? "").trim();
+	const title = `New race announced: ${eventLabel}`;
+
+	const lines: string[] = [];
+	lines.push(
+		`<p>${escapeNewsHtml(eventLabel)} has been announced` +
+			(dateLabel ? ` and is scheduled for ${escapeNewsHtml(dateLabel)}` : "") +
+			`.</p>`,
+	);
+	if (distanceLabel) {
+		lines.push(`<p>Distance: ${escapeNewsHtml(distanceLabel)}.</p>`);
+	}
+	const regUrl = (input.registrationUrl ?? "").trim();
+	if (regUrl) {
+		lines.push(
+			`<p><a href="${escapeNewsHtml(regUrl)}">Race and registration details on RunSignup</a></p>`,
+		);
+	}
+	lines.push(
+		`<p>Results, performance levels, and standings are published here as the race completes.</p>`,
+	);
+
+	return {
+		title,
+		body_html: lines.join("\n"),
+		slug: raceAnnouncementSlug(input.series, input.distance, input.eventId),
+	};
+}
+
+export function raceAnnouncementSlug(
+	series: string,
+	distance: string,
+	eventId: number,
+): string {
+	const safe = `${series}-${distance}-${eventId}`
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 100);
+	return `race-announced-${safe || "news"}`;
+}
+
+// Server-side: announces an event the first time the engine sees it.
+// Idempotent per (series, distance, event_id).
+export async function autoPublishRaceAnnouncedNews(
+	db: D1Database,
+	params: RaceAnnouncementInput,
+): Promise<AutoPublishNewsOutcome> {
+	const slug = raceAnnouncementSlug(params.series, params.distance, params.eventId);
+	const seen = await db
+		.prepare(
+			"SELECT event_id FROM race_event_first_seen WHERE series = ? AND distance = ? AND event_id = ?",
+		)
+		.bind(params.series, params.distance, params.eventId)
+		.first<{ event_id: number }>();
+	if (seen) return { published: false, skipped: "already_announced" };
+
+	const now = new Date().toISOString();
+	await db
+		.prepare(
+			`INSERT OR IGNORE INTO race_event_first_seen
+			 (series, distance, race_id, event_id, event_name, event_date, first_seen_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(
+			params.series,
+			params.distance,
+			params.raceId,
+			params.eventId,
+			params.eventName,
+			params.eventDate,
+			now,
+		)
+		.run();
+
+	const news = buildRaceAnnouncementNews(params);
+	await db
+		.prepare(
+			`INSERT INTO site_news (slug, title, body_html, published_at, kind, created_by)
+			 VALUES (?, ?, ?, ?, 'news', 'engine:auto-publish')`,
+		)
+		.bind(news.slug, news.title, news.body_html, now)
+		.run();
+
+	return { published: true, slug: news.slug };
+}
+
+// One-shot backfill: marks every event already stored in
+// race_event_results as seen, so the first deploy never announces the
+// existing events as new. Safe to re-run (INSERT OR IGNORE).
+export async function backfillRaceEventFirstSeen(
+	db: D1Database,
+	seenAt: string,
+): Promise<{ marked: number }> {
+	const result = await db
+		.prepare(
+			`INSERT OR IGNORE INTO race_event_first_seen
+			 (series, distance, race_id, event_id, event_name, event_date, first_seen_at)
+			 SELECT series, distance, race_id, event_id, event_name, event_date, ?
+			 FROM race_event_results`,
+		)
+		.bind(seenAt)
+		.run();
+	const changes = (result as { meta?: { changes?: unknown } }).meta?.changes;
+	return { marked: typeof changes === "number" ? changes : 0 };
+}

@@ -1,5 +1,14 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — News auto-publish on first sight of a race event (ADR-0012)
+
+- Mirror of ADR-0011 for the START of the competition lifecycle: `syncRaceLifecycleDistance` now writes one "new race announced" row into `site_news` (kind `news`, created_by `engine:auto-publish`) the first time it observes a race event. Content is factual only: race name, date, distance, and the registration link the sync observed. Internal D1 write only; the owner's explicit sync trigger is the authorization; nothing external is sent and nothing is written back to RunSignup. Generic engine machinery, independent of any specific series.
+- New events only: migration 0023 adds `race_event_first_seen` (series, distance, event_id marker); the deploy backfills every event already in `race_event_results`, so existing events are never announced retroactively. Idempotent per (series, distance, event_id) via the marker plus deterministic slug `race-announced-<series>-<distance>-<eventId>`.
+- kind stays `news` deliberately: the `site_news` CHECK constraint allows only `news`/`winner_announcement`, and the public site renders every kind in the feed without filtering, so a new kind would need a risky D1 table rebuild for no rendering benefit. Slug prefix `race-announced-` identifies the rows.
+- The sync response now carries an `announcements` outcome array per event.
+- New pure builders `buildRaceAnnouncementNews` / `raceAnnouncementSlug` in operating-center.ts with HTML-escaping; title stored raw (public site escapes at render, same contract as `publishSiteNews`).
+- Verified locally: Vitest suite green, TypeScript clean. Live path runs on the next sync that observes a genuinely new event.
+
 ## 2026-09-22 — News auto-publish on result publication (ADR-0011)
 
 - Closed the deferred ADR-0010 item: `publishSeries2026Result` now writes one winner-announcement row into `site_news` (kind `winner_announcement`, created_by `engine:auto-publish`) right after a publication is confirmed with explicit `PUBLISH`. Internal D1 write only; the explicit PUBLISH confirmation is the authorization, so no owner key is needed at this point; nothing external is sent and nothing is written back to RunSignup.

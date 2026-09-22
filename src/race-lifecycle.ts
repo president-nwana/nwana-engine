@@ -17,6 +17,10 @@ import {
 	previewSeries2026ResultPublications,
 	type Series2026Source,
 } from "./series-2026-results";
+import {
+	autoPublishRaceAnnouncedNews,
+	type RaceAnnouncementOutcome,
+} from "./operating-center";
 
 export const RACE_LIFECYCLE_SERIES = "SERIES_2026";
 
@@ -717,7 +721,7 @@ export interface SyncRaceLifecycleInput {
 // timer; the owner triggers it explicitly.
 export async function syncRaceLifecycleDistance(
 	input: SyncRaceLifecycleInput,
-): Promise<LifecycleDistanceState & { synced_at: string }> {
+): Promise<LifecycleDistanceState & { synced_at: string; announcements: RaceAnnouncementOutcome[] }> {
 	const source = SERIES_2026_SOURCES.find(
 		(entry) => entry.distance === input.distance,
 	);
@@ -904,7 +908,28 @@ export async function syncRaceLifecycleDistance(
 			.run();
 	}
 
-	return { ...state, synced_at: syncedAt };
+	// Announce events the engine sees for the first time (ADR-0012). Events
+	// that existed before this feature deployed were backfilled into
+	// race_event_first_seen, so only genuinely new events produce news.
+	// Creating the object starts its public life at the moment of creation:
+	// name, date, distance, registration link. Internal D1 writes only;
+	// the owner's explicit sync trigger is the authorization; nothing is
+	// sent externally and nothing is written back to RunSignup.
+	const announcements: RaceAnnouncementOutcome[] = [];
+	for (const eventInput of eventInputs) {
+		const outcome = await autoPublishRaceAnnouncedNews(input.db, {
+			series: RACE_LIFECYCLE_SERIES,
+			distance: input.distance,
+			raceId: source.raceId,
+			eventId: eventInput.eventId,
+			eventName: eventInput.eventName,
+			eventDate: eventInput.eventDate,
+			registrationUrl: eventInput.registrationUrl,
+		});
+		announcements.push({ event_id: eventInput.eventId, ...outcome });
+	}
+
+	return { ...state, synced_at: syncedAt, announcements };
 }
 
 export async function getRaceLifecycleView(db: D1Database): Promise<{

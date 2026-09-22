@@ -79,6 +79,14 @@ Read before making changes:
 - Idempotent per publication key via deterministic slug `winner-announcement-<key>`; duplicates are never created. The publish response now includes a `site_news` outcome object.
 - Local verification: Vitest 68/68, TypeScript clean. The authenticated end-to-end publication path (owner key + Meta token) is not testable in this environment; the auto-publish runs on the next real publication.
 
+## NEWS AUTO-PUBLISH ON FIRST SIGHT OF A RACE EVENT — ADR-0012 (2026-09-22)
+
+- The lifecycle sync (`syncRaceLifecycleDistance`) now writes one "new race announced" row into `site_news` (kind `news`, created_by `engine:auto-publish`) the first time it observes a race event: race name, date, distance, and the registration link the sync observed, factual only. Internal D1 write only; the owner's explicit sync trigger is the authorization; nothing external is sent, nothing written back to RunSignup.
+- New events only: migration 0023 adds `race_event_first_seen` (series, distance, event_id marker). Deploy backfills every event already in `race_event_results`, so existing events are never announced retroactively. Idempotent per (series, distance, event_id) via the marker plus deterministic slug `race-announced-<series>-<distance>-<eventId>`.
+- kind stays `news` deliberately (site_news CHECK allows only news/winner_announcement; the public site renders every kind without filtering, so a new kind would need a risky D1 table rebuild). Slug prefix `race-announced-` identifies the rows.
+- The sync response now carries an `announcements` outcome array per event.
+- Live path runs on the next sync that observes a genuinely new event.
+
 ## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
 
 - The authenticated NWANA Email Marketing Dashboard exists at dashboard ID `513494` and is connected to `Nordic Walking Association of North America NWANA`.
