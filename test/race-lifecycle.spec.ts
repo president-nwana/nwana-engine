@@ -7,6 +7,7 @@ import {
 	computeSeries2026Levels,
 	confirmRaceLifecyclePrep,
 	deriveEventStage,
+	detectPrepExceptions,
 	flattenEventResults,
 	getRaceLifecycleView,
 	getRaceResultsView,
@@ -199,7 +200,7 @@ describe("lifecycle distance state", () => {
 		expect(state.events.find((event) => event.event_id === 2)?.stage).toBe("registration_open");
 	});
 
-	it("moves to next_race_prep with drafts when the previous event is published", () => {
+	it("auto-confirms routine prep when the previous event is published", () => {
 		const state = computeLifecycleDistanceState({
 			source: source1K,
 			events: [{ ...finalizedEvent, publication: "PUBLISHED" as const }, upcomingEvent],
@@ -209,13 +210,65 @@ describe("lifecycle distance state", () => {
 			previousPrep: null,
 		});
 
-		expect(state.stage).toBe("next_race_prep");
+		expect(state.stage).toBe("registration_open");
 		expect(state.active_event?.event_id).toBe(2);
-		expect(state.prep?.status).toBe("DRAFT");
+		expect(state.prep?.status).toBe("AUTO_CONFIRMED");
+		expect(state.prep?.exceptions).toEqual([]);
 		expect(state.prep?.email.dashboard_id).toBe(513494);
 		expect(state.prep?.email.classification).toBe("MARKETING");
 		expect(state.prep?.email.send).toBe("manual in Email Marketing Dashboard");
+		expect(state.prep_confirmed).toBe(true);
+		expect(state.owner_action_required).toBe(false);
+	});
+
+	it("holds next_race_prep for prep exceptions (missing event name)", () => {
+		// Note: a missing date cannot reach the prep branch at all, because
+		// deriveEventStage only reports registration_open for dated future
+		// events. A blank name with a valid future date is the realistic
+		// exception case.
+		const state = computeLifecycleDistanceState({
+			source: source1K,
+			events: [
+				{ ...finalizedEvent, publication: "PUBLISHED" as const },
+				{ ...upcomingEvent, eventName: "   " },
+			],
+			nowDate: "2026-09-22",
+			previousActiveEventId: 1,
+			previousPrepConfirmed: false,
+			previousPrep: null,
+		});
+
+		expect(state.stage).toBe("next_race_prep");
+		expect(state.active_event?.event_id).toBe(2);
+		expect(state.prep?.status).toBe("DRAFT");
+		expect(state.prep?.exceptions).toEqual(["missing event name"]);
+		expect(state.prep_confirmed).toBe(false);
 		expect(state.owner_action_required).toBe(true);
+		expect(state.owner_action).toContain("missing event name");
+	});
+
+	it("respects a manual confirmation even when prep has exceptions", () => {
+		const prep = buildNextRacePrep({
+			distance: "1K",
+			eventName: null,
+			eventDate: "2026-10-03",
+			registrationUrl: null,
+		});
+		expect(prep.exceptions).toEqual(["missing event name"]);
+		const state = computeLifecycleDistanceState({
+			source: source1K,
+			events: [
+				{ ...finalizedEvent, publication: "PUBLISHED" as const },
+				{ ...upcomingEvent, eventName: null },
+			],
+			nowDate: "2026-09-22",
+			previousActiveEventId: 2,
+			previousPrepConfirmed: true,
+			previousPrep: prep,
+		});
+
+		expect(state.stage).toBe("registration_open");
+		expect(state.prep_confirmed).toBe(true);
 	});
 
 	it("opens registration after the owner confirms prep", () => {
@@ -238,7 +291,7 @@ describe("lifecycle distance state", () => {
 		expect(state.prep_confirmed).toBe(true);
 	});
 
-	it("regenerates prep when the active event changes", () => {
+	it("regenerates prep when the active event changes and auto-confirms it", () => {
 		const prep = buildNextRacePrep({
 			distance: "1K",
 			eventName: "October 1K",
@@ -254,8 +307,9 @@ describe("lifecycle distance state", () => {
 			previousPrep: prep,
 		});
 
-		expect(state.stage).toBe("next_race_prep");
-		expect(state.prep_confirmed).toBe(false);
+		expect(state.stage).toBe("registration_open");
+		expect(state.prep_confirmed).toBe(true);
+		expect(state.prep?.status).toBe("AUTO_CONFIRMED");
 		expect(state.prep?.announcement.text).toContain("October 1K");
 	});
 });
@@ -270,11 +324,42 @@ describe("next race prep drafts", () => {
 		});
 
 		expect(prep.status).toBe("DRAFT");
+		expect(prep.exceptions).toEqual([]);
 		expect(prep.announcement.send).toBe("manual");
 		expect(prep.announcement.channels).toHaveLength(4);
 		expect(prep.announcement.text).toContain("October 3K");
 		expect(prep.email.subject).toContain("October 3K");
 		expect(prep.email.body).toContain("https://runsignup.com/Race/3K");
+	});
+});
+
+describe("prep exception detection", () => {
+	it("returns no exceptions for complete prep data", () => {
+		expect(
+			detectPrepExceptions({ eventName: "October 3K", eventDate: "2026-10-10" }),
+		).toEqual([]);
+	});
+
+	it("flags a missing event name", () => {
+		expect(
+			detectPrepExceptions({ eventName: null, eventDate: "2026-10-10" }),
+		).toEqual(["missing event name"]);
+		expect(detectPrepExceptions({ eventName: "  ", eventDate: "2026-10-10" })).toEqual([
+			"missing event name",
+		]);
+	});
+
+	it("flags a missing event date", () => {
+		expect(detectPrepExceptions({ eventName: "October 3K", eventDate: null })).toEqual([
+			"missing event date",
+		]);
+	});
+
+	it("flags both when both are missing", () => {
+		expect(detectPrepExceptions({ eventName: null, eventDate: "" })).toEqual([
+			"missing event name",
+			"missing event date",
+		]);
 	});
 });
 
@@ -377,6 +462,44 @@ describe("lifecycle persistence (in-memory D1 stub)", () => {
 			write_mode: "dry_run",
 		});
 		expect(view.distances[0].active_event?.event_id).toBe(2);
+		expect(view.distances[0].owner_action).toBeNull();
+	});
+
+	it("exposes the prep review reason in the lifecycle view", async () => {
+		const { db } = makeDb([
+			{
+				series: "SERIES_2026",
+				distance: "3K",
+				race_id: 209981,
+				active_event_id: 7,
+				active_event_name: "September 3K",
+				active_event_date: null,
+				stage: "next_race_prep",
+				events_json: "[]",
+				prep_json: JSON.stringify({
+					status: "DRAFT",
+					exceptions: ["missing event date"],
+					announcement: { status: "DRAFT", channels: [], text: "", image_url: null, send: "manual" },
+					email: {
+						status: "DRAFT",
+						platform: "RunSignup/TicketSignup Email V2",
+						dashboard_id: 513494,
+						classification: "MARKETING",
+						audience: "",
+						subject: "",
+						body: "",
+						send: "manual in Email Marketing Dashboard",
+					},
+				}),
+				prep_confirmed: "false",
+				write_access: "UNKNOWN",
+				write_mode: "dry_run",
+				synced_at: "2026-09-22T00:00:00Z",
+			},
+		]);
+		const view = await getRaceLifecycleView(db);
+		expect(view.distances[0].owner_action).toContain("missing event date");
+		expect(view.distances[0].owner_action_required).toBe(true);
 	});
 });
 
@@ -488,7 +611,7 @@ describe("future race regression", () => {
 			previousPrep: null,
 		});
 		// The event itself stays registration_open; the distance stage is
-		// next_race_prep because pre-race announcement/email drafts are due.
+		// registration_open too because routine prep auto-confirms.
 		// It must never become awaiting_results, verifying, levels_computed,
 		// or published.
 		expect(state.active_event?.event_id).toBe(2);

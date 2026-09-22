@@ -1,5 +1,14 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — Routine next-race prep auto-confirms; owner gate kept for exceptions only (ADR-0014)
+
+- Removed the owner-click gate from routine race-prep distribution: when the previous event is done and the upcoming race has complete prep data (event name and date), the lifecycle sync now auto-confirms prep (`AUTO_CONFIRMED`) and the distance moves straight to `registration_open`. `next_race_prep` is now the exception state, held only when prep data is incomplete.
+- New pure `detectPrepExceptions`: a missing event name or date is a genuine exception (the announcement cannot be built truthfully); everything else, including a missing registration URL (falls back to the Series hub link), is routine. A previous manual confirmation is always respected and never downgraded.
+- The exception is visible, not vague: `GET /api/operating-center/race-lifecycle` now exposes `owner_action` per distance, and the operating center renders the concrete missing piece next to the Confirm prep button (this also fixes the previously dead `d.owner_action` reference in the UI). The manual prep-confirm endpoint stays as the override for exceptions.
+- Nothing about sending changes: announcement send stays manual, email send stays manual in the Email V2 dashboard; no RunSignup writes (still dry_run).
+- Verified: Vitest 92/92, TypeScript clean. Live-data proof: the real stored 3K/5K rows (next_race_prep, prep_confirmed=false) were replayed through the new logic and flip to `registration_open` + `AUTO_CONFIRMED` on the next sync.
+- Deployed 2026-09-22: engine Worker redeployed; live checks pass.
+
 ## 2026-09-22 — Next-race promo auto-publish on result publication (ADR-0013)
 
 - Closes the last gap in the competition lifecycle loop (series -> registration -> results -> levels -> standings -> publication -> next event): `publishSeries2026Result` now writes one "next race" promo row into `site_news` (kind `news`, created_by `engine:auto-publish`) right after a publication confirmed with explicit `PUBLISH`. The promo points at the next not-yet-run event of the same series and distance, by date: race name, date, distance, and the registration link, factual only. Internal D1 write only; the explicit PUBLISH confirmation is the authorization; nothing external is sent and nothing is written back to RunSignup.

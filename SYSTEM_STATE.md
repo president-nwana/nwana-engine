@@ -162,9 +162,26 @@ Follow `OPERATING_PLAN.md`:
 
 The definition of done is owner independence from terminal commands and chat sessions for normal operation. The strict $0 operating-cost rule and event/action-trigger rule remain binding.
 
+## PRODUCTION CURRENCY (single source of truth for what is live)
+
+- Live Worker version: `cf2dae01-2db1-40fe-8eeb-6950e385b87f`, deployed 2026-09-22T15:43:58Z.
+- Corresponds to commit `c716e202` (ADR-0011 + ADR-0012 + ADR-0013 news auto-publish chain).
+- Rule: before ANY redeploy, run `wrangler deployments list` and compare the latest
+  version timestamp against the latest commit timestamp. Deploy only when the newest
+  commit is newer than the newest deployment. Never redeploy on assumption.
+- Lesson 2026-09-22: two same-day deploys of effectively one commit happened because
+  currency was not checked first. This section exists so it does not repeat.
+
 ## CURRENT STAGE
 
-Stage 8 — Connect existing NWANA assets to the Rules and Distribution Engine
+**Master map priorities** (`~/workspace/goals/nwana/files/machine-master-map.md` is the
+single source of priorities; old "Stage 8" notes are superseded). Current order:
+1. Remove the owner-confirmation gate from routine race-prep distribution.
+2. Fund as a first-class machine object ($50K bridge sprint first).
+3. Investigate the real Google Ads access path (investigate only).
+
+**Ban:** no new increments to the competition cycle until live distribution of the
+2026-09-26/27 weekend races is confirmed.
 
 Stage 7 is closed.
 

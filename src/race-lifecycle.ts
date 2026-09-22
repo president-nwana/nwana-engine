@@ -10,6 +10,9 @@
 //   The levels pipeline therefore always prepares data in dry_run mode and
 //   never claims a write it did not perform.
 // - Publication and email Send always remain human-confirmed last miles.
+// - Routine next-race prep auto-confirms (no owner click for the normal
+//   case); next_race_prep is the exception state, held only when prep data
+//   is incomplete (missing event name or date).
 
 import {
 	SERIES_2026_SOURCES,
@@ -310,7 +313,10 @@ export function deriveEventStage(input: EventStageInput): EventCoreStage {
 }
 
 export interface NextRacePrep {
-	status: "DRAFT";
+	status: "DRAFT" | "AUTO_CONFIRMED";
+	// Genuine blockers that keep prep in human review (missing event name
+	// or date). Empty for routine prep, which auto-confirms.
+	exceptions: string[];
 	announcement: {
 		status: "DRAFT";
 		channels: string[];
@@ -330,7 +336,27 @@ export interface NextRacePrep {
 	};
 }
 
+// Pure: genuine exceptions that keep race prep in human review. A missing
+// event name or date means the announcement cannot be built truthfully;
+// everything else (including a missing registration URL, which falls back
+// to the Series hub link) is routine and auto-confirms.
+export function detectPrepExceptions(input: {
+	eventName: string | null;
+	eventDate: string | null;
+}): string[] {
+	const exceptions: string[] = [];
+	if (!input.eventName || !input.eventName.trim()) {
+		exceptions.push("missing event name");
+	}
+	if (!input.eventDate || !input.eventDate.trim()) {
+		exceptions.push("missing event date");
+	}
+	return exceptions;
+}
+
 // Pre-race distribution preparation: announcement assets and email drafts.
+// Routine prep (complete name and date) auto-confirms during the lifecycle
+// sync; only prep with exceptions waits for the owner's confirm click.
 // The final Send is always manual in the Email V2 dashboard; nothing here
 // sends anything.
 export function buildNextRacePrep(input: {
@@ -346,6 +372,10 @@ export function buildNextRacePrep(input: {
 		: "Registration link: see the Series 2026 hub at https://series.nwaofna.org/";
 	return {
 		status: "DRAFT",
+		exceptions: detectPrepExceptions({
+			eventName: input.eventName,
+			eventDate: input.eventDate,
+		}),
 		announcement: {
 			status: "DRAFT",
 			channels: [
@@ -495,6 +525,14 @@ function ownerActionForStage(stage: EventCoreStage): string | null {
 	}
 }
 
+// Owner-facing text for the exception state: names exactly what is missing
+// so the human review is a concrete fix, not a vague approval click.
+function prepReviewAction(prep: NextRacePrep): string {
+	const exceptions = prep.exceptions ?? [];
+	const detail = exceptions.length > 0 ? ` (${exceptions.join("; ")})` : "";
+	return `Prep needs your review${detail}. Check the announcement and email drafts, then confirm prep to open the registration stage.`;
+}
+
 export interface LifecycleEventInput {
 	eventId: number;
 	eventName: string | null;
@@ -507,9 +545,10 @@ export interface LifecycleEventInput {
 	resultsUrl: string | null;
 }
 
-// Pure: folds per-event inputs into the distance lifecycle state, advancing
-// to next_race_prep when the previous event is done and the next one needs
-// distribution preparation.
+// Pure: folds per-event inputs into the distance lifecycle state. Routine
+// next-race prep auto-confirms (the distance moves straight to
+// registration_open); next_race_prep is held only for genuine prep
+// exceptions that need human review.
 export function computeLifecycleDistanceState(input: {
 	source: Series2026Source;
 	events: readonly LifecycleEventInput[];
@@ -565,8 +604,7 @@ export function computeLifecycleDistanceState(input: {
 		const activeIndex = sorted.indexOf(active);
 		const previous = activeIndex > 0 ? sorted[activeIndex - 1] : null;
 		const previousDone = previous === null || previous.stage === "published";
-		if (previousDone && !prepConfirmed) {
-			stage = "next_race_prep";
+		if (previousDone) {
 			if (!prep) {
 				const source = input.events.find((event) => event.eventId === active.event_id);
 				prep = buildNextRacePrep({
@@ -576,6 +614,18 @@ export function computeLifecycleDistanceState(input: {
 					registrationUrl: source?.registrationUrl ?? null,
 				});
 			}
+			if (!prepConfirmed) {
+				// Routine prep auto-confirms: no owner click for the normal
+				// case. Only genuine exceptions hold the distance in
+				// next_race_prep for human review. A previous manual
+				// confirmation is always respected.
+				const exceptions = prep.exceptions ?? [];
+				if (exceptions.length === 0) {
+					prep = { ...prep, status: "AUTO_CONFIRMED" };
+					prepConfirmed = true;
+				}
+			}
+			stage = prepConfirmed ? "registration_open" : "next_race_prep";
 		} else {
 			stage = "registration_open";
 		}
@@ -586,8 +636,8 @@ export function computeLifecycleDistanceState(input: {
 	}
 
 	const ownerAction =
-		stage === "next_race_prep"
-			? "Review the announcement and email drafts, then confirm prep to open the registration stage."
+		stage === "next_race_prep" && prep
+			? prepReviewAction(prep)
 			: active
 				? ownerActionForStage(active.stage)
 				: null;
@@ -949,6 +999,7 @@ export async function getRaceLifecycleView(db: D1Database): Promise<{
 			event_date: string | null;
 		} | null;
 		owner_action_required: boolean;
+		owner_action: string | null;
 		prep: NextRacePrep | null;
 		prep_confirmed: boolean;
 		write_access: RunSignupWriteAccess;
@@ -1007,6 +1058,10 @@ export async function getRaceLifecycleView(db: D1Database): Promise<{
 				row.stage === "levels_computed" ||
 				row.stage === "awaiting_results" ||
 				row.stage === "next_race_prep",
+			owner_action:
+				row.stage === "next_race_prep" && row.prep_json
+					? prepReviewAction(JSON.parse(row.prep_json) as NextRacePrep)
+					: null,
 			prep: row.prep_json ? (JSON.parse(row.prep_json) as NextRacePrep) : null,
 			prep_confirmed: row.prep_confirmed === "true",
 			write_access: row.write_access,
