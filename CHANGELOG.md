@@ -7,7 +7,8 @@
 - Main `/operating-center` keeps a clean lifecycle stage overview with a link to the results page; sync buttons removed from the main page.
 - Added API `GET /api/operating-center/race-results`. Added `flattenEventResults` (dedupe by result_id, sort by level then level place) with regression tests.
 - Verified locally: Vitest 47/47, TypeScript clean.
-- Not deployed yet: no Cloudflare credentials in this session. Commits not pushed yet: local commits ahead of origin/main, push after deploy verification.
+- Deployed 2026-09-22: migration 0020 applied to remote D1 (direct execute + journal entry; wrangler `migrations apply` tried to re-apply all migrations, so it was bypassed for 0020), Worker deployed to https://nwana-engine.nwana-engine.workers.dev. Verified live: /operating-center/results returns 200 with the key gate, /api/operating-center/race-results returns 401 without the key.
+- Commits not pushed yet: no GitHub credentials in this session.
 
 ## 2026-09-22 — Close the Series 2026 race lifecycle loop (phase 1)
 
