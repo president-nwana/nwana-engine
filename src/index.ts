@@ -34,6 +34,7 @@ import {
 	listBoardSubmissions,
 	listInitiatives,
 	publishSiteNews,
+	autoPublishWinnerNews,
 	renderOperatingCenterHtml,
 	renderRaceResultsHtml,
 } from "./operating-center";
@@ -5564,11 +5565,22 @@ async function publishSeries2026Result(
 		WHERE publication_key = ?
 	`).bind(draft.publication_key).run();
 
+	// Engine-side news auto-publish (ADR-0011): the owner's explicit PUBLISH
+	// confirmation above authorizes one winner announcement on the public
+	// site's news feed. Internal D1 write only; nothing external is sent.
+	const siteNews = await autoPublishWinnerNews(env.nwana_engine_db, {
+		publicationKey: draft.publication_key,
+		series: "SERIES_2026",
+		raceId: draft.source.race_id,
+		eventId: draft.source.event_id,
+	});
+
 	return json({
 		ok: true,
 		publication_key: draft.publication_key,
 		status: "PUBLISHED",
 		deliveries: result,
+		site_news: siteNews,
 	});
 }
 

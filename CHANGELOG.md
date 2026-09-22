@@ -1,5 +1,14 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — News auto-publish on result publication (ADR-0011)
+
+- Closed the deferred ADR-0010 item: `publishSeries2026Result` now writes one winner-announcement row into `site_news` (kind `winner_announcement`, created_by `engine:auto-publish`) right after a publication is confirmed with explicit `PUBLISH`. Internal D1 write only; the explicit PUBLISH confirmation is the authorization, so no owner key is needed at this point; nothing external is sent and nothing is written back to RunSignup.
+- New pure builder `buildWinnerAnnouncementNews` (operating-center.ts): level-place-1 finishers from the stored per-event results snapshot, grouped by performance level in level order, athlete name/gender/time, all user text HTML-escaped in `body_html`; title stored raw (the public site escapes titles at render, same contract as `publishSiteNews`); returns null when no winners so nothing empty is published.
+- Idempotent per publication key: deterministic slug `winner-announcement-<key>`; an existing slug is never duplicated. The publish response now carries a `site_news: { published, slug }` or `{ published: false, skipped: <reason> }` outcome.
+- Owner-key `POST /api/site/news` remains for hand-written federation news.
+- Verified locally: Vitest 68/68, TypeScript clean. Authenticated end-to-end publication needs the owner key and Meta token, so the live auto-publish path runs on the next real publication.
+- Deployed: engine Worker redeployed (endpoint behavior verified by 401-without-key checks).
+
 ## 2026-09-22 — Public site (nwana-site) + site news distribution channel
 
 - Added migration 0022 (`site_news` table: slug unique, title, body_html, published_at, kind news|winner_announcement, created_by). Applied to remote D1.

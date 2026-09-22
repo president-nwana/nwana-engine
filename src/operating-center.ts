@@ -586,3 +586,205 @@ export async function publishSiteNews(
 		201,
 	);
 }
+
+// ---------------------------------------------------------------------------
+// Engine-side news auto-publish (ADR-0011).
+//
+// When a result publication is confirmed with an explicit PUBLISH, the engine
+// also writes a winner announcement into site_news, the public site's news
+// feed. This is the machine's own distribution surface (its own D1 table),
+// so no owner key is needed at this point: the owner's explicit PUBLISH
+// confirmation is the authorization. Nothing is sent externally and nothing
+// is written back to RunSignup. The write is idempotent per publication key.
+
+export interface WinnerAnnouncementRow {
+	athlete: string;
+	gender: string | null;
+	time: string | null;
+	performance_level: string | null;
+	level_place: string | null;
+}
+
+export interface WinnerAnnouncementInput {
+	publicationKey: string;
+	eventName: string | null;
+	eventDate: string | null;
+	distance: string | null;
+	rows: ReadonlyArray<WinnerAnnouncementRow>;
+}
+
+export interface WinnerAnnouncementNews {
+	title: string;
+	body_html: string;
+	slug: string;
+}
+
+const WINNER_LEVEL_ORDER = [
+	"Elite",
+	"High Performance",
+	"Performance",
+	"Competitive",
+	"Open",
+] as const;
+
+function winnerLevelOrder(value: string | null): number {
+	if (!value) return WINNER_LEVEL_ORDER.length;
+	const index = WINNER_LEVEL_ORDER.findIndex((level) =>
+		value.startsWith(level),
+	);
+	return index === -1 ? WINNER_LEVEL_ORDER.length : index;
+}
+
+function escapeNewsHtml(value: string): string {
+	return value.replace(/[&<>"']/g, (c) => {
+		switch (c) {
+			case "&":
+				return "&amp;";
+			case "<":
+				return "&lt;";
+			case ">":
+				return "&gt;";
+			case '"':
+				return "&quot;";
+			default:
+				return "&#39;";
+		}
+	});
+}
+
+// Pure: builds a winner-announcement news item from level winners
+// (level_place "1"). Returns null when no winners are present, so the
+// caller publishes nothing instead of an empty announcement.
+export function buildWinnerAnnouncementNews(
+	input: WinnerAnnouncementInput,
+): WinnerAnnouncementNews | null {
+	const winners = input.rows.filter(
+		(row) => String(row.level_place ?? "").trim() === "1",
+	);
+	if (winners.length === 0) return null;
+
+	const byLevel = new Map<string, WinnerAnnouncementRow[]>();
+	for (const winner of winners) {
+		const level = (winner.performance_level ?? "").trim() || "Open";
+		const group = byLevel.get(level);
+		if (group) group.push(winner);
+		else byLevel.set(level, [winner]);
+	}
+	const orderedLevels = [...byLevel.keys()].sort(
+		(a, b) => winnerLevelOrder(a) - winnerLevelOrder(b),
+	);
+
+	const eventLabel = (input.eventName ?? "").trim() ||
+		`NWANA ${((input.distance ?? "").trim() || "race")}`;
+	const dateLabel = (input.eventDate ?? "").trim();
+	const title = `Winner congratulations: ${eventLabel}`;
+
+	const lines: string[] = [];
+	lines.push(
+		`<p>Congratulations to the winners of ${escapeNewsHtml(eventLabel)}` +
+			(dateLabel ? ` (${escapeNewsHtml(dateLabel)})` : "") +
+			`!</p>`,
+	);
+	for (const level of orderedLevels) {
+		lines.push(`<h3>${escapeNewsHtml(level)}</h3>`);
+		lines.push("<ul>");
+		for (const winner of byLevel.get(level) ?? []) {
+			const name = escapeNewsHtml((winner.athlete ?? "").trim() || "Unknown athlete");
+			const detailParts: string[] = [];
+			const gender = (winner.gender ?? "").trim();
+			if (gender) detailParts.push(escapeNewsHtml(gender));
+			const time = (winner.time ?? "").trim();
+			if (time) detailParts.push(escapeNewsHtml(time));
+			const detail = detailParts.length > 0 ? ` (${detailParts.join(", ")})` : "";
+			lines.push(`<li>${name}${detail}</li>`);
+		}
+		lines.push("</ul>");
+	}
+	lines.push(
+		`<p>Full results are published in the <a href="/results">results section</a>.</p>`,
+	);
+
+	return {
+		title,
+		body_html: lines.join("\n"),
+		slug: winnerAnnouncementSlug(input.publicationKey),
+	};
+}
+
+export function winnerAnnouncementSlug(publicationKey: string): string {
+	const safe = publicationKey
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 100);
+	return `winner-announcement-${safe || "news"}`;
+}
+
+export interface AutoPublishNewsOutcome {
+	published: boolean;
+	slug?: string;
+	skipped?: string;
+}
+
+// Server-side: reads the stored per-event results snapshot and writes one
+// winner-announcement row into site_news. Idempotent per publication key.
+export async function autoPublishWinnerNews(
+	db: D1Database,
+	params: {
+		publicationKey: string;
+		series: string;
+		raceId: number;
+		eventId: number;
+	},
+): Promise<AutoPublishNewsOutcome> {
+	const slug = winnerAnnouncementSlug(params.publicationKey);
+	const existing = await db
+		.prepare("SELECT id FROM site_news WHERE slug = ?")
+		.bind(slug)
+		.first<{ id: number }>();
+	if (existing) return { published: false, skipped: "already_exists" };
+
+	const snapshot = await db
+		.prepare(
+			`SELECT event_name, event_date, distance, results_json
+			 FROM race_event_results
+			 WHERE series = ? AND race_id = ? AND event_id = ?
+			 LIMIT 1`,
+		)
+		.bind(params.series, params.raceId, params.eventId)
+		.first<{
+			event_name: string | null;
+			event_date: string | null;
+			distance: string | null;
+			results_json: string;
+		}>();
+	if (!snapshot) return { published: false, skipped: "no_results_snapshot" };
+
+	let rows: WinnerAnnouncementRow[];
+	try {
+		const parsed: unknown = JSON.parse(snapshot.results_json);
+		if (!Array.isArray(parsed)) return { published: false, skipped: "unparseable_results" };
+		rows = parsed as WinnerAnnouncementRow[];
+	} catch {
+		return { published: false, skipped: "unparseable_results" };
+	}
+
+	const news = buildWinnerAnnouncementNews({
+		publicationKey: params.publicationKey,
+		eventName: snapshot.event_name,
+		eventDate: snapshot.event_date,
+		distance: snapshot.distance,
+		rows,
+	});
+	if (!news) return { published: false, skipped: "no_winners" };
+
+	await db
+		.prepare(
+			`INSERT INTO site_news (slug, title, body_html, published_at, kind, created_by)
+			 VALUES (?, ?, ?, ?, 'winner_announcement', 'engine:auto-publish')`,
+		)
+		.bind(news.slug, news.title, news.body_html, new Date().toISOString())
+		.run();
+
+	return { published: true, slug: news.slug };
+}

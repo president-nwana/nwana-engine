@@ -72,6 +72,13 @@ Read before making changes:
 - Live verification: `/operating-center` returns 200 with the key-entry gate; `/api/operating-center/overview`, `/api/initiatives`, `/api/board/submissions` return 401 without the key and 200 with the correct key; a test initiative round-tripped through POST and list, then was deleted, leaving the tables empty for the owner.
 - Follow-up hardening (not blocking): the `?key=` query-parameter fallback is accepted alongside the `Authorization: Bearer` header; consider removing it later so the key never appears in URLs, and update ADR-0007 if changed.
 
+## NEWS AUTO-PUBLISH ON RESULT PUBLICATION — IMPLEMENTED LOCALLY 2026-09-22
+
+- ADR-0011: `publishSeries2026Result` now writes one winner-announcement row into `site_news` (kind `winner_announcement`, created_by `engine:auto-publish`) immediately after a publication confirmed with explicit `PUBLISH`. Internal D1 write only; the PUBLISH confirmation is the authorization; nothing external is sent, nothing written back to RunSignup.
+- Pure builder `buildWinnerAnnouncementNews` in `src/operating-center.ts`: level-place-1 finishers from the stored `race_event_results` snapshot, grouped by performance level in level order; user text HTML-escaped in `body_html`; title stored raw (public site escapes titles at render). Returns null when there are no winners.
+- Idempotent per publication key via deterministic slug `winner-announcement-<key>`; duplicates are never created. The publish response now includes a `site_news` outcome object.
+- Local verification: Vitest 68/68, TypeScript clean. The authenticated end-to-end publication path (owner key + Meta token) is not testable in this environment; the auto-publish runs on the next real publication.
+
 ## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
 
 - The authenticated NWANA Email Marketing Dashboard exists at dashboard ID `513494` and is connected to `Nordic Walking Association of North America NWANA`.
