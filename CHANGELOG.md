@@ -1,13 +1,5 @@
 # NWANA Engine Changelog
 
-## 2026-09-22 — Lifecycle rows to the results page + button menu (ADR-0023)
-
-- The "Series 2026 race lifecycle" per-distance rows moved off the main operating-center page onto the dedicated `/operating-center/results` page (the "Race results" link already pointed there). The results page now shows the full rows verbatim: stage headings, event name/date, write access, synced_at, owner actions, and the "Confirm prep" button posting to the same `/api/operating-center/race-lifecycle/prep-confirm` API. The page still auto-syncs every distance on open; existing results/sync functionality untouched.
-- The main `/operating-center` page now shows only a compact lifecycle summary card: counts by stage, "N preps need review" (highlighted when nonzero), and an "Open results →" link. Every other panel is untouched.
-- All three operating-center pages (Overview, Results, Funds) now share one button menu directly under the header (`operatingCenterMenu()` in `src/operating-center.ts`): Overview / Results / Funds, current page marked with `aria-current="page"` and a distinct active style. Same visual language as the existing UI, mobile-friendly. The old "← Back to Operating Center" links on Results and Funds were removed as redundant.
-- No migration, no API change, no new endpoints. Auth behavior unchanged: HTML renders, APIs return 401 without the owner key.
-- Verified: Vitest 178/178 (8 new tests: menu on all pages, active state, header placement, summary card, lifecycle panel with buttons, script-parse regression tests for results and funds pages), TypeScript clean.
-
 ## 2026-09-22 — Hotfix: operating-center blank page (ADR-0022 regression)
 
 - The ADR-0022 deploy shipped a stray closing brace in the main page's inline `<script>` (after `loadFundSummary()`), a SyntaxError that stopped all client JS: the page showed only the header. Fixed with a one-line removal; `/operating-center/funds` untouched. Added a regression test that syntax-checks the embedded page script (`new Function`), which TypeScript and the markup tests cannot catch.
