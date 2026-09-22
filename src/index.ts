@@ -38,6 +38,18 @@ import {
 	getSponsorshipAssetsView,
 } from "./sponsorship-asset";
 import {
+	advanceBoardWorkItem,
+	advanceInitiative,
+	closeBoardMeeting,
+	createBoardMeeting,
+	getBoardMeetingDetail,
+	listBoardMeetings,
+	listBoardWorkItems,
+	openBoardMeeting,
+	recordBoardDecision,
+	triageAgenda,
+} from "./board";
+import {
 	createBoardSubmission,
 	createInitiative,
 	getOperatingCenterOverview,
@@ -5738,6 +5750,80 @@ export default {
 				return await createBoardSubmission(request, env.nwana_engine_db);
 			} catch (error) {
 				return json({ ok: false, error: error instanceof Error ? error.message : "Board submission failed" }, 400);
+			}
+		}
+
+		// Board meeting loop (ADR-0019): meetings, agenda triage, decisions,
+		// work items. All under /api/board/* so the owner-key gate above applies.
+		if (url.pathname === "/api/board/meetings" && request.method === "POST") {
+			try {
+				return await createBoardMeeting(request, env.nwana_engine_db);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Board meeting creation failed" }, 400);
+			}
+		}
+
+		if (url.pathname === "/api/board/meetings" && request.method === "GET") {
+			try {
+				return await listBoardMeetings(env.nwana_engine_db);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Board meetings list failed" }, 500);
+			}
+		}
+
+		if (url.pathname === "/api/board/decisions" && request.method === "POST") {
+			try {
+				return await recordBoardDecision(request, env.nwana_engine_db);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Board decision failed" }, 400);
+			}
+		}
+
+		if (url.pathname === "/api/board/work-items" && request.method === "GET") {
+			try {
+				return await listBoardWorkItems(env.nwana_engine_db);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Work items list failed" }, 500);
+			}
+		}
+
+		if (url.pathname === "/api/board/work-items/advance" && request.method === "POST") {
+			try {
+				return await advanceBoardWorkItem(request, env.nwana_engine_db);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Work item advance failed" }, 400);
+			}
+		}
+
+		if (url.pathname === "/api/initiatives/advance" && request.method === "POST") {
+			try {
+				return await advanceInitiative(request, env.nwana_engine_db);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Initiative advance failed" }, 400);
+			}
+		}
+
+		const boardMeetingPath = url.pathname.match(/^\/api\/board\/meetings\/([^/]+)(?:\/(open|agenda|close))?$/);
+		if (boardMeetingPath) {
+			const meetingId = decodeURIComponent(boardMeetingPath[1]);
+			const action = boardMeetingPath[2];
+			try {
+				if (request.method === "GET" && !action) {
+					return await getBoardMeetingDetail(env.nwana_engine_db, meetingId);
+				}
+				if (request.method === "POST" && action === "open") {
+					return await openBoardMeeting(request, env.nwana_engine_db, meetingId);
+				}
+				if (request.method === "POST" && action === "agenda") {
+					return await triageAgenda(request, env.nwana_engine_db, meetingId);
+				}
+				if (request.method === "POST" && action === "close") {
+					return await closeBoardMeeting(request, env.nwana_engine_db, meetingId);
+				}
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Board meeting action failed" }, 400);
 			}
 		}
 

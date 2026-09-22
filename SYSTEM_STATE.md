@@ -641,6 +641,14 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
   not testable: the owner key is held only by Albert Fatikhov.
 - Vitest 62/62, TypeScript clean on both workers.
 
+## BOARD MEETING LOOP — IMPLEMENTED 2026-09-22 (ADR-0019)
+
+- ADR-0019 closes the Board workspace loop from ADR-0006: new `src/board.ts` reuses the existing migration-0018 tables (no schema change, no migration, no seeding). The board_meetings, board_decisions, and work_items tables were previously never written; now they are.
+- Meeting DRAFT -> OPEN -> CLOSED; agenda triage PENDING -> AGENDA with carryover of unresolved items back to PENDING on close; decisions CONFIRMED/DEFERRED/REJECTED with responsible person + due date; CONFIRMED decisions with owner/due date immediately create linked work items; work items READY -> IN_PROGRESS -> DONE (BLOCKED side state); initiatives NEW -> UNDER_REVIEW -> APPROVED -> CONVERTED (DECLINED exit).
+- Owner-key-protected endpoints: POST/GET /api/board/meetings, GET /api/board/meetings/:id, POST /api/board/meetings/:id/open|agenda|close, POST /api/board/decisions, GET /api/board/work-items, POST /api/board/work-items/advance, POST /api/initiatives/advance. Operating-center Board meetings + work-items panels added (English only); empty states stay explicit.
+- Machine never invents members/meetings/decisions; no emails, no notifications, no Gmail, no RunSignup writes. decision_requests has no endpoints yet (overview count only).
+- Local verification: Vitest 158/158 (9 new board tests), `npx tsc --noEmit` clean.
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.

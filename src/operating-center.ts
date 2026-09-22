@@ -338,6 +338,22 @@ export function renderOperatingCenterHtml(): string {
 			<div><span class="message" id="sponsorship-message" aria-live="polite"></span></div>
 			<div id="sponsorship-assets">Loading…</div>
 		</section>
+		<section class="panel" id="board-meetings-panel" style="margin-top:20px"><h2>Board meetings</h2>
+			<p class="meta">The weekly meeting loop. Stages: Draft → Open → Closed. Triage pending items into the agenda, record each decision with a responsible person and due date; a confirmed decision immediately becomes tracked work. Unresolved agenda items return to the queue when the meeting closes.</p>
+			<form id="meeting-create-form" style="margin-bottom:12px">
+				<label for="meeting-title">Meeting title</label><input id="meeting-title" name="title" required maxlength="200" placeholder="Weekly Board meeting">
+				<label for="meeting-date">Scheduled date</label><input id="meeting-date" name="scheduled_for" type="date">
+				<button type="submit">Create meeting</button>
+				<div class="message" id="meeting-create-message" aria-live="polite"></div>
+			</form>
+			<div id="meetings">Loading…</div>
+			<div id="meeting-detail" style="margin-top:16px"></div>
+		</section>
+		<section class="panel" id="work-items-panel" style="margin-top:20px"><h2>Work items</h2>
+			<p class="meta">Tracked work from Board decisions. Stages: Ready → In progress → Done (Blocked allowed).</p>
+			<div><span class="message" id="workitem-message" aria-live="polite"></span></div>
+			<div id="work-items">Loading…</div>
+		</section>
 		<section class="grid">
 			<form class="panel" id="initiative-form"><h2>Submit an initiative</h2>
 				<label for="initiative-type">Input type</label><select id="initiative-type" name="input_type"><option>THOUGHT</option><option>PROBLEM</option><option>OPPORTUNITY</option><option>TASK</option><option>SOURCE_MATERIAL</option></select>
@@ -372,15 +388,27 @@ export function renderOperatingCenterHtml(): string {
 		function showApp(){gate.hidden=true;app.hidden=false}
 		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
 		function formJson(form){return Object.fromEntries([...new FormData(form)].map(([k,v])=>[k,String(v)]))}
+		let pendingSubmissionsCache=[];
 		async function load(){
 			const [o,i,b]=await Promise.all([api('/api/operating-center/overview'),api('/api/initiatives'),api('/api/board/submissions')]);
+			pendingSubmissionsCache=b.submissions||[];
 			const labels={active_initiatives:'Active initiatives',pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results'};
 			document.querySelector('#stats').innerHTML=Object.entries(o.counts).map(([k,v])=>'<div class="stat"><strong>'+esc(v)+'</strong><span>'+esc(labels[k]||k)+'</span></div>').join('');
-			document.querySelector('#initiatives').innerHTML=i.initiatives.length?i.initiatives.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.input_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No initiatives yet.</div>';
+			const INIT_NEXT={NEW:['UNDER_REVIEW'],PROPOSED:['UNDER_REVIEW'],UNDER_REVIEW:['APPROVED','DECLINED'],APPROVED:['CONVERTED']};
+			document.querySelector('#initiatives').innerHTML=i.initiatives.length?i.initiatives.map(x=>{
+				const nexts=INIT_NEXT[x.status]||[];
+				const btns=nexts.map(n=>'<button data-initiative-advance="'+esc(x.initiative_id)+'" data-to="'+n+'" style="width:auto">Move to '+n.toLowerCase().replace(/_/g,' ')+'</button>').join(' ');
+				return '<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.input_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div>'+(btns?'<div>'+btns+'</div>':'')+'</div>';
+			}).join(''):'<div class="unavailable">No initiatives yet.</div>';
+			document.querySelector('#initiatives').querySelectorAll('[data-initiative-advance]').forEach(btn=>btn.addEventListener('click',async()=>{
+				try{await api('/api/initiatives/advance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initiative_id:btn.dataset.initiativeAdvance,to_status:btn.dataset.to})});await load()}catch(err){alert(err.message)}
+			}));
 			document.querySelector('#board-items').innerHTML=b.submissions.length?b.submissions.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.submission_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
 			loadLifecycle();
 			loadFund();
 			loadSponsorshipAssets();
+			loadMeetings();
+			loadWorkItems();
 		}
 		async function loadFund(){
 			const box=document.querySelector('#funds');
@@ -471,8 +499,104 @@ export function renderOperatingCenterHtml(): string {
 				}));
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
+		let selectedMeetingId=null;
+		async function loadMeetings(){
+			const box=document.querySelector('#meetings');
+			try{
+				const data=await api('/api/board/meetings');
+				if(!data.meetings.length){box.innerHTML='<div class="unavailable">No meetings yet. Create one above.</div>';return}
+				const label={DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed'};
+				box.innerHTML=data.meetings.map(m=>'<div class="item"><strong>'+esc(m.title)+'</strong>'+
+					'<div class="meta">'+(m.scheduled_for?esc(String(m.scheduled_for).slice(0,10))+' · ':'')+esc(label[m.status]||m.status)+' · agenda '+m.agenda_count+' · decisions '+m.decision_count+'</div>'+
+					'<div><button data-meeting="'+esc(m.meeting_id)+'" style="width:auto">Open workspace</button></div></div>').join('');
+				box.querySelectorAll('[data-meeting]').forEach(btn=>btn.addEventListener('click',()=>selectMeeting(btn.dataset.meeting)));
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function selectMeeting(id){
+			selectedMeetingId=id;
+			const box=document.querySelector('#meeting-detail');
+			box.innerHTML='Loading…';
+			try{
+				const d=await api('/api/board/meetings/'+encodeURIComponent(id));
+				const m=d.meeting;
+				const label={DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed'};
+				let html='<div class="item"><strong>'+esc(m.title)+'</strong><div class="meta">'+esc(label[m.status]||m.status)+(m.scheduled_for?' · '+esc(String(m.scheduled_for).slice(0,10)):'')+(m.attendees?' · attendees: '+esc(m.attendees):'')+'</div></div>';
+				if(m.status==='DRAFT'){
+					html+='<form id="meeting-open-form"><label>Attendees (as written by the owner)</label><input name="attendees" maxlength="500" placeholder="Names of attendees"><button type="submit" style="width:auto">Open meeting</button><div class="message" aria-live="polite"></div></form>';
+				}
+				if(m.status==='DRAFT'||m.status==='OPEN'){
+					const pend=pendingSubmissionsCache.filter(s=>s.status==='PENDING');
+					html+='<h3 style="margin:16px 0 8px;font-size:18px">Add to agenda</h3>';
+					html+=pend.length?'<form id="agenda-form">'+pend.map(s=>'<label style="font-weight:400"><input type="checkbox" name="sid" value="'+esc(s.submission_id)+'" style="width:auto"> '+esc(s.title)+' <span class="meta">('+esc(s.submission_type)+' · '+esc(s.submitted_by)+')</span></label>').join('')+'<button type="submit" style="width:auto">Add selected to agenda</button><div class="message" aria-live="polite"></div></form>':'<div class="unavailable">No pending items in the queue.</div>';
+				}
+				html+='<h3 style="margin:16px 0 8px;font-size:18px">Agenda</h3>';
+				html+=d.agenda.length?d.agenda.map(a=>'<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.submission_type)+' · '+esc(a.submitted_by)+' · '+esc(a.status)+'</div>'+(a.requested_outcome?'<div class="meta">Requested outcome: '+esc(a.requested_outcome)+'</div>':'')+'</div>').join(''):'<div class="unavailable">Agenda is empty.</div>';
+				if(m.status==='OPEN'){
+					const undecided=d.agenda.filter(a=>a.status==='AGENDA');
+					html+='<h3 style="margin:16px 0 8px;font-size:18px">Record a decision</h3><form id="decision-form">'+
+						'<label>Agenda item (optional)</label><select name="submission_id"><option value="">General decision</option>'+undecided.map(a=>'<option value="'+esc(a.submission_id)+'">'+esc(a.title)+'</option>').join('')+'</select>'+
+						'<label>Decision</label><textarea name="decision_text" required></textarea>'+
+						'<label>Outcome</label><select name="outcome"><option>CONFIRMED</option><option>DEFERRED</option><option>REJECTED</option></select>'+
+						'<label>Responsible person</label><input name="responsible_person" maxlength="200">'+
+						'<label>Due date</label><input name="due_date" type="date">'+
+						'<label>Vote record (optional)</label><input name="vote_record" maxlength="500">'+
+						'<button type="submit" style="width:auto">Record decision</button><div class="message" aria-live="polite"></div></form>';
+					html+='<h3 style="margin:16px 0 8px;font-size:18px">Close meeting</h3><form id="meeting-close-form"><label>Minutes</label><textarea name="minutes"></textarea><button type="submit" style="width:auto">Close meeting</button><div class="message" aria-live="polite"></div></form>';
+				}
+				html+='<h3 style="margin:16px 0 8px;font-size:18px">Decisions</h3>';
+				html+=d.decisions.length?d.decisions.map(x=>'<div class="item"><strong>'+esc(x.decision_text)+'</strong><div class="meta">'+esc(x.outcome)+(x.submission_title?' · '+esc(x.submission_title):'')+(x.responsible_person?' · '+esc(x.responsible_person):'')+(x.due_date?' · due '+esc(String(x.due_date).slice(0,10)):'')+'</div></div>').join(''):'<div class="unavailable">No decisions recorded yet.</div>';
+				if(m.minutes){html+='<h3 style="margin:16px 0 8px;font-size:18px">Minutes</h3><div class="meta">'+esc(m.minutes)+'</div>'}
+				box.innerHTML=html;
+				const wire=(fid,path,after)=>{
+					const f=box.querySelector('#'+fid);
+					if(f)f.addEventListener('submit',async e=>{
+						e.preventDefault();
+						const msg=e.target.querySelector('.message');msg.textContent='Saving…';
+						try{
+							const fd=formJson(e.target);
+							if(fid==='agenda-form'){fd.submission_ids=[...e.target.querySelectorAll('input[name="sid"]:checked')].map(c=>c.value)}
+							await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(fd)});
+							msg.textContent='Saved.';
+							if(after)await after();
+							await selectMeeting(selectedMeetingId);
+						}catch(err){msg.textContent=err.message}
+					});
+				};
+				const mid='/api/board/meetings/'+encodeURIComponent(selectedMeetingId);
+				wire('meeting-open-form',mid+'/open',loadMeetings);
+				wire('agenda-form',mid+'/agenda',loadMeetings);
+				wire('decision-form','/api/board/decisions',async()=>{await loadMeetings();await loadWorkItems()});
+				wire('meeting-close-form',mid+'/close',loadMeetings);
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadWorkItems(){
+			const box=document.querySelector('#work-items');
+			const NEXT={READY:['IN_PROGRESS','BLOCKED'],IN_PROGRESS:['READY','BLOCKED','DONE'],BLOCKED:['READY','IN_PROGRESS']};
+			try{
+				const data=await api('/api/board/work-items');
+				if(!data.work_items.length){box.innerHTML='<div class="unavailable">No active work items. Confirmed Board decisions with a responsible person or due date appear here.</div>';return}
+				box.innerHTML=data.work_items.map(w=>{
+					const nexts=NEXT[w.status]||[];
+					const btns=nexts.map(n=>'<button data-wi-advance="'+esc(w.work_item_id)+'" data-to="'+n+'" style="width:auto">Move to '+n.toLowerCase().replace(/_/g,' ')+'</button>').join(' ');
+					return '<div class="item"><strong>'+esc(w.title)+'</strong>'+
+						'<div class="meta">'+esc(w.status)+(w.assigned_to?' · '+esc(w.assigned_to):'')+(w.due_date?' · due '+esc(String(w.due_date).slice(0,10)):'')+(w.meeting_title?' · '+esc(w.meeting_title):'')+'</div>'+
+						(w.blocker?'<div class="meta">Blocker: '+esc(w.blocker)+'</div>':'')+
+						'<div class="meta">Next: '+esc(w.next_action)+'</div>'+
+						(btns?'<div>'+btns+'</div>':'')+'</div>';
+				}).join('');
+				box.querySelectorAll('[data-wi-advance]').forEach(btn=>btn.addEventListener('click',async()=>{
+					const m=document.querySelector('#workitem-message');m.textContent='Moving…';
+					try{
+						let blocker=null;
+						if(btn.dataset.to==='BLOCKED'){blocker=prompt('What is blocking this work item?')||''}
+						await api('/api/board/work-items/advance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({work_item_id:btn.dataset.wiAdvance,to_status:btn.dataset.to,blocker})});
+						m.textContent='Moved.';await loadWorkItems();
+					}catch(err){m.textContent=err.message}
+				}));
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
 		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
-		for(const [id,path] of [['initiative-form','/api/initiatives'],['board-form','/api/board/submissions']])document.querySelector('#'+id).addEventListener('submit',async e=>{e.preventDefault();const m=e.currentTarget.querySelector('.message');m.textContent='Saving…';try{await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formJson(e.currentTarget))});e.currentTarget.reset();m.textContent='Saved.';await load()}catch(err){m.textContent=err.message}});
+		for(const [id,path] of [['initiative-form','/api/initiatives'],['board-form','/api/board/submissions'],['meeting-create-form','/api/board/meetings']])document.querySelector('#'+id).addEventListener('submit',async e=>{e.preventDefault();const m=e.currentTarget.querySelector('.message');m.textContent='Saving…';try{await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formJson(e.currentTarget))});e.currentTarget.reset();m.textContent='Saved.';await load()}catch(err){m.textContent=err.message}});
 		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load().catch(renderLoadError)});
 		if(getKey()){showApp();load().catch(renderLoadError)}else{showGate('')}
 	</script>
