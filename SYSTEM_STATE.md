@@ -103,6 +103,13 @@ Read before making changes:
 - Verified: Vitest 92/92, TypeScript clean. Live-data proof: the real stored 3K/5K rows (next_race_prep, prep_confirmed=false, events Sept 26/27) were replayed through the new logic and flip to `registration_open` + `AUTO_CONFIRMED` on the next owner-triggered sync. The stored rows themselves were not modified.
 - Deployed 2026-09-22: engine Worker redeployed (version f580daf0-2058-4d6a-8a4b-c233e156c097); live checks pass (/operating-center/results 200, /api/operating-center/* 401 without key). Commit a3d31835 on origin/main.
 
+## FUND FOLLOW-UP REMINDERS — ADR-0018 (2026-09-22)
+
+- The machine now surfaces which follow-ups are due: pure `src/fund-followup.ts` computes `follow_up_due_at = sent_at + 14 days` and derives `upcoming / due / overdue` (overdue = past 21 days, no follow-up) per render, never stored. Only stage `sent` can have a due follow-up; no `sent_at` means no due date. No D1 migration.
+- Fund view returns `follow_up_due_at` + `follow_up_status` per prospect and `follow_ups_due_now` per fund; the `sent` next action names the concrete due date. Operating-center panel (English only): "Follow-ups due now: N" per fund plus per-prospect due/overdue lines.
+- A follow-up NEVER sends anything: the machine surfaces, the owner presses Send. No emails, no auto drafts.
+- Verified: Vitest 149/149 (11 new tests), TypeScript clean. Deployed 2026-09-22: Worker redeployed; no migration needed.
+
 ## SPONSORSHIP ASSET AS A FIRST-CLASS MACHINE OBJECT — ADR-0017 (2026-09-22)
 
 - The machine now generates its own seller packages: `sponsorship_assets` table (migration 0026), one asset per (object_type, object_id) via UNIQUE constraint, generation idempotent, no duplicates possible.

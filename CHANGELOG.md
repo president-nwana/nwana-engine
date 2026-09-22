@@ -1,5 +1,14 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — Fund follow-up reminders (ADR-0018)
+
+- The machine now answers "which follow-ups are due right now": pure, tested follow-up logic in `src/fund-followup.ts` computes `follow_up_due_at = sent_at + 14 days` (the 2-3 week rule's window opening) and derives per-prospect status `upcoming / due / overdue` (overdue = past 21 days with no follow-up) at render time, never stored, so it cannot drift.
+- Only prospects at stage `sent` can have a due follow-up; every other stage (including `follow_up`, where the follow-up was already sent) reports `none`. Prospects with no `sent_at` have no due date. No D1 migration: due dates derive only from the factual stored send dates, nothing invented.
+- The fund view (`GET /api/operating-center/fund`, still owner-key protected, 401 without the key) now returns `follow_up_due_at` and `follow_up_status` per prospect and `follow_ups_due_now` per fund; the `sent`-stage next action names the concrete due date. Operating-center Fund panel (English only) shows a "Follow-ups due now: N" summary per fund and per-prospect follow-up lines with visual due/overdue states.
+- A follow-up NEVER sends anything: the machine surfaces due follow-ups; the owner still presses Send. No emails, no drafts created automatically.
+- Verified: Vitest 149/149 (11 new follow-up tests), TypeScript clean.
+- Deployed 2026-09-22: engine Worker redeployed; no migration needed.
+
 ## 2026-09-22 — Sponsorship Asset as a first-class machine object (ADR-0017)
 
 - The machine now generates its own seller packages: new `SponsorshipAsset` object in D1 (`sponsorship_assets`, migration 0026), one asset per (object_type, object_id) via a UNIQUE constraint, so generation is idempotent and can never duplicate.

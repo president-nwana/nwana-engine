@@ -11,6 +11,14 @@
 // per stage, and routes committed funds into stewardship and public
 // recognition. The first live object is the $50K Manhattan HQ bridge sprint.
 
+// ADR-0018: follow-up due dates and statuses are derived in the view,
+// never stored.
+import {
+	followUpDueAt,
+	followUpStatus,
+	type FollowUpStatus,
+} from "./fund-followup";
+
 export const FUND_STAGES = [
 	"prospect",
 	"verified",
@@ -201,15 +209,23 @@ export const BRIDGE_SPRINT_PROSPECTS: FundProspectSeed[] = [
 
 export interface FundViewProspect extends FundProspectRecord {
 	next_action: string;
+	// ADR-0018: derived from sent_at + stage, never stored.
+	follow_up_due_at: string | null;
+	follow_up_status: FollowUpStatus;
 }
 
 export interface FundView {
 	fund: FundRecord;
 	stage_counts: Record<FundStage, number>;
+	// ADR-0018: prospects with a follow-up due or overdue right now.
+	follow_ups_due_now: number;
 	prospects: FundViewProspect[];
 }
 
-export async function getFundView(db: D1Database): Promise<{
+export async function getFundView(
+	db: D1Database,
+	nowIso: string = new Date().toISOString(),
+): Promise<{
 	ok: true;
 	generated_at: string;
 	funds: FundView[];
@@ -232,16 +248,25 @@ export async function getFundView(db: D1Database): Promise<{
 		ok: true,
 		generated_at: new Date().toISOString(),
 		funds: fundRows.results.map((fund) => {
-			const prospects = (byFund.get(fund.id) ?? []).map((p) => ({
-				...p,
-				next_action: isFundStage(p.stage)
+			const prospects = (byFund.get(fund.id) ?? []).map((p) => {
+				// ADR-0018: follow-up timing derived from sent_at + stage.
+				const follow_up_due_at = followUpDueAt(p.sent_at);
+				const follow_up_status = followUpStatus(p.stage, p.sent_at, nowIso);
+				let next_action = isFundStage(p.stage)
 					? fundProspectNextAction(p.stage)
-					: "Unknown stage: review manually.",
-			}));
+					: "Unknown stage: review manually.";
+				if (p.stage === "sent" && follow_up_due_at) {
+					next_action += ` Follow-up due ${follow_up_due_at.slice(0, 10)}.`;
+				}
+				return { ...p, next_action, follow_up_due_at, follow_up_status };
+			});
 			const stage_counts = Object.fromEntries(
 				FUND_STAGES.map((s) => [s, prospects.filter((p) => p.stage === s).length]),
 			) as Record<FundStage, number>;
-			return { fund, stage_counts, prospects };
+			const follow_ups_due_now = prospects.filter(
+				(p) => p.follow_up_status === "due" || p.follow_up_status === "overdue",
+			).length;
+			return { fund, stage_counts, follow_ups_due_now, prospects };
 		}),
 	};
 }

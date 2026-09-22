@@ -296,7 +296,7 @@ export function renderOperatingCenterHtml(): string {
 		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
 		header{background:var(--brand);color:white;padding:28px clamp(20px,5vw,72px)}header h1{margin:0;font-size:clamp(28px,4vw,44px)}header p{margin:8px 0 0;color:#dce9e2}
 		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.stat,.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px}.stat strong{display:block;font-size:30px}.stat span{color:var(--muted)}
-		.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:20px}h2{margin:0 0 14px;font-size:22px}label{display:block;margin:12px 0 5px;font-weight:650}input,select,textarea,button{width:100%;font:inherit}input,select,textarea{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white}textarea{min-height:105px;resize:vertical}button{margin-top:14px;border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer}.message{min-height:24px;color:var(--muted);margin-top:9px}.queue{margin-top:20px}.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item strong{display:block}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}
+		.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:20px}h2{margin:0 0 14px;font-size:22px}label{display:block;margin:12px 0 5px;font-weight:650}input,select,textarea,button{width:100%;font:inherit}input,select,textarea{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white}textarea{min-height:105px;resize:vertical}button{margin-top:14px;border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer}.message{min-height:24px;color:var(--muted);margin-top:9px}.queue{margin-top:20px}.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item strong{display:block}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}.followup-due{color:#b35400;font-weight:700}.followup-overdue{color:#b00020;font-weight:700}
 	</style>
 </head>
 <body>
@@ -393,16 +393,23 @@ export function renderOperatingCenterHtml(): string {
 				box.innerHTML=data.funds.map(f=>{
 					const counts=order.map(s=>esc(label[s])+': '+f.stage_counts[s]).join(' · ');
 					const pct=f.fund.goal_amount?Math.round(100*f.fund.raised_amount/f.fund.goal_amount):0;
+					const dueNow=Number(f.follow_ups_due_now||0);
+					const dueLine='<div class="meta'+(dueNow?' followup-due':'')+'">Follow-ups due now: '+dueNow+'. The owner presses Send; the machine never sends.</div>';
 					const rows=f.prospects.map(p=>{
 						const next=order[order.indexOf(p.stage)+1];
 						const btn=next?'<button data-advance="'+esc(p.id)+'" data-to="'+esc(next)+'" style="width:auto">Move to '+esc(label[next])+'</button>':'<span class="meta">Terminal stage</span>';
+						const fu=p.follow_up_status;
+						const fuDate=p.follow_up_due_at?esc(String(p.follow_up_due_at).slice(0,10)):'';
+						const fuLine=fu==='none'?'':'<div class="meta '+(fu==='overdue'?'followup-overdue':fu==='due'?'followup-due':'')+'">Follow-up '+(fu==='upcoming'?'due '+fuDate:fu==='due'?'due now ('+fuDate+')':'overdue (was due '+fuDate+')')+'.</div>';
 						return '<div class="item"><strong>'+esc(p.name)+'</strong>'+
 							'<div class="meta">'+esc(label[p.stage]||p.stage)+' · ask '+esc(p.ask_tier||'')+' · '+(p.sent_at?'sent '+esc(p.sent_at.slice(0,10)):'not sent')+'</div>'+
+							fuLine+
 							'<div class="meta">Next: '+esc(p.next_action)+'</div>'+
 							'<div>'+btn+'</div></div>';
 					}).join('');
 					return '<div class="item"><strong>'+esc(f.fund.name)+'</strong>'+
 						'<div class="meta">Goal '+money(f.fund.goal_amount)+' · Raised '+money(f.fund.raised_amount)+' ('+pct+'%) · '+esc(f.fund.status)+'</div>'+
+						dueLine+
 						'<div class="meta">'+esc(counts)+'</div>'+rows+'</div>';
 				}).join('');
 				box.querySelectorAll('[data-advance]').forEach(btn=>btn.addEventListener('click',async()=>{
