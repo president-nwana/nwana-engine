@@ -1,5 +1,17 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — Sponsorship Asset as a first-class machine object (ADR-0017)
+
+- The machine now generates its own seller packages: new `SponsorshipAsset` object in D1 (`sponsorship_assets`, migration 0026), one asset per (object_type, object_id) via a UNIQUE constraint, so generation is idempotent and can never duplicate.
+- Enforced asset lifecycle: draft -> packaged -> offered -> negotiating -> committed -> fulfilled -> renewal. Forward flow plus one-step corrections backward; `renewal` is terminal; stage-skipping is rejected with the exact allowed moves.
+- Pure builder `buildSponsorshipAssetPackage`: parent object facts in, seller package out (title, description, audience, delivers, reference pricing). Content comes from the verified 11-asset inventory; pricing uses ONLY the verified 2026 reference grid, always labeled "Reference" with its 2026-12-31 term limit; everything else is "TBD", no numbers invented.
+- Supported parents in this step: `series` (SERIES_2026 only; other series ids rejected, not guessed) and `fund` (resolved from the `funds` table). Unknown object types rejected.
+- The machine NEVER contacts sellers or sponsors: no outreach, no emails, no portal submissions. Seller conversations stay human; the sales stream picks packages up from the operating center. Generation and tracking only.
+- Generation is explicit (operating-center button / API), not retroactive: no backfill, and the 53 past race events were not turned into assets (assets are per Series / per Fund, not per race event).
+- New operating-center panel: each asset shows its package (audience, delivers, reference pricing), stage, next action, a Generate form (object type + object id), and a one-click stage advance (owner key required). New API: `POST /api/operating-center/sponsorship-assets/generate`, `GET /api/operating-center/sponsorship-assets`, `POST /api/operating-center/sponsorship-assets/advance`.
+- Verified: Vitest 138/138 (19 new sponsorship-asset tests), TypeScript clean.
+- Deployed 2026-09-22: engine Worker redeployed; migration 0026 applied to remote D1.
+
 ## 2026-09-22 — Fund as a first-class machine object (ADR-0015)
 
 - The machine now models money, not just races: new `Fund` object in D1 (`funds` + `fund_prospects`, migration 0025) with an enforced prospect lifecycle: prospect -> verified -> drafted -> sent -> follow_up -> committed -> stewardship -> recognition. Forward flow plus one-step corrections backward, plus the direct sent -> committed path; `recognition` is terminal; stage-skipping is rejected with the exact allowed moves.

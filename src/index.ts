@@ -33,6 +33,11 @@ import {
 	seedBridgeSprintFund,
 } from "./fund";
 import {
+	advanceSponsorshipAsset,
+	generateSponsorshipAsset,
+	getSponsorshipAssetsView,
+} from "./sponsorship-asset";
+import {
 	createBoardSubmission,
 	createInitiative,
 	getOperatingCenterOverview,
@@ -5832,6 +5837,43 @@ export default {
 				return json(result);
 			} catch (error) {
 				return json({ ok: false, error: error instanceof Error ? error.message : "Prospect advance failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/sponsorship-assets/generate") {
+			try {
+				const body = await request.json() as { object_type?: string; object_id?: string };
+				const result = await generateSponsorshipAsset(env.nwana_engine_db, body.object_type ?? "", body.object_id ?? "");
+				if (!result.ok) {
+					return json(result, 400);
+				}
+				return json(result);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Sponsorship asset generation failed" }, 500);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/sponsorship-assets") {
+			try {
+				return json(await getSponsorshipAssetsView(env.nwana_engine_db));
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Sponsorship assets view failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/sponsorship-assets/advance") {
+			try {
+				const body = await request.json() as { asset_id?: string; to_stage?: string };
+				if (!body.asset_id || !body.to_stage) {
+					return json({ ok: false, error: "asset_id and to_stage are required" }, 400);
+				}
+				const result = await advanceSponsorshipAsset(env.nwana_engine_db, body.asset_id, body.to_stage);
+				if (!result.ok) {
+					return json(result, 400);
+				}
+				return json(result);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Sponsorship asset advance failed" }, 500);
 			}
 		}
 

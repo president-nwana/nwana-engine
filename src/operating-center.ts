@@ -325,6 +325,19 @@ export function renderOperatingCenterHtml(): string {
 			<div><span class="message" id="fund-message" aria-live="polite"></span></div>
 			<div id="funds">Loading…</div>
 		</section>
+		<section class="panel" id="sponsorship-panel" style="margin-top:20px"><h2>Sponsorship assets</h2>
+			<p class="meta">Machine-generated seller packages, one per object. Stages: draft → packaged → offered → negotiating → committed → fulfilled → renewal. The machine generates and tracks; seller conversations stay human.</p>
+			<form id="sponsorship-generate-form" style="margin-bottom:12px">
+				<label for="sponsorship-object-type">Object type</label>
+				<select id="sponsorship-object-type" name="object_type"><option value="series">series</option><option value="fund">fund</option></select>
+				<label for="sponsorship-object-id">Object id</label>
+				<input id="sponsorship-object-id" name="object_id" required maxlength="120" placeholder="SERIES_2026 or a fund id">
+				<button type="submit">Generate package</button>
+				<div class="message" id="sponsorship-generate-message" aria-live="polite"></div>
+			</form>
+			<div><span class="message" id="sponsorship-message" aria-live="polite"></span></div>
+			<div id="sponsorship-assets">Loading…</div>
+		</section>
 		<section class="grid">
 			<form class="panel" id="initiative-form"><h2>Submit an initiative</h2>
 				<label for="initiative-type">Input type</label><select id="initiative-type" name="input_type"><option>THOUGHT</option><option>PROBLEM</option><option>OPPORTUNITY</option><option>TASK</option><option>SOURCE_MATERIAL</option></select>
@@ -367,6 +380,7 @@ export function renderOperatingCenterHtml(): string {
 			document.querySelector('#board-items').innerHTML=b.submissions.length?b.submissions.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.submission_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
 			loadLifecycle();
 			loadFund();
+			loadSponsorshipAssets();
 		}
 		async function loadFund(){
 			const box=document.querySelector('#funds');
@@ -397,6 +411,40 @@ export function renderOperatingCenterHtml(): string {
 				}));
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
+		async function loadSponsorshipAssets(){
+			const box=document.querySelector('#sponsorship-assets');
+			const order=['draft','packaged','offered','negotiating','committed','fulfilled','renewal'];
+			const label={draft:'Draft',packaged:'Packaged',offered:'Offered',negotiating:'Negotiating',committed:'Committed',fulfilled:'Fulfilled',renewal:'Renewal'};
+			try{
+				const data=await api('/api/operating-center/sponsorship-assets');
+				if(!data.assets.length){box.innerHTML='<div class="unavailable">No sponsorship assets yet. Generate one above.</div>';return}
+				box.innerHTML=data.assets.map(a=>{
+					const next=order[order.indexOf(a.stage)+1];
+					const btn=next?'<button data-sasset-advance="'+esc(a.id)+'" data-to="'+esc(next)+'" style="width:auto">Move to '+esc(label[next])+'</button>':'<span class="meta">Terminal stage</span>';
+					return '<div class="item"><strong>'+esc(a.title)+'</strong>'+
+						'<div class="meta">'+esc(a.object_type)+' · '+esc(a.object_id)+' · stage '+esc(label[a.stage]||a.stage)+'</div>'+
+						'<div class="meta">Audience: '+esc(a.audience)+'</div>'+
+						'<div class="meta">Delivers: '+esc(a.delivers)+'</div>'+
+						'<div class="meta">Pricing: '+esc(a.reference_pricing)+'</div>'+
+						'<div class="meta">Next: '+esc(a.next_action)+'</div>'+
+						'<div>'+btn+'</div></div>';
+				}).join('');
+				box.querySelectorAll('[data-sasset-advance]').forEach(btn=>btn.addEventListener('click',async()=>{
+					const m=document.querySelector('#sponsorship-message');m.textContent='Moving…';
+					try{await api('/api/operating-center/sponsorship-assets/advance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({asset_id:btn.dataset.sassetAdvance,to_stage:btn.dataset.to})});m.textContent='Moved.';await loadSponsorshipAssets()}catch(err){m.textContent=err.message}
+				}));
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		document.querySelector('#sponsorship-generate-form').addEventListener('submit',async(e)=>{
+			e.preventDefault();
+			const m=document.querySelector('#sponsorship-generate-message');m.textContent='Generating…';
+			try{
+				const fd=formJson(e.target);
+				const data=await api('/api/operating-center/sponsorship-assets/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({object_type:fd.object_type,object_id:fd.object_id})});
+				m.textContent=data.generated?'Package generated.':'Package already exists.';
+				await loadSponsorshipAssets();
+			}catch(err){m.textContent=err.message}
+		});
 		async function loadLifecycle(){
 			const box=document.querySelector('#lifecycle');
 			try{

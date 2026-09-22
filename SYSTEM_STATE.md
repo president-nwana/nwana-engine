@@ -103,6 +103,16 @@ Read before making changes:
 - Verified: Vitest 92/92, TypeScript clean. Live-data proof: the real stored 3K/5K rows (next_race_prep, prep_confirmed=false, events Sept 26/27) were replayed through the new logic and flip to `registration_open` + `AUTO_CONFIRMED` on the next owner-triggered sync. The stored rows themselves were not modified.
 - Deployed 2026-09-22: engine Worker redeployed (version f580daf0-2058-4d6a-8a4b-c233e156c097); live checks pass (/operating-center/results 200, /api/operating-center/* 401 without key). Commit a3d31835 on origin/main.
 
+## SPONSORSHIP ASSET AS A FIRST-CLASS MACHINE OBJECT — ADR-0017 (2026-09-22)
+
+- The machine now generates its own seller packages: `sponsorship_assets` table (migration 0026), one asset per (object_type, object_id) via UNIQUE constraint, generation idempotent, no duplicates possible.
+- Enforced lifecycle: draft -> packaged -> offered -> negotiating -> committed -> fulfilled -> renewal. Forward flow plus one-step corrections backward; renewal terminal; stage-skipping rejected with the allowed moves.
+- Pure builder `buildSponsorshipAssetPackage` from the verified 11-asset inventory: title, description, audience, delivers, reference pricing. Pricing uses ONLY the verified 2026 reference grid, labeled "Reference" with 2026-12-31 term limit; everything else TBD, no numbers invented.
+- Supported parents: `series` (SERIES_2026 only) and `fund` (resolved from `funds` table). Unknown types/ids rejected, not guessed.
+- The machine NEVER contacts sellers or sponsors: generation and tracking only; seller conversations stay human. Generation is explicit (operating-center button / API), no retroactive backfill.
+- Operating center panel: package preview, stage, next action, Generate form, one-click stage advance (owner key required). API: `POST /api/operating-center/sponsorship-assets/generate`, `GET /api/operating-center/sponsorship-assets`, `POST /api/operating-center/sponsorship-assets/advance`.
+- Verified: Vitest 138/138 (19 new tests), TypeScript clean. Deployed 2026-09-22: Worker redeployed, migration 0026 applied to remote D1.
+
 ## FUND AS A FIRST-CLASS MACHINE OBJECT — ADR-0015 (2026-09-22)
 
 - The machine now models money, not just races: `funds` + `fund_prospects` tables (migration 0025) with an enforced prospect lifecycle: prospect -> verified -> drafted -> sent -> follow_up -> committed -> stewardship -> recognition. Forward flow plus one-step corrections backward, plus direct sent -> committed; recognition is terminal; stage-skipping rejected with the allowed moves.
