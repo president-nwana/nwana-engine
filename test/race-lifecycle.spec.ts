@@ -568,6 +568,18 @@ describe("getRaceResultsView (past races only)", () => {
 		const view = await getRaceResultsView(db, new Date("2026-09-22T12:00:00Z"));
 		expect(view.distances[0].events.map((event) => event.event_id)).toEqual([1, 5]);
 	});
+
+	it("includes all five performance levels with thresholds per distance", async () => {
+		const db = makeDb([lifecycleRow], [pastRow]);
+		const view = await getRaceResultsView(db, new Date("2026-09-22T12:00:00Z"));
+		expect(view.distances[0].levels).toEqual([
+			{ name: "Elite", threshold: "< 2:20:00" },
+			{ name: "High Performance", threshold: "< 2:30:00" },
+			{ name: "Performance", threshold: "< 2:40:00" },
+			{ name: "Competitive", threshold: "< 2:50:00" },
+			{ name: "Open", threshold: "2:50:00+" },
+		]);
+	});
 });
 
 describe("runSignupGetJson single 522 retry", () => {

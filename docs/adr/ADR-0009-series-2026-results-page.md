@@ -45,6 +45,13 @@ rejected:
    distance shows a clear sync status (synced, or failed with the error).
 6. The main operating-center page stays compact: summary stats, lifecycle
    stages, initiatives, Board queue, and navigation to the results page.
+7. Federation-complete results tables: every past event renders all five
+   performance levels in order, with their time thresholds, even when a
+   level had no finishers (shown as "No finishers in this level"). The
+   table is complete by structure, not by participation: the page looks
+   the way a major federation's results page looks whether a level has
+   2367 finishers or zero. The server ships the per-distance level
+   definitions with the results view; the client groups rows by level.
 
 ## Consequences
 
@@ -56,7 +63,9 @@ rejected:
 
 ## Regression protection
 
-Vitest covers: US/ISO date normalization, a future October race never
-leaving `registration_open`, the results view excluding future and
-undated events and sorting newest first, exactly one retry on 522 and no
-retry on other errors, and the absence of manual sync buttons on both pages.
+Vitest covers: US/ISO date normalization (including the real `M/D/YYYY
+HH:MM` `start_time` form), a future October race never leaving
+`registration_open`, the results view excluding future and undated events
+and sorting newest first, the results view shipping all five level
+definitions per distance, exactly one retry on 522 and no retry on other
+errors, and the absence of manual sync buttons on both pages.

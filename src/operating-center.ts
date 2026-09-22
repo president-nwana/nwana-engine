@@ -401,7 +401,7 @@ export function renderRaceResultsHtml(): string {
 		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
 		header{background:var(--brand);color:white;padding:28px clamp(20px,5vw,72px)}header h1{margin:0;font-size:clamp(28px,4vw,44px)}header p{margin:8px 0 0;color:#dce9e2}header a{color:#dce9e2}
 		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px}
-		h2{margin:0 0 14px;font-size:22px}h3{margin:18px 0 8px;font-size:18px}
+		h2{margin:0 0 14px;font-size:22px}h3{margin:18px 0 8px;font-size:18px}h4{margin:14px 0 4px;font-size:16px}
 		label{display:block;margin:12px 0 5px;font-weight:650}input,button{font:inherit}input{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%}
 		button{border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer;width:auto;margin-top:14px}
 		.message{min-height:24px;color:var(--muted);margin-top:9px}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}
@@ -455,17 +455,25 @@ export function renderRaceResultsHtml(): string {
 				(s.ok?'<span class="ok">Synced</span>':'<span class="err">Sync failed</span><br><span class="meta">'+esc(s.error)+'</span>')+
 				'</div>').join('');
 		}
+		function renderLevelBlock(level,rows){
+			const body=rows.length?'<table><thead><tr><th>Athlete</th><th>Gender</th><th>Time</th><th>Level place</th></tr></thead><tbody>'+
+				rows.map(r=>'<tr><td>'+esc(r.athlete)+'</td><td>'+esc(r.gender)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.level_place)+'</td></tr>').join('')+'</tbody></table>'
+				:'<div class="unavailable">No finishers in this level.</div>';
+			return '<h4>'+esc(level.name)+' ('+esc(level.threshold)+')</h4>'+body;
+		}
 		function renderResults(data){
 			const box=document.querySelector('#results');
 			if(!data.distances.length){box.innerHTML='<div class="panel"><div class="unavailable">No results yet.</div></div>';return}
 			box.innerHTML=data.distances.map(d=>{
+				const levels=Array.isArray(d.levels)&&d.levels.length?d.levels:[];
 				const events=d.events.length?d.events.map(e=>{
 					const link=e.results_url?'<a href="'+esc(e.results_url)+'" target="_blank" rel="noopener">Full results on RunSignup</a>':'<span class="unavailable">RunSignup link not available</span>';
-					const rows=e.results.length?'<table><thead><tr><th>Athlete</th><th>Gender</th><th>Time</th><th>Performance level</th><th>Level place</th></tr></thead><tbody>'+
-						e.results.map(r=>'<tr><td>'+esc(r.athlete)+'</td><td>'+esc(r.gender)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.performance_level)+'</td><td>'+esc(r.level_place)+'</td></tr>').join('')+'</tbody></table>'
-						:'<div class="unavailable">No results synced for this event yet.</div>';
+					const blocks=levels.length?levels.map(l=>{
+						const rows=(e.results||[]).filter(r=>String(r.performance_level||'').indexOf(l.name)===0);
+						return renderLevelBlock(l,rows);
+					}).join(''):'<div class="unavailable">No results synced for this event yet.</div>';
 					return '<div class="event"><h3>'+esc(e.event_name||('Event '+e.event_id))+' · '+esc(e.event_date||'')+'</h3>'+
-						'<div class="meta">'+esc(String(e.result_count))+' results'+(e.finalized?' · finalized':'')+' · Publication: '+esc(publicationLabel(e.publication_status))+' · '+link+'</div>'+rows+'</div>';
+						'<div class="meta">'+esc(String(e.result_count))+' results'+(e.finalized?' · finalized':'')+' · Publication: '+esc(publicationLabel(e.publication_status))+' · '+link+'</div>'+blocks+'</div>';
 				}).join(''):'<div class="unavailable">No past races with results yet.</div>';
 				return '<section class="panel"><h2>'+esc(d.distance)+' — '+esc(d.stage)+'</h2>'+
 					'<div class="meta">'+(d.synced_at?'Synced '+esc(d.synced_at):'Never synced')+'</div>'+

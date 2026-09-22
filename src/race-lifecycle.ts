@@ -1080,6 +1080,11 @@ export async function getRaceResultsView(
 			race_id: row.race_id,
 			stage: row.stage,
 			synced_at: row.synced_at,
+			// All five performance levels, in order, so the results page can
+			// show every level for every event even when a level had no
+			// finishers: a federation results table is complete by structure,
+			// not by participation.
+			levels: getSeries2026LevelDefinitions(row.distance),
 			events: byDistance.get(row.distance) ?? [],
 		})),
 	};
