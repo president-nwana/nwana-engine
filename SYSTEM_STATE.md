@@ -63,6 +63,15 @@ Read before making changes:
 - Local verification: Vitest 28/28 (4 new auth tests), `npx tsc --noEmit` clean.
 - Still pending: apply migration 0018 to remote D1, set the `OPERATING_CENTER_KEY` secret, deploy, and hand the key to the owner.
 
+## OPERATING CENTER — DEPLOYED LIVE 2026-09-21
+
+- Live at `https://nwana-engine.nwana-engine.workers.dev/operating-center` (Worker `nwana-engine`, deploy version `8dfe5f52-5246-4a3c-86db-736534bd36aa`, code commit `3d7dc59`).
+- Remote D1 `nwana-engine-db`: migration journal was empty although the 0001-0017 schema was already present (applied earlier by raw SQL, not the journal). Backfilled journal rows for 0001-0017, then applied `0018-add-operating-center.sql` via raw `d1 execute` (all statements are `IF NOT EXISTS`, idempotent). All six operating-center tables verified present remotely; journal now records 18 migrations.
+- Known quirk: `wrangler d1 migrations apply` re-attempts already-applied migrations against this database (journal name format mismatch), so use raw `d1 execute --file` for future migrations here, then insert the journal row manually.
+- `OPERATING_CENTER_KEY` Worker secret is set (strong random 64-hex value, issued to the owner in chat on 2026-09-21; the value is not stored in the repo, memory, or any file).
+- Live verification: `/operating-center` returns 200 with the key-entry gate; `/api/operating-center/overview`, `/api/initiatives`, `/api/board/submissions` return 401 without the key and 200 with the correct key; a test initiative round-tripped through POST and list, then was deleted, leaving the tables empty for the owner.
+- Follow-up hardening (not blocking): the `?key=` query-parameter fallback is accepted alongside the `Authorization: Bearer` header; consider removing it later so the key never appears in URLs, and update ADR-0007 if changed.
+
 ## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
 
 - The authenticated NWANA Email Marketing Dashboard exists at dashboard ID `513494` and is connected to `Nordic Walking Association of North America NWANA`.

@@ -1,5 +1,13 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-21 — Deploy the operating center live
+
+- Applied migration 0018 to remote D1 `nwana-engine-db` (all six operating-center tables verified present; journal backfilled for 0001-0017 which had been applied by raw SQL).
+- Set the `OPERATING_CENTER_KEY` Worker secret and deployed Worker `nwana-engine` to `https://nwana-engine.nwana-engine.workers.dev/operating-center`.
+- Verified live: key-entry gate renders; all operating-center APIs return 401 without the key and 200 with it; initiative write and list round-tripped, test record removed.
+- The owner key was handed to Albert Fatikhov in chat; it is not stored in the repo.
+- No timer, polling, cron, paid service, email, or publication was added.
+
 ## 2026-09-21 — Protect and enable the operating center
 
 - Added owner-key access protection for all operating-center API routes: the key is accepted as an `Authorization: Bearer` header or a `?key=` parameter, compared in constant time, and stored as the `OPERATING_CENTER_KEY` Worker secret (never in the repo).
