@@ -198,8 +198,8 @@ The definition of done is owner independence from terminal commands and chat ses
 
 ## PRODUCTION CURRENCY (single source of truth for what is live)
 
-- Live Worker version: `e7506c3f-21ff-4c7c-865c-330e0b9e9e77`, deployed 2026-09-22T22:44Z.
-- Corresponds to commit `cc317477` (ADR-0018 Fund follow-up reminders; includes ADR-0017 Sponsorship Asset).
+- Live Worker version: `dc9e4a94-f50b-47bf-9bf0-24bd8985f4f8`, deployed 2026-09-22 (after 23:30 UTC).
+- Corresponds to commit `2a6462ca` (ADR-0020 unified Board intake + next-meeting-first layout; includes ADR-0019 Board meeting loop).
 - Rule: before ANY redeploy, run `wrangler deployments list` and compare the latest
   version timestamp against the latest commit timestamp. Deploy only when the newest
   commit is newer than the newest deployment. Never redeploy on assumption.
