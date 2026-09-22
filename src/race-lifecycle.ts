@@ -565,7 +565,7 @@ async function runSignupGetJson(
 	if (!response.ok) {
 		const body = await response.text().catch(() => "");
 		throw new Error(
-			`RunSignup request failed: ${response.status} ${response.statusText} for ${url.pathname}${url.search} :: ${body.slice(0, 500)}`,
+			`RunSignup request failed: ${response.status} ${response.statusText} for ${url.pathname} :: ${body.slice(0, 500)}`,
 		);
 	}
 	return (await response.json()) as Record<string, unknown>;
