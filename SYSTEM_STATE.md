@@ -94,15 +94,6 @@ Read before making changes:
 - Idempotent per publication key via deterministic slug `next-race-<key>`; the publish response now includes a `next_race_news` outcome object (skips with a reported reason when there is no upcoming event). kind stays `news` deliberately (site_news CHECK allows only news/winner_announcement). Slug prefix `next-race-` identifies the rows.
 - Local verification: Vitest 85/85 (10 new), TypeScript clean. The authenticated end-to-end publication path (owner key + Meta token) is not testable in this environment; the promo runs on the next real publication.
 
-## ROUTINE NEXT-RACE PREP AUTO-CONFIRM — ADR-0014 (2026-09-22)
-
-- Removed the owner-click gate from routine race-prep distribution. When the previous event is done and the upcoming race has complete prep data (event name and date), the lifecycle sync auto-confirms prep (`AUTO_CONFIRMED`) and the distance moves straight to `registration_open`. `next_race_prep` is now the exception state, held only for incomplete prep data.
-- New pure `detectPrepExceptions`: missing event name or date is a genuine exception (the announcement cannot be built truthfully); everything else, including a missing registration URL (falls back to the Series hub link), is routine. A previous manual confirmation is always respected and never downgraded by a later sync.
-- The exception is visible, not vague: `GET /api/operating-center/race-lifecycle` now exposes `owner_action` per distance, and the operating center renders the concrete missing piece next to the Confirm prep button (this also fixes the previously dead `d.owner_action` reference in the UI). The manual prep-confirm endpoint stays as the override for exceptions.
-- Nothing about sending changes: announcement send stays manual, email send stays manual in the Email V2 dashboard; no RunSignup writes (still dry_run, write access UNKNOWN).
-- Verified: Vitest 92/92, TypeScript clean. Live-data proof: the real stored 3K/5K rows (next_race_prep, prep_confirmed=false, events Sept 26/27) were replayed through the new logic and flip to `registration_open` + `AUTO_CONFIRMED` on the next owner-triggered sync. The stored rows themselves were not modified.
-- Deployed 2026-09-22: engine Worker redeployed (version f580daf0-2058-4d6a-8a4b-c233e156c097); live checks pass (/operating-center/results 200, /api/operating-center/* 401 without key). Commit a3d31835 on origin/main.
-
 ## RUNSIGNUP/TICKETSIGNUP EMAIL AUDIT — VERIFIED 2026-09-19
 
 - The authenticated NWANA Email Marketing Dashboard exists at dashboard ID `513494` and is connected to `Nordic Walking Association of North America NWANA`.
