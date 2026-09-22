@@ -447,7 +447,6 @@ export function renderOperatingCenterHtml(): string {
 					'<div class="meta">'+data.funds.map(f=>esc(f.fund.name)).join(' · ')+'</div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
-		}
 		async function loadSponsorshipAssets(){
 			const box=document.querySelector('#sponsorship-assets');
 			const order=['draft','packaged','offered','negotiating','committed','fulfilled','renewal'];

@@ -147,3 +147,14 @@ describe("operating center access protection", () => {
 		expect(html).toContain("nwana_operating_center_key");
 	});
 });
+
+describe("operating center main page client script", () => {
+	it("embeds syntactically valid JavaScript so the page can boot (regression: ADR-0022 stray brace blanked the page)", () => {
+		const html = renderOperatingCenterHtml();
+		const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+		expect(scripts.length).toBeGreaterThan(0);
+		for (const body of scripts) {
+			expect(() => new Function(body)).not.toThrow();
+		}
+	});
+});
