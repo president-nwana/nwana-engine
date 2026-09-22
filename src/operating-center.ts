@@ -503,3 +503,86 @@ export function renderRaceResultsHtml(): string {
 	</script>
 </body></html>`;
 }
+
+export type SiteNewsKind = "news" | "winner_announcement";
+
+export interface SiteNewsInput {
+	title?: unknown;
+	slug?: unknown;
+	body_html?: unknown;
+	published_at?: unknown;
+	kind?: unknown;
+	created_by?: unknown;
+}
+
+function slugifySiteNewsTitle(title: string): string {
+	const slug = title
+		.toLowerCase()
+		.normalize("NFKD")
+		.replace(/[̀-ͯ]/g, "")
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.replace(/-{2,}/g, "-")
+		.slice(0, 120);
+	return slug || "news";
+}
+
+function validSiteNewsPublishedAt(value: string): boolean {
+	return /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/.test(value);
+}
+
+export async function publishSiteNews(
+	request: Request,
+	db: D1Database,
+): Promise<Response> {
+	const input = await readBody<SiteNewsInput>(request);
+	const title = clean(input.title, 200);
+	const kind = clean(input.kind, 30).toLowerCase() || "news";
+	const bodyHtml = clean(input.body_html, 200_000);
+	const createdBy = clean(input.created_by, 200) || null;
+
+	if (!title) throw new Error("News title is required");
+	if (kind !== "news" && kind !== "winner_announcement") {
+		throw new Error("kind must be 'news' or 'winner_announcement'");
+	}
+
+	const publishedAt = clean(input.published_at, 40) || new Date().toISOString();
+	if (!validSiteNewsPublishedAt(publishedAt)) {
+		throw new Error("published_at must be a date or ISO timestamp");
+	}
+
+	let baseSlug = clean(input.slug, 140).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || slugifySiteNewsTitle(title);
+	let slug = baseSlug;
+	for (let attempt = 2; attempt <= 100; attempt++) {
+		const taken = await db
+			.prepare("SELECT id FROM site_news WHERE slug = ?")
+			.bind(slug)
+			.first<{ id: number }>();
+		if (!taken) break;
+		slug = `${baseSlug}-${attempt}`;
+	}
+	const taken = await db
+		.prepare("SELECT id FROM site_news WHERE slug = ?")
+		.bind(slug)
+		.first<{ id: number }>();
+	if (taken) throw new Error("Unable to generate a unique slug");
+
+	const result = await db
+		.prepare(
+			`INSERT INTO site_news (slug, title, body_html, published_at, kind, created_by)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(slug, title, bodyHtml, publishedAt, kind, createdBy)
+		.run();
+
+	return response(
+		{
+			ok: true,
+			id: result.meta.last_row_id,
+			slug,
+			kind,
+			published_at: publishedAt,
+		},
+		201,
+	);
+}

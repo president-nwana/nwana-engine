@@ -539,6 +539,35 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
   errors), no manual sync buttons on either page. Verified locally:
   Vitest 60/60, TypeScript clean.
 
+## PUBLIC SITE AND SITE NEWS CHANNEL — BUILT 2026-09-22
+
+- Owner approved Phase 1 of the nwaofna.org migration: build the new public
+  site first on a staging address, switch DNS only after approval. DNS is
+  untouched.
+- Added migration `0022-add-site-news.sql` (`site_news`: slug unique, title,
+  body_html, published_at, kind `news`|`winner_announcement`, created_by).
+  Applied to remote D1. Write path is the owner-key endpoint only.
+- Added owner-key-protected `POST /api/site/news` (`publishSiteNews` in
+  `src/operating-center.ts`, same Bearer-key pattern as the operating
+  center). This is the machine's news distribution channel: winner
+  announcements and federation updates can be published by key at the moment
+  results are published. Engine-side auto-publish on result publication is
+  deferred to a later step. Recorded as ADR-0010.
+- Built the public site as a separate Worker `nwana-site`
+  (repo at `~/workspace/nwana-site`), bound read-only to the same D1
+  (`nwana-engine-db`). Pages: home (hero, season stats, next races, latest
+  winners, news teaser), results (per-distance level tables, federation-
+  complete empty levels), calendar (upcoming races grouped by month with
+  RunSignup register links), winners (recent congratulations), news feed and
+  articles from `site_news`. Site-wide Network menu links all properties.
+  English only, no em-dashes.
+- Verified live 2026-09-22: engine deployed (news endpoint returns 401
+  without the key); site at https://nwana-site.nwana-engine.workers.dev
+  returns 200 on all pages with real D1 data (results, calendar, winners);
+  news shows an honest empty state (no rows yet). Authenticated POST path
+  not testable: the owner key is held only by Albert Fatikhov.
+- Vitest 62/62, TypeScript clean on both workers.
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.

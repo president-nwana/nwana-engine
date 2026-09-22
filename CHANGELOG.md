@@ -1,4 +1,12 @@
-﻿# NWANA Engine Changelog
+# NWANA Engine Changelog
+
+## 2026-09-22 — Public site (nwana-site) + site news distribution channel
+
+- Added migration 0022 (`site_news` table: slug unique, title, body_html, published_at, kind news|winner_announcement, created_by). Applied to remote D1.
+- Added owner-key-protected `POST /api/site/news` on the engine worker (same Bearer key pattern as the operating center, `publishSiteNews` in operating-center.ts). The machine's news distribution channel: winner announcements and federation updates can be published by key at the moment results are published. Engine-side auto-publish wiring deferred to a later step. Recorded as ADR-0010.
+- Built the new public site as a separate Worker `nwana-site` (~/workspace/nwana-site), bound read-only to the same D1: home (hero, season stats, next races, latest winners, news teaser), results (per-distance level tables, federation-complete empty levels), calendar (upcoming races grouped by month, RunSignup register links), winners (recent congratulations), news feed + articles from `site_news`. Site-wide Network menu links all properties. English only, no em-dashes.
+- Verified locally: Vitest 62/62, TypeScript clean (both workers).
+- Deployed 2026-09-22: engine Worker deployed (endpoint live, 401 without key verified); nwana-site deployed to https://nwana-site.nwana-engine.workers.dev. Verified live: all pages 200 with real D1 data (results, calendar, winners), news shows an honest empty state (no rows yet), 404 page works. Authenticated POST path not testable: the owner key is held only by Albert Fatikhov.
 
 ## 2026-09-22 — Results page correction (past races only, auto-sync, no manual buttons)
 

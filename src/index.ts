@@ -33,6 +33,7 @@ import {
 	isOperatingCenterAuthorized,
 	listBoardSubmissions,
 	listInitiatives,
+	publishSiteNews,
 	renderOperatingCenterHtml,
 	renderRaceResultsHtml,
 } from "./operating-center";
@@ -5669,6 +5670,20 @@ export default {
 				return await createInitiative(request, env.nwana_engine_db);
 			} catch (error) {
 				return json({ ok: false, error: error instanceof Error ? error.message : "Initiative submission failed" }, 400);
+			}
+		}
+
+		// Site news distribution channel: the machine's publishing endpoint for
+		// the public website (news feed + winner announcements). Owner key
+		// only; the public site reads from D1 directly.
+		if (url.pathname === "/api/site/news" && request.method === "POST") {
+			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
+				return json({ ok: false, error: "Site news publishing requires the owner key" }, 401);
+			}
+			try {
+				return await publishSiteNews(request, env.nwana_engine_db);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Site news publish failed" }, 400);
 			}
 		}
 
