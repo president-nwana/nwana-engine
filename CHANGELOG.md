@@ -6,6 +6,7 @@
 - Migration 0024 adds `registration_url` to `race_event_results`; the lifecycle sync persists the race-level URL (`race.url`) it already observes from RunSignup onto every event snapshot row, so the promo reads the link from stored D1 data (never constructed).
 - New pure builder `buildNextRacePromoNews` and slug `next-race-<publicationKey>` in operating-center.ts; user text HTML-escaped in `body_html`; title stored raw (public site escapes at render, same contract as `publishSiteNews`). Idempotent per publication key; the publish response now carries a `next_race_news` outcome next to `site_news`, skipping with a reported reason (`no_upcoming_race`, `no_results_snapshot`) instead of failing the publication. "Not-yet-run" follows the engine's convention: event_date strictly after today.
 - Verified locally: Vitest 85/85 (10 new tests), TypeScript clean. The authenticated end-to-end publication path needs the owner key and Meta token, so the live auto-publish path runs on the next real publication.
+- Deployed 2026-09-22: engine Worker redeployed (version cf2dae01-2db1-40fe-8eeb-6950e385b87f); live checks pass (/api/operating-center/* 401 without key, /operating-center/results 200). This completes the news auto-publish chain in production: winner announcements (ADR-0011), new-race announcements (ADR-0012), and next-race promos (ADR-0013).
 
 ## 2026-09-22 — News auto-publish on first sight of a race event (ADR-0012)
 
