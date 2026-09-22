@@ -1,16 +1,5 @@
 # NWANA Engine Changelog
 
-## 2026-09-22 — Board meeting loop (ADR-0019)
-
-- The Board workspace finally has a machine loop: new `src/board.ts` (pure state machines + D1 functions, following the fund/sponsorship-asset pattern) reuses the existing tables from migration 0018 with no schema change, no migration, no seeding.
-- Meeting: DRAFT -> OPEN -> CLOSED. Created with title + scheduled date, opened with owner-written attendees, closed with minutes. Agenda triage moves PENDING submissions to AGENDA on a DRAFT/OPEN meeting; unresolved agenda items return to PENDING on close so they carry into the next meeting.
-- Decision: recorded only in an OPEN meeting, outcome CONFIRMED / DEFERRED / REJECTED, with responsible person, due date, optional vote record. A CONFIRMED decision with a responsible person or due date immediately becomes a linked work item (ADR-0006). CONFIRMED/REJECTED mark the submission DECIDED.
-- Work item: READY -> IN_PROGRESS -> DONE, BLOCKED as a side state, one-step corrections backward, DONE terminal. Initiative: NEW -> UNDER_REVIEW -> APPROVED -> CONVERTED (DECLINED as the exit), so the intake queue is triageable.
-- New owner-key-protected endpoints (all under /api/board/* and /api/initiatives, covered by the ADR-0007 gate): POST/GET /api/board/meetings, GET /api/board/meetings/:id (meeting + agenda + decisions), POST /api/board/meetings/:id/open|agenda|close, POST /api/board/decisions, GET /api/board/work-items, POST /api/board/work-items/advance, POST /api/initiatives/advance.
-- Operating center (English only): new Board meetings panel (create, open with attendees, agenda triage from the pending queue, per-agenda-item decision recording, close with minutes) and work-items panel with stage advance; initiative rows gained stage-advance buttons. Empty states stay explicit.
-- The machine never invents Board members, meetings, or decisions; every record comes from an explicit owner action. No emails, no notifications, no Gmail, no RunSignup writes.
-- Verified: Vitest 158/158 (9 new board tests covering the full loop plus rejection paths), TypeScript clean.
-
 ## 2026-09-22 — Fund follow-up reminders (ADR-0018)
 
 - The machine now answers "which follow-ups are due right now": pure, tested follow-up logic in `src/fund-followup.ts` computes `follow_up_due_at = sent_at + 14 days` (the 2-3 week rule's window opening) and derives per-prospect status `upcoming / due / overdue` (overdue = past 21 days with no follow-up) at render time, never stored, so it cannot drift.
