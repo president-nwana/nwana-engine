@@ -648,6 +648,7 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Owner-key-protected endpoints: POST/GET /api/board/meetings, GET /api/board/meetings/:id, POST /api/board/meetings/:id/open|agenda|close, POST /api/board/decisions, GET /api/board/work-items, POST /api/board/work-items/advance, POST /api/initiatives/advance. Operating-center Board meetings + work-items panels added (English only); empty states stay explicit.
 - Machine never invents members/meetings/decisions; no emails, no notifications, no Gmail, no RunSignup writes. decision_requests has no endpoints yet (overview count only).
 - Local verification: Vitest 158/158 (9 new board tests), `npx tsc --noEmit` clean.
+- Deployed 2026-09-22: engine Worker `nwana-engine` version `da3eb365-ae4f-4ca3-8675-40eefadf1d22` (commit `6ff20a28`). Live checks: `/operating-center` 200; all new board/initiative endpoints 401 without the owner key. Note: the first deploy of this change briefly left `/api/initiatives/advance` outside the owner-key gate (the gate matched `/api/initiatives` exactly); fixed, re-pushed, redeployed, and re-verified 401.
 
 ## DO NOT
 
