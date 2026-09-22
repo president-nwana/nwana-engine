@@ -320,11 +320,6 @@ export function renderOperatingCenterHtml(): string {
 			<div><span class="message" id="sync-message" aria-live="polite"></span></div>
 			<div id="lifecycle">Loading…</div>
 		</section>
-		<section class="panel" id="fund-panel" style="margin-top:20px"><h2>Funds</h2>
-			<p class="meta">Fund objects and their prospect pipelines. Stages: prospect → verified → drafted → sent → follow-up → committed → stewardship → public recognition. The owner still presses Send and signs; the machine tracks state and routes what comes next.</p>
-			<div><span class="message" id="fund-message" aria-live="polite"></span></div>
-			<div id="funds">Loading…</div>
-		</section>
 		<section class="grid">
 			<form class="panel" id="initiative-form"><h2>Submit an initiative</h2>
 				<label for="initiative-type">Input type</label><select id="initiative-type" name="input_type"><option>THOUGHT</option><option>PROBLEM</option><option>OPPORTUNITY</option><option>TASK</option><option>SOURCE_MATERIAL</option></select>
@@ -366,36 +361,6 @@ export function renderOperatingCenterHtml(): string {
 			document.querySelector('#initiatives').innerHTML=i.initiatives.length?i.initiatives.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.input_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No initiatives yet.</div>';
 			document.querySelector('#board-items').innerHTML=b.submissions.length?b.submissions.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.submission_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
 			loadLifecycle();
-			loadFund();
-		}
-		async function loadFund(){
-			const box=document.querySelector('#funds');
-			const order=['prospect','verified','drafted','sent','follow_up','committed','stewardship','recognition'];
-			const label={prospect:'Prospect',verified:'Verified',drafted:'Drafted',sent:'Sent',follow_up:'Follow-up',committed:'Committed',stewardship:'Stewardship',recognition:'Public recognition'};
-			const money=n=>'$'+Number(n||0).toLocaleString('en-US');
-			try{
-				const data=await api('/api/operating-center/fund');
-				if(!data.funds.length){box.innerHTML='<div class="unavailable">No funds yet.</div>';return}
-				box.innerHTML=data.funds.map(f=>{
-					const counts=order.map(s=>esc(label[s])+': '+f.stage_counts[s]).join(' · ');
-					const pct=f.fund.goal_amount?Math.round(100*f.fund.raised_amount/f.fund.goal_amount):0;
-					const rows=f.prospects.map(p=>{
-						const next=order[order.indexOf(p.stage)+1];
-						const btn=next?'<button data-advance="'+esc(p.id)+'" data-to="'+esc(next)+'" style="width:auto">Move to '+esc(label[next])+'</button>':'<span class="meta">Terminal stage</span>';
-						return '<div class="item"><strong>'+esc(p.name)+'</strong>'+
-							'<div class="meta">'+esc(label[p.stage]||p.stage)+' · ask '+esc(p.ask_tier||'')+' · '+(p.sent_at?'sent '+esc(p.sent_at.slice(0,10)):'not sent')+'</div>'+
-							'<div class="meta">Next: '+esc(p.next_action)+'</div>'+
-							'<div>'+btn+'</div></div>';
-					}).join('');
-					return '<div class="item"><strong>'+esc(f.fund.name)+'</strong>'+
-						'<div class="meta">Goal '+money(f.fund.goal_amount)+' · Raised '+money(f.fund.raised_amount)+' ('+pct+'%) · '+esc(f.fund.status)+'</div>'+
-						'<div class="meta">'+esc(counts)+'</div>'+rows+'</div>';
-				}).join('');
-				box.querySelectorAll('[data-advance]').forEach(btn=>btn.addEventListener('click',async()=>{
-					const m=document.querySelector('#fund-message');m.textContent='Moving…';
-					try{await api('/api/operating-center/fund/prospect/advance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prospect_id:btn.dataset.advance,to_stage:btn.dataset.to})});m.textContent='Moved.';await loadFund()}catch(err){m.textContent=err.message}
-				}));
-			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadLifecycle(){
 			const box=document.querySelector('#lifecycle');
