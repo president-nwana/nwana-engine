@@ -316,7 +316,7 @@ export function renderOperatingCenterHtml(): string {
 		<section class="stats" id="stats"><div class="stat"><strong>…</strong><span>Loading verified state</span></div></section>
 		<section class="panel" id="lifecycle-panel" style="margin-top:20px"><h2>Series 2026 race lifecycle</h2>
 			<p class="meta">One row per distance. Stages: registration_open → awaiting_results → verifying (owner) → levels_computed → published → next_race_prep.</p>
-			<p class="meta"><a href="/operating-center/results">Race results and sync →</a></p>
+			<p class="meta"><a href="/operating-center/results">Race results →</a></p>
 			<div><span class="message" id="sync-message" aria-live="polite"></span></div>
 			<div id="lifecycle">Loading…</div>
 		</section>
@@ -366,7 +366,7 @@ export function renderOperatingCenterHtml(): string {
 			const box=document.querySelector('#lifecycle');
 			try{
 				const data=await api('/api/operating-center/race-lifecycle');
-				if(!data.distances.length){box.innerHTML='<div class="unavailable">No lifecycle state yet. Open <a href="/operating-center/results">Race results and sync</a> and press "Sync all distances".</div>';return}
+				if(!data.distances.length){box.innerHTML='<div class="unavailable">No lifecycle state yet. Open <a href="/operating-center/results">Race results</a>; opening the page runs the first sync automatically.</div>';return}
 				box.innerHTML=data.distances.map(d=>{
 					const ev=d.active_event;
 					const action=d.owner_action?'<div class="meta">Owner action: '+esc(d.owner_action)+'</div>':'';
@@ -397,7 +397,7 @@ export function renderRaceResultsHtml(): string {
 	<meta name="viewport" content="width=device-width,initial-scale=1">
 	<title>Series 2026 race results — NWANA Operating Center</title>
 	<style>
-		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9}
+		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9;--ok:#1c6b3a;--err:#a3322b}
 		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
 		header{background:var(--brand);color:white;padding:28px clamp(20px,5vw,72px)}header h1{margin:0;font-size:clamp(28px,4vw,44px)}header p{margin:8px 0 0;color:#dce9e2}header a{color:#dce9e2}
 		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px}
@@ -405,13 +405,16 @@ export function renderRaceResultsHtml(): string {
 		label{display:block;margin:12px 0 5px;font-weight:650}input,button{font:inherit}input{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%}
 		button{border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer;width:auto;margin-top:14px}
 		.message{min-height:24px;color:var(--muted);margin-top:9px}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}
+		.ok{color:var(--ok);font-weight:650}.err{color:var(--err);font-weight:650}
 		table{width:100%;border-collapse:collapse;margin-top:8px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--muted);font-weight:650}
 		.event{border-top:1px solid var(--line);padding:14px 0}.event:first-of-type{border-top:0}
 		.nav{margin-bottom:18px}.nav a{color:var(--brand);font-weight:650}
+		.sync-status{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px}
+		.sync-status div{background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px}
 	</style>
 </head>
 <body>
-	<header><h1>Series 2026 race results</h1><p>Past races, synced from RunSignup. Sync runs only when you press a button. Never on a timer.</p></header>
+	<header><h1>Series 2026 race results</h1><p>Past races only, newest first. Results refresh automatically every time this page is opened or reloaded. No buttons, no timers.</p></header>
 	<main>
 		<div class="nav"><a href="/operating-center">← Back to Operating Center</a></div>
 		<section class="panel" id="gate" hidden>
@@ -426,10 +429,9 @@ export function renderRaceResultsHtml(): string {
 		</section>
 		<div id="app" hidden>
 			<section class="panel">
-				<h2>Sync</h2>
-				<p class="meta">Sync reads RunSignup and stores the latest results. RunSignup occasionally returns a temporary error (522); if a sync fails, wait a minute and press the button again.</p>
-				<button id="sync-all">Sync all distances</button>
-				<div class="message" id="sync-message" aria-live="polite"></div>
+				<h2>Sync status</h2>
+				<div class="message" id="sync-message" aria-live="polite">Refreshing results from RunSignup…</div>
+				<div class="sync-status" id="sync-status"></div>
 			</section>
 			<div id="results">Loading…</div>
 		</div>
@@ -446,41 +448,50 @@ export function renderRaceResultsHtml(): string {
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
 		function showApp(){gate.hidden=true;app.hidden=false}
 		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
+		function publicationLabel(s){return s==='PUBLISHED'?'Published':s==='BASELINE'?'Historical baseline':'Not published yet'}
+		function renderSyncStatus(statuses){
+			document.querySelector('#sync-status').innerHTML=statuses.map(s=>
+				'<div><strong>'+esc(s.distance)+'</strong><br>'+
+				(s.ok?'<span class="ok">Synced</span>':'<span class="err">Sync failed</span><br><span class="meta">'+esc(s.error)+'</span>')+
+				'</div>').join('');
+		}
 		function renderResults(data){
 			const box=document.querySelector('#results');
-			if(!data.distances.length){box.innerHTML='<div class="panel"><div class="unavailable">No results yet. Press "Sync all distances".</div></div>';return}
+			if(!data.distances.length){box.innerHTML='<div class="panel"><div class="unavailable">No results yet.</div></div>';return}
 			box.innerHTML=data.distances.map(d=>{
 				const events=d.events.length?d.events.map(e=>{
+					const link=e.results_url?'<a href="'+esc(e.results_url)+'" target="_blank" rel="noopener">Full results on RunSignup</a>':'<span class="unavailable">RunSignup link not available</span>';
 					const rows=e.results.length?'<table><thead><tr><th>Athlete</th><th>Gender</th><th>Time</th><th>Performance level</th><th>Level place</th></tr></thead><tbody>'+
 						e.results.map(r=>'<tr><td>'+esc(r.athlete)+'</td><td>'+esc(r.gender)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.performance_level)+'</td><td>'+esc(r.level_place)+'</td></tr>').join('')+'</tbody></table>'
 						:'<div class="unavailable">No results synced for this event yet.</div>';
 					return '<div class="event"><h3>'+esc(e.event_name||('Event '+e.event_id))+' · '+esc(e.event_date||'')+'</h3>'+
-						'<div class="meta">'+esc(String(e.result_count))+' results'+(e.finalized?' · finalized':'')+'</div>'+rows+'</div>';
-				}).join(''):'<div class="unavailable">No events synced yet.</div>';
+						'<div class="meta">'+esc(String(e.result_count))+' results'+(e.finalized?' · finalized':'')+' · Publication: '+esc(publicationLabel(e.publication_status))+' · '+link+'</div>'+rows+'</div>';
+				}).join(''):'<div class="unavailable">No past races with results yet.</div>';
 				return '<section class="panel"><h2>'+esc(d.distance)+' — '+esc(d.stage)+'</h2>'+
-					'<div class="meta">'+(d.synced_at?'Synced '+esc(d.synced_at):'Never synced')+' · <button data-sync="'+esc(d.distance)+'" style="margin-top:6px">Sync '+esc(d.distance)+'</button></div>'+
+					'<div class="meta">'+(d.synced_at?'Synced '+esc(d.synced_at):'Never synced')+'</div>'+
 					events+'</section>';
 			}).join('');
-			box.querySelectorAll('[data-sync]').forEach(btn=>btn.addEventListener('click',async()=>{
-				const m=document.querySelector('#sync-message');m.textContent='Syncing '+btn.dataset.sync+'…';
-				try{await api('/api/operating-center/race-lifecycle/sync?distance='+encodeURIComponent(btn.dataset.sync),{method:'POST'});m.textContent='Synced.';await load()}catch(err){m.textContent=err.message}
-			}));
 		}
-		async function load(){
-			try{const data=await api('/api/operating-center/race-results');renderResults(data)}
+		async function refresh(){
+			const m=document.querySelector('#sync-message');
+			m.textContent='Refreshing results from RunSignup…';
+			const statuses=[];
+			for(const d of DISTANCES){
+				try{
+					await api('/api/operating-center/race-lifecycle/sync?distance='+encodeURIComponent(d),{method:'POST'});
+					statuses.push({distance:d,ok:true});
+				}catch(err){statuses.push({distance:d,ok:false,error:err.message})}
+				renderSyncStatus(statuses);
+			}
+			const failed=statuses.filter(s=>!s.ok);
+			m.textContent=failed.length
+				? 'Refresh finished with errors on '+failed.map(s=>s.distance).join(', ')+'. Showing the last synced results below.'
+				: 'Results are up to date.';
+			try{renderResults(await api('/api/operating-center/race-results'))}
 			catch(err){document.querySelector('#results').innerHTML='<div class="panel"><div class="unavailable">'+esc(err.message)+'</div></div>'}
 		}
-		document.querySelector('#sync-all').addEventListener('click',async()=>{
-			const m=document.querySelector('#sync-message');
-			for(const d of DISTANCES){
-				m.textContent='Syncing '+d+'…';
-				try{await api('/api/operating-center/race-lifecycle/sync?distance='+d,{method:'POST'})}
-				catch(err){m.textContent='Failed at '+d+': '+err.message;await load();return}
-			}
-			m.textContent='All synced.';await load();
-		});
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load()});
-		if(getKey()){showApp();load()}else{showGate('')}
+		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();refresh()});
+		if(getKey()){showApp();refresh()}else{showGate('')}
 	</script>
 </body></html>`;
 }

@@ -22,7 +22,8 @@ NWANA-FINAL.ps1 (2026-09-05) established the verified level logic: per-distance 
 3. The level computation in Engine is a direct port of the verified NWANA-FINAL.ps1 thresholds and ranking logic. It is computed for reports and never auto-written to RunSignup; the RunSignup write plan is a dry-run structure (`write_mode: dry_run`, `executed: false`).
 4. Human boundaries stay manual: verifying (GPX/Strava/Garmin and pole requirement), Meta PUBLISH confirmation, Email V2 send from the dashboard, and any RunSignup write test.
 5. RunSignup write access is recorded per distance and defaults to `UNKNOWN`. A write-test route exists but does nothing until the owner types an explicit `TEST_WRITE` confirmation; it then performs at most the first additive field creation of the real levels pipeline (create the "Performance Level" custom field on a verifying event's result set) and records CONFIRMED or DENIED.
-6. No polling, cron, timers, or background sync. Every sync is an owner action from the operating center.
+6. No polling, cron, timers, or background sync. Sync runs when the owner opens or
+   reloads the results page (see ADR-0009); no manual sync buttons exist.
 7. Formulas are Series-2026-specific. Series 2027 must define its own processing profile.
 
 ## Consequences

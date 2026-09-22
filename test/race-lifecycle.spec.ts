@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	buildNextRacePrep,
 	buildSeries2026LevelsWritePlan,
@@ -9,10 +9,13 @@ import {
 	deriveEventStage,
 	flattenEventResults,
 	getRaceLifecycleView,
+	getRaceResultsView,
+	normalizeRunSignupDate,
 	parseNwanaTime,
+	runSignupGetJson,
 	series2026LevelDisplayName,
 } from "../src/race-lifecycle";
-import { renderOperatingCenterHtml } from "../src/operating-center";
+import { renderOperatingCenterHtml, renderRaceResultsHtml } from "../src/operating-center";
 
 const source1K = {
 	distance: "1K",
@@ -164,6 +167,7 @@ describe("lifecycle distance state", () => {
 		finalized: true,
 		publication: "PENDING" as const,
 		publicationKey: "runsignup:series-2026:209980:1:10",
+		resultsUrl: null,
 	};
 	const upcomingEvent = {
 		eventId: 2,
@@ -174,6 +178,7 @@ describe("lifecycle distance state", () => {
 		finalized: false,
 		publication: "PENDING" as const,
 		publicationKey: null,
+		resultsUrl: null,
 	};
 
 	it("focuses on the earliest unfinished event and flags the owner action", () => {
@@ -278,7 +283,21 @@ describe("operating center lifecycle view", () => {
 		const html = renderOperatingCenterHtml();
 		expect(html).toContain("Series 2026 race lifecycle");
 		expect(html).toContain("/api/operating-center/race-lifecycle");
-		expect(html).toContain("Sync all distances");
+		expect(html).toContain("/operating-center/results");
+	});
+
+	it("does not render manual sync buttons on the main page", () => {
+		const html = renderOperatingCenterHtml();
+		expect(html).not.toContain("Sync all distances");
+	});
+
+	it("results page auto-syncs on open and shows no manual sync buttons", () => {
+		const html = renderRaceResultsHtml();
+		expect(html).not.toContain("Sync all distances");
+		expect(html).not.toContain("data-sync");
+		expect(html).toContain("refresh automatically");
+		expect(html).toContain("Publication");
+		expect(html).toContain("Full results on RunSignup");
 	});
 });
 
@@ -399,5 +418,204 @@ describe("flattenEventResults (results page rows)", () => {
 			"Open0",
 			"Open1",
 		]);
+	});
+});
+
+describe("normalizeRunSignupDate", () => {
+	it("converts the RunSignup US format to ISO", () => {
+		expect(normalizeRunSignupDate("10/10/2026")).toBe("2026-10-10");
+		expect(normalizeRunSignupDate("1/5/2026")).toBe("2026-01-05");
+		expect(normalizeRunSignupDate(" 7/19/2026 ")).toBe("2026-07-19");
+	});
+
+	it("passes ISO dates and datetimes through", () => {
+		expect(normalizeRunSignupDate("2026-10-10")).toBe("2026-10-10");
+		expect(normalizeRunSignupDate("2026-10-10T09:00:00")).toBe("2026-10-10");
+	});
+
+	it("returns null when no real date is present", () => {
+		expect(normalizeRunSignupDate(null)).toBe(null);
+		expect(normalizeRunSignupDate("")).toBe(null);
+		expect(normalizeRunSignupDate("not a date")).toBe(null);
+		expect(normalizeRunSignupDate("13/40/2026")).toBe(null);
+		expect(normalizeRunSignupDate("2026-13-01")).toBe(null);
+	});
+});
+
+describe("future race regression", () => {
+	it("never treats a future October race as finished after US-date normalization", () => {
+		// Exact 2026-09-22 defect: raw "10/10/2026" string-compared smaller
+		// than "2026-09-22" and the October race showed as awaiting_results.
+		const eventDate = normalizeRunSignupDate("10/10/2026");
+		expect(eventDate).toBe("2026-10-10");
+		expect(
+			deriveEventStage({
+				eventDate,
+				nowDate: "2026-09-22",
+				hasResults: false,
+				finalized: false,
+				publication: "PENDING",
+			}),
+		).toBe("registration_open");
+	});
+
+	it("keeps the future event as the active event and never treats it as finished", () => {
+		const state = computeLifecycleDistanceState({
+			source: source1K,
+			events: [
+				{
+					eventId: 2,
+					eventName: "October 1K",
+					eventDate: normalizeRunSignupDate("10/10/2026"),
+					registrationUrl: null,
+					hasResults: false,
+					finalized: false,
+					publication: "PENDING" as const,
+					publicationKey: null,
+					resultsUrl: null,
+				},
+			],
+			nowDate: "2026-09-22",
+			previousActiveEventId: null,
+			previousPrepConfirmed: false,
+			previousPrep: null,
+		});
+		// The event itself stays registration_open; the distance stage is
+		// next_race_prep because pre-race announcement/email drafts are due.
+		// It must never become awaiting_results, verifying, levels_computed,
+		// or published.
+		expect(state.active_event?.event_id).toBe(2);
+		expect(state.active_event?.event_date).toBe("2026-10-10");
+		expect(state.events.find((event) => event.event_id === 2)?.stage).toBe(
+			"registration_open",
+		);
+		expect(state.stage).not.toBe("awaiting_results");
+		expect(state.stage).not.toBe("verifying");
+		expect(state.stage).not.toBe("levels_computed");
+		expect(state.stage).not.toBe("published");
+	});
+});
+
+describe("getRaceResultsView (past races only)", () => {
+	function makeDb(lifecycleRows: Array<Record<string, unknown>>, resultRows: Array<Record<string, unknown>>) {
+		const db = {
+			prepare(sql: string) {
+				return {
+					bind() {
+						return {
+							async all() {
+								if (sql.includes("race_event_results")) return { results: resultRows };
+								return { results: lifecycleRows };
+							},
+						};
+					},
+				};
+			},
+		};
+		return db as unknown as D1Database;
+	}
+
+	const lifecycleRow = {
+		distance: "20K",
+		race_id: 210020,
+		stage: "registration_open",
+		synced_at: "2026-09-22T10:00:00.000Z",
+	};
+
+	const pastRow = {
+		distance: "20K",
+		event_id: 1,
+		event_name: "July 20K",
+		event_date: "2026-07-19",
+		result_count: 2,
+		finalized: 1,
+		results_json: "[]",
+		results_url: "https://runsignup.com/Race/Results/210020",
+		publication_status: "BASELINE",
+	};
+
+	it("shows only past races, newest first, with publication status and link", async () => {
+		const futureRow = { ...pastRow, event_id: 2, event_name: "October 20K", event_date: "2026-10-10" };
+		const db = makeDb([lifecycleRow], [futureRow, pastRow]);
+		const view = await getRaceResultsView(db, new Date("2026-09-22T12:00:00Z"));
+		const events = view.distances[0].events;
+		expect(events.map((event) => event.event_id)).toEqual([1]);
+		expect(events[0]).toMatchObject({
+			event_date: "2026-07-19",
+			publication_status: "BASELINE",
+			results_url: "https://runsignup.com/Race/Results/210020",
+		});
+	});
+
+	it("excludes legacy US-format future dates and null dates", async () => {
+		const legacyFuture = { ...pastRow, event_id: 3, event_name: "Legacy October", event_date: "10/10/2026" };
+		const nullDate = { ...pastRow, event_id: 4, event_name: "No date", event_date: null };
+		const db = makeDb([lifecycleRow], [legacyFuture, nullDate, pastRow]);
+		const view = await getRaceResultsView(db, new Date("2026-09-22T12:00:00Z"));
+		expect(view.distances[0].events.map((event) => event.event_id)).toEqual([1]);
+	});
+
+	it("sorts past events newest first", async () => {
+		const older = { ...pastRow, event_id: 5, event_name: "June 20K", event_date: "2026-06-28" };
+		const db = makeDb([lifecycleRow], [older, pastRow]);
+		const view = await getRaceResultsView(db, new Date("2026-09-22T12:00:00Z"));
+		expect(view.distances[0].events.map((event) => event.event_id)).toEqual([1, 5]);
+	});
+});
+
+describe("runSignupGetJson single 522 retry", () => {
+	const url = () => new URL("https://api.runsignup.com/rest/race/209980?format=json");
+	const okResponse = () =>
+		({
+			ok: true,
+			status: 200,
+			statusText: "OK",
+			json: async () => ({ race: {} }),
+			text: async () => "",
+		}) as unknown as Response;
+	const failedResponse = (status: number) =>
+		({
+			ok: false,
+			status,
+			statusText: status === 522 ? "Connection timed out" : "Error",
+			json: async () => ({}),
+			text: async () => "upstream error",
+		}) as unknown as Response;
+
+	it("retries exactly once after a 522 and succeeds", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(failedResponse(522))
+			.mockResolvedValueOnce(okResponse());
+		vi.stubGlobal("fetch", fetchMock);
+		try {
+			const data = await runSignupGetJson(url(), { accessToken: "token" });
+			expect(data).toEqual({ race: {} });
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("throws after the second 522 with no further retries", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(failedResponse(522));
+		vi.stubGlobal("fetch", fetchMock);
+		try {
+			await expect(runSignupGetJson(url(), { accessToken: "token" })).rejects.toThrow("522");
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("does not retry non-522 errors", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(failedResponse(500));
+		vi.stubGlobal("fetch", fetchMock);
+		try {
+			await expect(runSignupGetJson(url(), { accessToken: "token" })).rejects.toThrow("500");
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

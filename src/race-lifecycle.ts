@@ -396,6 +396,8 @@ export interface LifecycleEventResults {
 	event_name: string | null;
 	event_date: string | null;
 	finalized: boolean;
+	publication_status: "PUBLISHED" | "BASELINE" | "PENDING";
+	results_url: string | null;
 	result_count: number;
 	results: LifecycleResultRow[];
 }
@@ -498,6 +500,7 @@ export interface LifecycleEventInput {
 	finalized: boolean;
 	publication: "PUBLISHED" | "BASELINE" | "PENDING";
 	publicationKey: string | null;
+	resultsUrl: string | null;
 }
 
 // Pure: folds per-event inputs into the distance lifecycle state, advancing
@@ -609,13 +612,48 @@ export function todayDateString(now: Date = new Date()): string {
 	return now.toISOString().slice(0, 10);
 }
 
+// Normalizes the date formats RunSignup actually returns into YYYY-MM-DD.
+// RunSignup event start times arrive as US dates ("10/10/2026"), ISO dates
+// ("2026-10-10"), or ISO datetimes ("2026-10-10T09:00:00"). Anything else
+// returns null so a race is never classified from a guessed date.
+export function normalizeRunSignupDate(
+	value: string | null | undefined,
+): string | null {
+	if (value === null || value === undefined) return null;
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+
+	const usMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+	if (usMatch) {
+		const month = Number(usMatch[1]);
+		const day = Number(usMatch[2]);
+		const year = Number(usMatch[3]);
+		if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+		return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+	}
+
+	const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+	if (isoMatch) {
+		const month = Number(isoMatch[2]);
+		const day = Number(isoMatch[3]);
+		if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+		return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+	}
+
+	return null;
+}
+
 interface RunSignupCallEnv {
 	accessToken: string;
 	apiCallerToken?: string;
 	apiCallerSecret?: string;
 }
 
-async function runSignupGetJson(
+// Single bounded retry on a transient RunSignup 522 (upstream connection
+// timeout). Exactly one immediate retry, no delay, no timers, no polling:
+// if the second attempt fails the error surfaces with a clear message and
+// the owner sees it on the results page.
+export async function runSignupGetJson(
 	url: URL,
 	env: RunSignupCallEnv,
 ): Promise<Record<string, unknown>> {
@@ -626,7 +664,10 @@ async function runSignupGetJson(
 		url.searchParams.set("rsu_api_reg", env.apiCallerToken);
 		headers["X-RSU-API-REG-SECRET"] = env.apiCallerSecret;
 	}
-	const response = await fetch(url, { headers });
+	let response = await fetch(url, { headers });
+	if (response.status === 522) {
+		response = await fetch(url, { headers });
+	}
 	if (!response.ok) {
 		const body = await response.text().catch(() => "");
 		throw new Error(
@@ -718,9 +759,9 @@ export async function syncRaceLifecycleDistance(
 		const event = raw as Record<string, unknown>;
 		const eventId = Number(event.event_id);
 		const startTime = [event.start_time, event.event_start_time].find(
-			(value): value is string => typeof value === "string" && value.length >= 10,
+			(value): value is string => typeof value === "string" && value.length >= 4,
 		);
-		const eventDate = startTime ? startTime.slice(0, 10) : null;
+		const eventDate = normalizeRunSignupDate(startTime ?? null);
 		const sets = draftsByEvent.get(eventId) ?? [];
 		const setsWithResults = sets.filter((draft) => draft.content.results.length > 0);
 		const hasResults = setsWithResults.length > 0;
@@ -741,6 +782,11 @@ export async function syncRaceLifecycleDistance(
 		}
 		const publicationKey =
 			setsWithResults[0]?.publication_key ?? sets[0]?.publication_key ?? null;
+		const resultsUrl =
+			sets
+				.map((draft) => draft.editorial_draft.link_url)
+				.find((link): link is string => typeof link === "string" && link.length > 0) ??
+			null;
 		return {
 			eventId,
 			eventName: typeof event.name === "string" ? event.name : null,
@@ -750,6 +796,7 @@ export async function syncRaceLifecycleDistance(
 			finalized,
 			publication,
 			publicationKey,
+			resultsUrl,
 		};
 	});
 
@@ -824,14 +871,17 @@ export async function syncRaceLifecycleDistance(
 				`
 				INSERT INTO race_event_results (
 					series, distance, race_id, event_id, event_name, event_date,
-					result_count, finalized, results_json, synced_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					result_count, finalized, results_json, results_url,
+					publication_status, synced_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT(series, distance, event_id) DO UPDATE SET
 					event_name = excluded.event_name,
 					event_date = excluded.event_date,
 					result_count = excluded.result_count,
 					finalized = excluded.finalized,
 					results_json = excluded.results_json,
+					results_url = excluded.results_url,
+					publication_status = excluded.publication_status,
 					synced_at = excluded.synced_at
 				`,
 			)
@@ -845,6 +895,8 @@ export async function syncRaceLifecycleDistance(
 				rows.length,
 				eventInput.finalized ? 1 : 0,
 				JSON.stringify(rows),
+				eventInput.resultsUrl,
+				eventInput.publication,
 				syncedAt,
 			)
 			.run();
@@ -938,9 +990,14 @@ export async function getRaceLifecycleView(db: D1Database): Promise<{
 	};
 }
 
-// Read-only view for the operating center results page: per-distance events
-// with their synced result rows, most recent event first.
-export async function getRaceResultsView(db: D1Database): Promise<{
+// Read-only view for the operating center results page: per-distance past
+// events with their synced result rows, most recent event first. Only
+// events on or before today are shown: future races never appear here,
+// no matter what their stored date format was.
+export async function getRaceResultsView(
+	db: D1Database,
+	now: Date = new Date(),
+): Promise<{
 	ok: true;
 	series: string;
 	generated_at: string;
@@ -952,6 +1009,7 @@ export async function getRaceResultsView(db: D1Database): Promise<{
 		events: LifecycleEventResults[];
 	}>;
 }> {
+	const today = todayDateString(now);
 	const lifecycle = await db
 		.prepare(
 			`SELECT distance, race_id, stage, synced_at FROM race_lifecycle WHERE series = ? ORDER BY distance`,
@@ -966,8 +1024,9 @@ export async function getRaceResultsView(db: D1Database): Promise<{
 
 	const results = await db
 		.prepare(
-			`SELECT distance, event_id, event_name, event_date, result_count, finalized, results_json
-			 FROM race_event_results WHERE series = ? ORDER BY distance, event_date DESC`,
+			`SELECT distance, event_id, event_name, event_date, result_count, finalized,
+				results_json, results_url, publication_status
+			 FROM race_event_results WHERE series = ? ORDER BY distance`,
 		)
 		.bind(RACE_LIFECYCLE_SERIES)
 		.all<{
@@ -978,20 +1037,36 @@ export async function getRaceResultsView(db: D1Database): Promise<{
 			result_count: number;
 			finalized: number;
 			results_json: string;
+			results_url: string | null;
+			publication_status: string | null;
 		}>();
+
+	const validPublication = (
+		value: string | null,
+	): "PUBLISHED" | "BASELINE" | "PENDING" =>
+		value === "PUBLISHED" || value === "BASELINE" ? value : "PENDING";
 
 	const byDistance = new Map<string, LifecycleEventResults[]>();
 	for (const row of results.results) {
+		// Defensive: rows written before the date normalization fix may hold
+		// a US-format date; normalize before the past/future comparison.
+		const eventDate = normalizeRunSignupDate(row.event_date) ?? row.event_date;
+		if (eventDate === null || eventDate > today) continue;
 		const list = byDistance.get(row.distance) ?? [];
 		list.push({
 			event_id: row.event_id,
 			event_name: row.event_name,
-			event_date: row.event_date,
+			event_date: eventDate,
 			finalized: row.finalized === 1,
+			publication_status: validPublication(row.publication_status),
+			results_url: row.results_url,
 			result_count: row.result_count,
 			results: JSON.parse(row.results_json) as LifecycleResultRow[],
 		});
 		byDistance.set(row.distance, list);
+	}
+	for (const list of byDistance.values()) {
+		list.sort((a, b) => (b.event_date ?? "").localeCompare(a.event_date ?? ""));
 	}
 
 	return {

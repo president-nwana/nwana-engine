@@ -509,13 +509,35 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - The operating-center page now shows a Series 2026 race lifecycle panel: six distances, real current stage, owner action required, prep drafts, write access, and per-distance or bulk sync buttons. The overview `competition_calendar` section points at the lifecycle endpoint instead of reporting unavailable.
 - No polling, cron, timers, Gmail, Meta publication, Email V2 send, or RunSignup write was executed. Recorded as ADR-0008. Verified locally: migration 0019 applied to local D1, Vitest 42/42, TypeScript clean.
 
-## RACE RESULTS PAGE — IMPLEMENTED LOCALLY 2026-09-22
+## RACE RESULTS PAGE — CORRECTED AND COMPLETED 2026-09-22
 
-- Added migration `0020-race-event-results.sql` with the `race_event_results` table: per-event snapshot of result rows (athlete, gender, time, performance level, level place), written by the lifecycle sync from RunSignup data. Read-only storage; never writes back to RunSignup.
-- Added page `/operating-center/results`: Series 2026 past races per distance, most recent first, result tables sorted by performance level then level place. Sync buttons ("Sync all distances" and per-distance) live on this page.
-- Main `/operating-center` keeps a clean lifecycle stage overview with a link to the results page; sync buttons removed from the main page. This is the multi-page operating-center pattern.
-- Added API `GET /api/operating-center/race-results` and `flattenEventResults` (dedupe by result_id, sort by level then level place) with regression tests. Verified locally: Vitest 47/47, TypeScript clean.
-- Not deployed yet (no Cloudflare credentials in this session); migration 0020 not applied to remote D1 yet; commits not pushed yet.
+- Owner rejected the first results-page deployment (2026-09-22): RunSignup
+  US-format dates (`10/10/2026`) were sliced as ISO, so all six distances
+  wrongly showed future October races as `awaiting_results`; the page listed
+  every synced event instead of past races; manual sync buttons remained; no
+  publication status or RunSignup results link; no bounded 522 policy.
+- Final owner decision: results page shows past races only, newest first;
+  refresh is automatic on page open and ordinary reload (an explicit owner
+  action, not polling, cron, or a timer); no manual sync buttons anywhere;
+  transient RunSignup 522 gets exactly one immediate retry; publication
+  status (`PUBLISHED`/`BASELINE`/`PENDING`) and the RunSignup results link
+  are shown per event; per-distance sync status is visible. Recorded as
+  ADR-0009.
+- Added `normalizeRunSignupDate()` in `src/race-lifecycle.ts`: US `M/D/YYYY`,
+  ISO date, and ISO datetime all normalize to `YYYY-MM-DD`; anything else
+  returns null so races are never classified from guessed dates.
+- Added migration `0021-race-event-results-columns.sql` (`results_url`,
+  `publication_status` on `race_event_results`); sync stores both.
+- Page `/operating-center/results` auto-syncs all six distances on load via
+  owner-authenticated per-distance POST calls, continuing after a single
+  distance fails, and reports each distance as synced or failed with the
+  error. Main `/operating-center` stays compact: summary, initiatives,
+  Board queue, lifecycle overview, navigation.
+- Vitest regression tests: US/ISO normalization, future October race never
+  leaving `registration_open`, results view excluding future/undated
+  events and sorting newest first, exactly one 522 retry (none for other
+  errors), no manual sync buttons on either page. Verified locally:
+  Vitest 60/60, TypeScript clean.
 
 ## DO NOT
 

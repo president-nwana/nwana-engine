@@ -1,5 +1,13 @@
 ﻿# NWANA Engine Changelog
 
+## 2026-09-22 — Results page correction (past races only, auto-sync, no manual buttons)
+
+- Fixed the defect the owner rejected: RunSignup US-format dates (`10/10/2026`) were sliced as ISO, so future October races were classified `awaiting_results`. Added `normalizeRunSignupDate()`: US `M/D/YYYY`, ISO date, and ISO datetime all normalize to `YYYY-MM-DD`; anything else returns null so a race is never classified from a guessed date.
+- Final owner decision (ADR-0009): `/operating-center/results` shows past races only, newest first; refresh is automatic on page open and ordinary reload; no manual sync buttons; a transient RunSignup 522 gets exactly one immediate retry (no delays, no timers); per-event publication status (`PUBLISHED`/`BASELINE`/`PENDING`) and the RunSignup results link are shown; per-distance sync status (synced or failed with the error) is visible.
+- Added migration 0021 (`results_url`, `publication_status` columns on `race_event_results`).
+- Main `/operating-center` stays compact: summary, initiatives, Board queue, lifecycle overview, navigation.
+- Verified locally: Vitest 60/60, TypeScript clean.
+
 ## 2026-09-22 — Race results page (separate page, sync moved off the main page)
 
 - Added migration 0020 (`race_event_results` table): per-event snapshot of result rows (athlete, gender, time, performance level, level place), written by the lifecycle sync from RunSignup data. Read-only storage; never writes back to RunSignup.
