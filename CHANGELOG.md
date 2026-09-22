@@ -7,6 +7,8 @@
 - Added migration 0021 (`results_url`, `publication_status` columns on `race_event_results`).
 - Main `/operating-center` stays compact: summary, initiatives, Board queue, lifecycle overview, navigation.
 - Verified locally: Vitest 60/60, TypeScript clean.
+- Deployed 2026-09-22: migration 0021 applied to remote D1 (direct execute + journal entry), Worker deployed (version 6cbe2275-0efa-4cfe-bb1e-305298d99686). Verified live: /operating-center 200, /operating-center/results 200 with the key gate and the new auto-sync copy, /api/operating-center/race-results and sync return 401 without the key, zero manual sync buttons in the live HTML of either page. Authenticated check (auto-sync run) pending: the owner key is held only by Albert Fatikhov.
+- Commits not pushed yet: no GitHub credentials in this session.
 
 ## 2026-09-22 — Race results page (separate page, sync moved off the main page)
 
