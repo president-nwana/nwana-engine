@@ -5645,7 +5645,6 @@ export default {
 			url.pathname.startsWith("/operating-center/") ||
 			url.pathname.startsWith("/api/operating-center/") ||
 			url.pathname === "/api/initiatives" ||
-			url.pathname === "/api/initiatives/advance" ||
 			url.pathname.startsWith("/api/board/");
 
 		if (operatingCenterRoute && env.OPERATING_CENTER_ENABLED !== "true") {
