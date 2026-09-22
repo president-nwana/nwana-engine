@@ -1,5 +1,14 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — Fund as a first-class machine object (ADR-0015)
+
+- The machine now models money, not just races: new `Fund` object in D1 (`funds` + `fund_prospects`, migration 0025) with an enforced prospect lifecycle: prospect -> verified -> drafted -> sent -> follow_up -> committed -> stewardship -> recognition. Forward flow plus one-step corrections backward, plus the direct sent -> committed path; `recognition` is terminal; stage-skipping is rejected with the exact allowed moves.
+- The owner still presses Send and signs. The machine never sends outreach itself: it tracks pipeline state, surfaces the next action per stage (sends stay manual), and routes committed funds into stewardship and public recognition. No new external sends were automated; mass email stays on RunSignup/TicketSignup Email V2 per the email boundary.
+- First live object: the $50K Manhattan HQ Bridge Sprint, seeded with the factual Pool 4 pipeline (15 prospects, all at `sent`, owner pressed Send 2026-09-22, one-pager v5 attached). Seed is idempotent.
+- New operating-center panel: each fund shows goal/raised, per-stage counts, every prospect with its next action, and a one-click stage advance (owner key required, like all other operating-center actions). New API: `GET /api/operating-center/fund`, `POST /api/operating-center/fund/seed`, `POST /api/operating-center/fund/prospect/advance`.
+- Verified: Vitest 109/109 (17 new fund tests), TypeScript clean.
+- Deployed 2026-09-22: engine Worker redeployed; migration 0025 applied to remote D1; bridge sprint seeded in production (fund + 15 prospects at sent).
+
 ## 2026-09-22 — Routine next-race prep auto-confirms; owner gate kept for exceptions only (ADR-0014)
 
 - Removed the owner-click gate from routine race-prep distribution: when the previous event is done and the upcoming race has complete prep data (event name and date), the lifecycle sync now auto-confirms prep (`AUTO_CONFIRMED`) and the distance moves straight to `registration_open`. `next_race_prep` is now the exception state, held only when prep data is incomplete.
