@@ -25,7 +25,8 @@ rejected:
 ## Decision
 
 1. Date normalization: `normalizeRunSignupDate()` converts RunSignup US
-   dates (`M/D/YYYY`), ISO dates, and ISO datetimes into `YYYY-MM-DD`.
+   dates (`M/D/YYYY`, including the real `start_time` form `M/D/YYYY HH:MM`),
+   ISO dates, and ISO datetimes into `YYYY-MM-DD`.
    Anything else returns null, so a race is never classified from a guessed
    date. Past/future comparison, event sorting, and active-event selection
    all operate on normalized dates.

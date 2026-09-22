@@ -623,7 +623,9 @@ export function normalizeRunSignupDate(
 	const trimmed = value.trim();
 	if (!trimmed) return null;
 
-	const usMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+	const usMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)?$/i.exec(
+		trimmed,
+	);
 	if (usMatch) {
 		const month = Number(usMatch[1]);
 		const day = Number(usMatch[2]);

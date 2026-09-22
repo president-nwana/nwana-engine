@@ -428,6 +428,13 @@ describe("normalizeRunSignupDate", () => {
 		expect(normalizeRunSignupDate(" 7/19/2026 ")).toBe("2026-07-19");
 	});
 
+	it("accepts the real RunSignup event format with a time suffix", () => {
+		// This is what api.runsignup.com actually returns in start_time.
+		expect(normalizeRunSignupDate("7/4/2026 01:01")).toBe("2026-07-04");
+		expect(normalizeRunSignupDate("10/10/2026 9:00 AM")).toBe("2026-10-10");
+		expect(normalizeRunSignupDate("12/6/2026 01:01:30")).toBe("2026-12-06");
+	});
+
 	it("passes ISO dates and datetimes through", () => {
 		expect(normalizeRunSignupDate("2026-10-10")).toBe("2026-10-10");
 		expect(normalizeRunSignupDate("2026-10-10T09:00:00")).toBe("2026-10-10");
