@@ -334,3 +334,20 @@ It is not a substitute for Git history, SYSTEM_STATE.md, or Architecture Decisio
 - Established that unknown RunSignup competition containers do not automatically become OPEN_SERIES.
 - Established explicit semantic override:
   source + source_type + source_id -> NWANA meaning.
+
+## 2026-09-22
+
+### Race lifecycle sync: Bearer-only RunSignup auth
+- Lifecycle sync no longer attaches the rsu_api_reg layer to race/result endpoints (RunSignup returned error 17 on 10K/15K/20K); uses the same Bearer-only auth as the proven NWANA-FINAL.ps1.
+- RunSignup error diagnostics no longer include query parameters, so API caller identifiers never leak into error output.
+- Committed as 8ab9148 and f5f958f.
+
+### Phase 1 deployed; all 6 Series 2026 distances synced live
+- Migration 0019 applied to remote D1; race_lifecycle table verified.
+- All six distances (1K/3K/5K/10K/15K/20K) synced from RunSignup; stages live in the operating center. 20K initially hit transient RunSignup 522 timeouts, resolved on retry.
+- Worker deploy version e4d77b32 (Russian lifecycle panel).
+
+### Operating center lifecycle panel in Russian
+- Panel heading, hint, stage labels, buttons, and sync messages now in Russian. Stages: Регистрация открыта, Ждём результаты, Проверка результатов (вы), Уровни посчитаны, Опубликовано, Готовим следующую гонку.
+- Sync feedback made prominent (bold status line); hint explains when to press sync and that sync only reads, never writes or publishes.
+- 45/45 tests green, tsc clean. Committed as 1b5229a and pushed to GitHub main.
