@@ -1,5 +1,12 @@
 # NWANA Engine Changelog
 
+## 2026-09-22 — Funds on their own page (ADR-0022)
+
+- The Funds list moved off the main operating-center page onto a dedicated page at `/operating-center/funds`, following the race-results pattern. The new page shows the full existing functionality unchanged: fund objects with goal/raised and per-stage counts, every prospect with stage, ask tier, sent date, follow-up state (upcoming / due / overdue) and next action, plus one-click stage-advance buttons posting to `/api/operating-center/fund/prospect/advance`. A back link returns to `/operating-center`. The page uses the same stored owner key, so no re-entry is needed.
+- The main `/operating-center` page now shows only a compact Funds summary card: fund names, raised vs goal total, "N follow-ups due now" (highlighted when nonzero), and an "Open funds →" link. Every other panel is untouched.
+- No migration, no API change, no new endpoints. Auth behavior unchanged: HTML pages render, API endpoints return 401 without the owner key.
+- Verified: Vitest 169/169 (4 new tests), TypeScript clean.
+
 ## 2026-09-22 — Unified Board intake and next-meeting-first layout (ADR-0020)
 
 - The two intake windows ("Submit an initiative" and "Add a Board item") are merged into one "Submit to the Board" form. Initiative is now one item type in the dropdown, alongside THOUGHT, PROBLEM, OPPORTUNITY, TASK and SOURCE_MATERIAL (owner: an initiative usually appears as a question anyway). The separate Initiatives queue panel is removed from the page; the backend table and endpoints stay untouched.

@@ -62,6 +62,7 @@ import {
 	renderOperatingCenterHtml,
 	renderRaceResultsHtml,
 } from "./operating-center";
+import { renderFundsHtml } from "./operating-center-funds";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -5660,7 +5661,8 @@ export default {
 			!(
 				request.method === "GET" &&
 				(url.pathname === "/operating-center" ||
-					url.pathname === "/operating-center/results")
+					url.pathname === "/operating-center/results" ||
+					url.pathname === "/operating-center/funds")
 			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
@@ -5681,6 +5683,16 @@ export default {
 
 		if (request.method === "GET" && url.pathname === "/operating-center/results") {
 			return new Response(renderRaceResultsHtml(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		}
+
+		// ADR-0022: Funds live on their own page, like race results.
+		if (request.method === "GET" && url.pathname === "/operating-center/funds") {
+			return new Response(renderFundsHtml(), {
 				headers: {
 					"content-type": "text/html; charset=utf-8",
 					"cache-control": "no-store",
