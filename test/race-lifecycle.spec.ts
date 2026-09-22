@@ -275,9 +275,9 @@ describe("next race prep drafts", () => {
 describe("operating center lifecycle view", () => {
 	it("renders the Series 2026 race lifecycle panel", () => {
 		const html = renderOperatingCenterHtml();
-		expect(html).toContain("Гонки Series 2026");
+		expect(html).toContain("Series 2026 race lifecycle");
 		expect(html).toContain("/api/operating-center/race-lifecycle");
-		expect(html).toContain("Обновить все дистанции");
+		expect(html).toContain("Sync all distances");
 	});
 });
 
