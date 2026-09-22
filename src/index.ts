@@ -26,6 +26,7 @@ import {
         googleAdsAuthorizationUrl,
         handleGoogleAdsCallback,
 } from "./google-ads";
+import { buildDesiredState } from "./google-ads-state";
 import {
 	advanceFundProspect,
 	getFundView,
@@ -5831,6 +5832,14 @@ export default {
 				return json(result);
 			} catch (error) {
 				return json({ ok: false, error: error instanceof Error ? error.message : "Prospect advance failed" }, 500);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/google-ads/desired-state") {
+			try {
+				return json({ ok: true, ...buildDesiredState() });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Desired state failed" }, 500);
 			}
 		}
 
