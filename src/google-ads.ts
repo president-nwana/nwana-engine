@@ -376,22 +376,18 @@ export interface GoogleAdsAccountSnapshot {
 	error?: string;
 }
 
-export function buildLiveCampaignsQuery(): string {
-	return [
+async function searchLiveCampaigns(
+	accessToken: string,
+	customerId: string,
+): Promise<GoogleAdsLiveCampaign[]> {
+	const query = [
 		"SELECT campaign.id, campaign.name, campaign.status,",
 		"campaign_budget.amount_micros,",
 		"metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros",
 		"FROM campaign",
 		"WHERE campaign.status != 'REMOVED'",
-		`AND segments.date DURING ${GOOGLE_ADS_METRICS_RANGE}`,
+		`DURING ${GOOGLE_ADS_METRICS_RANGE}`,
 	].join(" ");
-}
-
-async function searchLiveCampaigns(
-	accessToken: string,
-	customerId: string,
-): Promise<GoogleAdsLiveCampaign[]> {
-	const query = buildLiveCampaignsQuery();
 	const response = await fetch(
 		`https://googleads.googleapis.com/${API_VERSION}/customers/${customerId}/googleAds:search`,
 		{
