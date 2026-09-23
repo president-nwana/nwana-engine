@@ -55,6 +55,27 @@ export interface SourceObjectLink {
 	title: string | null;
 }
 
+/**
+ * Bridge between the Distribution Planner and a Google Ads proposal.
+ * A proposal exists only when a real distribution action backs it:
+ * action_type = GOOGLE_ADS_CAMPAIGN, channel = GOOGLE_ADS_GRANT.
+ * Every field comes from a real distribution rule/action; a missing
+ * action is never fabricated.
+ */
+export interface DistributionLink {
+	/** Real action id from the distribution rules seed, or null. */
+	action_id: string | null;
+	/** Real rule id from the distribution rules seed, or null. */
+	rule_id: string | null;
+	/** Real channel from the distribution action, or null. */
+	channel: string | null;
+	/**
+	 * True only when a real Google Ads distribution action backs this
+	 * proposal. Actual creation still requires owner review.
+	 */
+	creation_eligible: boolean;
+}
+
 export interface CampaignSpec {
 	/** Stable identifier; the script finds campaigns by exact name. */
 	name: string;
@@ -69,6 +90,11 @@ export interface CampaignSpec {
 	 * missing linkage is never fabricated.
 	 */
 	source_object: SourceObjectLink | null;
+	/**
+	 * Distribution-planner backing for this proposal. Declared only
+	 * from real distribution rules/actions (see migrations/0006).
+	 */
+	distribution: DistributionLink;
 	/** The script creates every campaign paused. Hardcoded true, not a spec field. */
 }
 
@@ -173,6 +199,15 @@ function series2026Campaign(): CampaignSpec {
 			object_id: "NWANA-RACE-000001",
 			object_type: null,
 			title: null,
+		},
+		// Real distribution backing (migrations/0006-seed-core-distribution-rules.sql):
+		// ACT-SERIES-HUB-GOOGLE-ADS, action_type GOOGLE_ADS_CAMPAIGN,
+		// channel GOOGLE_ADS_GRANT, rule RULE-OPEN-SERIES-HUB.
+		distribution: {
+			action_id: "ACT-SERIES-HUB-GOOGLE-ADS",
+			rule_id: "RULE-OPEN-SERIES-HUB",
+			channel: "GOOGLE_ADS_GRANT",
+			creation_eligible: true,
 		},
 		daily_budget: 200,
 		geo_target_id: 2840,
@@ -285,6 +320,16 @@ function foundingCircleCampaign(): CampaignSpec {
 		// the Founding Circle, and ADR-0015 never links the two.
 		// The linkage stays null rather than invented.
 		source_object: null,
+		// No confirmed Google Ads distribution action exists for the
+		// Founding Circle: migrations/0006 contains no GOOGLE_ADS
+		// action outside ACT-SERIES-HUB-GOOGLE-ADS. Nulls are honest;
+		// nothing is fabricated to fill them.
+		distribution: {
+			action_id: null,
+			rule_id: null,
+			channel: null,
+			creation_eligible: false,
+		},
 		daily_budget: 100,
 		geo_target_id: 2840,
 		ad_groups: [
