@@ -10,7 +10,7 @@
 
 import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
 import { getFundView } from "./fund";
-import { buildDesiredState } from "./google-ads-state";
+import { buildDesiredState, validateCampaignSpec, type CampaignSpec, type DesiredState } from "./google-ads-state";
 // ADR-0029: the Ads screen reads the real Google Ads connection state from
 // the existing live integration (src/google-ads.ts), never a hardcoded flag.
 // ADR-0030: the screen is a read-only operational view of the real account:
@@ -249,6 +249,10 @@ export interface AdsOverview {
 		status_in_account: string;
 		ad_groups: Array<{ name: string; keywords: string[] }>;
 	}>;
+	// Proposal layer: the desired-state spec enriched with per-proposal
+	// status, the Ad Grants policy validation result (from the existing
+	// validator), and the next action. Never mixed with live campaigns.
+	machine_proposals: MachineProposal[];
 	// What the screen currently shows (real connection state plus the
 	// planned spec). Google Analytics is deliberately untouched here.
 	capabilities: string[];
@@ -256,6 +260,87 @@ export interface AdsOverview {
 
 type AdsStatusReader = typeof getGoogleAdsStatus;
 type AdsAccountReader = typeof getGoogleAdsAccountSnapshot;
+
+export interface MachineProposalAdGroup {
+	name: string;
+	default_cpc: number;
+	keywords: Array<{ text: string; match_type: string }>;
+	ads_count: number;
+}
+
+export interface MachineProposal {
+	name: string;
+	status: string;
+	next_action: string;
+	daily_budget: number;
+	target_url: string;
+	/** Present only if the current spec really carries a source; never invented. */
+	source: string | null;
+	ad_groups: MachineProposalAdGroup[];
+	/** Result of the existing Ad Grants policy validator (validateCampaignSpec). */
+	policy_violations: string[];
+}
+
+// Confirmed conflict: the live account already contains the real campaign
+// "2026 NWANA Open Nordic Walking Series", so this desired-state proposal
+// is flagged for review instead of shown as a fresh proposal. Hardcoded on
+// purpose: no automatic equivalence detection at this step.
+const SERIES_PROPOSAL_NAME = "NWANA \u00b7 Series 2026 \u00b7 Virtual Races";
+
+function proposalTargetUrl(spec: CampaignSpec): string {
+	const counts = new Map<string, number>();
+	for (const group of spec.ad_groups) {
+		for (const ad of group.ads) {
+			counts.set(ad.final_url, (counts.get(ad.final_url) ?? 0) + 1);
+		}
+	}
+	let best = "";
+	let bestCount = -1;
+	for (const [url, count] of counts) {
+		if (count > bestCount) {
+			best = url;
+			bestCount = count;
+		}
+	}
+	return best;
+}
+
+function buildMachineProposals(
+	spec: DesiredState,
+	liveCampaigns: GoogleAdsLiveCampaign[],
+): MachineProposal[] {
+	return spec.campaigns.map((campaign) => {
+		let status: string;
+		let nextAction: string;
+		if (campaign.name === SERIES_PROPOSAL_NAME) {
+			status = "POSSIBLE DUPLICATE / REVIEW";
+			nextAction = "Review against existing live Series campaign before any creation";
+		} else if (liveCampaigns.some((c) => c.name === campaign.name)) {
+			// Exact name identity only, never similarity: a live campaign
+			// with precisely this name already exists.
+			status = "POSSIBLE DUPLICATE / REVIEW";
+			nextAction = "Review against the existing live campaign before any creation";
+		} else {
+			status = "PROPOSED";
+			nextAction = "Needs owner review before creation";
+		}
+		return {
+			name: campaign.name,
+			status,
+			next_action: nextAction,
+			daily_budget: campaign.daily_budget,
+			target_url: proposalTargetUrl(campaign),
+			source: null,
+			ad_groups: campaign.ad_groups.map((g) => ({
+				name: g.name,
+				default_cpc: g.default_cpc,
+				keywords: g.keywords.map((k) => ({ text: k.text, match_type: k.match_type })),
+				ads_count: g.ads.length,
+			})),
+			policy_violations: validateCampaignSpec(campaign),
+		};
+	});
+}
 
 export async function getAdsOverview(
 	env: GoogleAdsEnv,
@@ -324,12 +409,13 @@ export async function getAdsOverview(
 				keywords: g.keywords.map((k) => k.text + " [" + k.match_type + "]"),
 			})),
 		})),
+		machine_proposals: buildMachineProposals(spec, liveAccount.campaigns),
 		capabilities: [
 			"Real Google Ads connection state (connected or the actual error)",
 			"Access level and accessible customer account(s)",
 			"Campaign creation/mutation status (currently disabled)",
 			"Live campaign data from the connected account (read-only)",
-			"Planned campaign spec — not created in any account",
+			"Machine campaign proposals (owner review required)",
 		],
 	};
 }
@@ -365,13 +451,22 @@ const ADS_SCRIPT = `
 				}
 			}
 			html+='<div class="item"><strong>Google Analytics<span class="badge-warn">Not set up</span></strong><div class="detail">'+esc(data.google_analytics.note)+'</div></div>';
-			html+='<h3>PLANNED / NOT CREATED</h3><p class="meta">Machine spec only. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any ad account yet.</p>';
-			for(const c of (data.planned_campaigns||[])){
-				html+='<div class="item"><strong>'+esc(c.name)+'<span class="badge-warn">'+esc(c.status_in_account)+'</span></strong><div class="meta">$'+esc(c.daily_budget)+'/day planned</div>';
-				for(const g of (c.ad_groups||[])){
-					html+='<div class="detail"><b>'+esc(g.name)+':</b> '+esc((g.keywords||[]).join(', '))+'</div>';
+			html+='<h3>MACHINE PROPOSALS</h3><p class="meta">What the machine proposes to create. Campaign creation is disabled; the owner reviews every proposal before anything is created.</p>';
+			for(const p of (data.machine_proposals||[])){
+				const st=p.status==='PROPOSED'?'<span class="badge-ok">'+esc(p.status)+'</span>':'<span class="badge-warn">'+esc(p.status)+'</span>';
+				html+='<div class="item"><strong>'+esc(p.name)+' '+st+'</strong>'
+					+'<div class="meta">Budget: $'+Number(p.daily_budget).toFixed(2)+'/day &middot; Target: '+esc(p.target_url)+'</div>';
+				if(p.source){html+='<div class="meta">Source: '+esc(p.source)+'</div>';}
+				for(const g of (p.ad_groups||[])){
+					const kws=(g.keywords||[]).map(function(k){return esc(k.text)+' ('+esc(k.match_type)+')';}).join(', ');
+					html+='<div class="detail"><b>'+esc(g.name)+':</b> max CPC $'+Number(g.default_cpc).toFixed(2)+', '+g.ads_count+' ads<br>Keywords: '+kws+'</div>';
 				}
-				html+='</div>';
+				if((p.policy_violations||[]).length===0){
+					html+='<div class="detail">Ad Grants policy: PASS</div>';
+				}else{
+					html+='<div class="detail">Ad Grants policy violations: '+p.policy_violations.map(esc).join('; ')+'</div>';
+				}
+				html+='<div class="detail">Next action: '+esc(p.next_action)+'</div></div>';
 			}
 			html+='<h3>What this screen shows today</h3><div class="detail">'+(data.capabilities||[]).map(w=>'&bull; '+esc(w)).join('<br>')+'</div>';
 			box.innerHTML=html;
@@ -1259,14 +1354,24 @@ export function buildAdsReport(data: AdsOverview): string {
 		}
 	}
 	body += `<p><strong>Google Analytics</strong> <span class="tag-warn">Not set up</span></p><p>${escHtml(data.google_analytics.note)}</p>`;
-	body += `<h2>PLANNED / NOT CREATED</h2>`;
-	body += `<p class="note">Prepared under Google Ad Grants policy. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any advertising account yet.</p>`;
-	for (const c of data.planned_campaigns) {
-		body += `<h3>${escHtml(c.name)} <span class="tag-warn">${escHtml(c.status_in_account)}</span></h3>`;
-		body += `<p class="note">Planned budget: $${escHtml(c.daily_budget)}/day</p>`;
-		for (const g of c.ad_groups) {
-			body += `<p><strong>${escHtml(g.name)}:</strong> ${escHtml(g.keywords.join(", "))}</p>`;
+	body += `<h2>MACHINE PROPOSALS</h2>`;
+	body += `<p class="note">What the machine proposes to create. Campaign creation is disabled; the owner reviews every proposal before anything is created.</p>`;
+	for (const p of data.machine_proposals) {
+		body += `<h3>${escHtml(p.name)} <span class="${p.status === "PROPOSED" ? "tag" : "tag-warn"}">${escHtml(p.status)}</span></h3>`;
+		body += `<p>Daily budget: $${p.daily_budget.toFixed(2)}; target URL: ${escHtml(p.target_url)}</p>`;
+		if (p.source) {
+			body += `<p>Source: ${escHtml(p.source)}</p>`;
 		}
+		for (const g of p.ad_groups) {
+			const kws = g.keywords.map((k) => `${escHtml(k.text)} (${escHtml(k.match_type)})`).join(", ");
+			body += `<p><strong>${escHtml(g.name)}:</strong> max CPC $${g.default_cpc.toFixed(2)}, ${g.ads_count} ads<br>Keywords: ${kws}</p>`;
+		}
+		if (p.policy_violations.length === 0) {
+			body += `<p>Ad Grants policy: PASS</p>`;
+		} else {
+			body += `<p>Ad Grants policy violations: ${p.policy_violations.map(escHtml).join("; ")}</p>`;
+		}
+		body += `<p>Next action: ${escHtml(p.next_action)}</p>`;
 	}
 	body += `<h2>What this report shows today</h2><ul>${data.capabilities.map((w) => `<li>${escHtml(w)}</li>`).join("")}</ul>`;
 	return reportDoc("NWANA advertising and analytics", reportDate(data.generated_at), body);
