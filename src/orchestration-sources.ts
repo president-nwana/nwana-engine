@@ -48,18 +48,6 @@ export interface OwnerDirectiveRef {
 }
 
 /**
- * One confirmed public donation destination. The URL is carried verbatim
- * from authoritative evidence; it is never guessed, constructed, or
- * substituted (a homepage is not a donation page). Each destination
- * carries its own provenance: the store, reader, and adapter that
- * confirmed it.
- */
-export interface DonationDestination {
-	url: string;
-	provenance: { store: string; reader: string; adapter: string };
-}
-
-/**
  * Channel-neutral description of one machine source. Every field is a fact
  * the adapter could actually read; unknown facts are null/empty, never
  * invented.
@@ -80,13 +68,6 @@ export interface NormalizedSource {
 	relationships: Array<{ type: string; target_identity: string }>;
 	/** Known public destinations (URLs). */
 	public_destinations: string[];
-	/**
-	 * Confirmed public donation destinations, each with its own
-	 * provenance. Empty when no authoritative evidence confirms one:
-	 * adapters never guess, construct, or substitute (a homepage is
-	 * not a donation page).
-	 */
-	donation_destinations: DonationDestination[];
 	/** Confirmed conversion paths (DONATION, REGISTRATION, ...). */
 	conversion_capabilities: string[];
 	/** Explicit distribution actions the adapter can name from evidence. */
@@ -112,8 +93,8 @@ export interface SponsorshipAssetRow {
 	id: string;
 	title: string;
 	stage: string;
-	object_type: string;
-	object_id: string;
+	parent_object_type: string;
+	parent_object_id: string;
 }
 
 /** Explicit owner instructions. Not derived from any source object or rule. */
@@ -129,28 +110,8 @@ export interface OwnerDirectiveConfig {
 	 * channel-input data, null when the directive carries no inputs.
 	 */
 	channel_inputs_ref: string | null;
-	/**
-	 * Confirmed capability facts the directive carries (factual owner
-	 * evidence only; empty when the directive claims none).
-	 */
-	capabilities?: string[];
-	/**
-	 * Confirmed public donation destinations with per-destination
-	 * provenance (factual owner evidence only).
-	 */
-	donation_destinations?: DonationDestination[];
 	provenance_note: string;
 }
-
-/**
- * Owner-confirmed NWANA online donation destination (RunSignup).
- * Confirmed by the DIR-FOUNDING-CIRCLE-2026 provenance note
- * ("destination is the RunSignup donation page") together with the
- * owner-approved Google Ads channel inputs for that directive.
- * Referenced, never duplicated, by consumers.
- */
-export const NWANA_RUNSIGNUP_DONATION_URL =
-	"https://sport.nwaofna.org/Race/Donate/FL/SaintPetersburg/NWANANordicWalkingSPORT";
 
 export const OWNER_DIRECTIVES: readonly OwnerDirectiveConfig[] = [
 	{
@@ -160,17 +121,6 @@ export const OWNER_DIRECTIVES: readonly OwnerDirectiveConfig[] = [
 		candidate_action: "Acquire donors via search",
 		ordered_channel: "GOOGLE_ADS_GRANT",
 		channel_inputs_ref: "DIR-FOUNDING-CIRCLE-2026",
-		capabilities: ["DONATION"],
-		donation_destinations: [
-			{
-				url: NWANA_RUNSIGNUP_DONATION_URL,
-				provenance: {
-					store: "OWNER_DIRECTIVES (orchestration-sources.ts)",
-					reader: "explicit owner instruction",
-					adapter: "adaptOwnerDirectiveSources",
-				},
-			},
-		],
 		provenance_note:
 			"Owner-authored directive (ADR-0031): NWANA is a 501(c)(3) public charity, " +
 			"donations are tax-deductible, destination is the RunSignup donation page. " +
@@ -201,7 +151,6 @@ export function adaptRegistrySources(): NormalizedSource[] {
 			capabilities: ["PUBLIC_WEBSITE"],
 			relationships: [],
 			public_destinations: ["https://series.nwaofna.org/"],
-			donation_destinations: [],
 			conversion_capabilities: [],
 			distribution_actions: DISTRIBUTION_ACTIONS.filter(
 				(a) => a.rule_id === "RULE-OPEN-SERIES-HUB",
@@ -227,7 +176,6 @@ export function adaptRegistrySources(): NormalizedSource[] {
 			capabilities: [],
 			relationships: [],
 			public_destinations: [],
-			donation_destinations: [],
 			conversion_capabilities: [],
 			distribution_actions: [],
 			source_facts: [
@@ -247,7 +195,6 @@ export function adaptRegistrySources(): NormalizedSource[] {
 			capabilities: [],
 			relationships: [],
 			public_destinations: [],
-			donation_destinations: [],
 			conversion_capabilities: [],
 			distribution_actions: [],
 			source_facts: [
@@ -267,7 +214,6 @@ export function adaptRegistrySources(): NormalizedSource[] {
 			capabilities: [],
 			relationships: [],
 			public_destinations: [],
-			donation_destinations: [],
 			conversion_capabilities: [],
 			distribution_actions: [],
 			source_facts: [
@@ -301,7 +247,6 @@ export function adaptRuleDerivedSources(): NormalizedSource[] {
 			capabilities: ["FUNDRAISING"],
 			relationships: [],
 			public_destinations: [],
-			donation_destinations: [],
 			conversion_capabilities: [],
 			distribution_actions: fundActions.map((a) => ({
 				action_id: a.action_id,
@@ -338,10 +283,9 @@ export function adaptOwnerDirectiveSources(): NormalizedSource[] {
 		factual_title: "Founding Circle",
 		status: null,
 		purpose: d.purpose,
-		capabilities: [...(d.capabilities ?? [])],
+		capabilities: [],
 		relationships: [],
 		public_destinations: [],
-		donation_destinations: [...(d.donation_destinations ?? [])],
 		conversion_capabilities: [],
 		distribution_actions: [],
 		source_facts: [d.provenance_note],
@@ -361,11 +305,9 @@ export function adaptOwnerDirectiveSources(): NormalizedSource[] {
 
 /**
  * Fund adapter: reads D1 funds rows. Carries only columns the table
- * actually holds. No per-fund special cases: the funds table has no
- * donation-destination column, so no fund carries a confirmed public
- * donation destination. A fund with a confirmed fundraising fact but no
- * confirmed destination is reported by the generic fundraising rule as
- * missing its destination, never given an invented or assumed URL.
+ * actually holds; the $50K bridge sprint has no distribution actions,
+ * no matching rule, and no owner directive, so the orchestration must
+ * report NO_DECISION rather than invent a channel.
  */
 export function adaptFundSources(rows: readonly FundRow[]): NormalizedSource[] {
 	return rows.map((row) => ({
@@ -377,15 +319,16 @@ export function adaptFundSources(rows: readonly FundRow[]): NormalizedSource[] {
 		purpose: "FUNDRAISING",
 		capabilities: ["FUNDRAISING"],
 		relationships: [],
-		public_destinations: [],
-		donation_destinations: [],
-		conversion_capabilities: [],
+		public_destinations:
+			row.id === "fund-50k-bridge-sprint"
+				? ["https://sport.nwaofna.org/Race/Donate/FL/SaintPetersburg/NWANANordicWalkingSPORT"]
+				: [],
+		conversion_capabilities:
+			row.id === "fund-50k-bridge-sprint" ? ["DONATION"] : [],
 		distribution_actions: [],
 		source_facts: [
 			`Goal ${row.goal_amount} ${row.currency}.`,
 			...(row.description ? [row.description] : []),
-			"No confirmed public donation destination is recorded for this fund " +
-				"in the machine (the funds table holds no destination field).",
 		],
 		owner_directive: null,
 		provenance: {
@@ -406,23 +349,22 @@ export function adaptSponsorshipAssetSources(
 	return rows.map((row) => ({
 		source_identity: row.id,
 		source_kind: "SPONSORSHIP_ASSET" as const,
-		canonical_object_id: row.object_id || null,
+		canonical_object_id: row.parent_object_id || null,
 		factual_title: row.title,
 		status: row.stage,
 		purpose: null,
 		capabilities: [],
-		relationships: row.object_id
-			? [{ type: "PARENT_OBJECT", target_identity: row.object_id }]
+		relationships: row.parent_object_id
+			? [{ type: "PARENT_OBJECT", target_identity: row.parent_object_id }]
 			: [],
 		public_destinations: [],
-		donation_destinations: [],
 		conversion_capabilities: [],
 		distribution_actions: [],
-		source_facts: [`Parent object type ${row.object_type}.`],
+		source_facts: [`Parent object type ${row.parent_object_type}.`],
 		owner_directive: null,
 		provenance: {
 			store: "D1 sponsorship_assets table",
-			reader: "SELECT id, title, stage, object_type, object_id FROM sponsorship_assets",
+			reader: "SELECT id, title, stage, parent_object_type, parent_object_id FROM sponsorship_assets",
 			adapter: "adaptSponsorshipAssetSources",
 		},
 	}));
@@ -455,7 +397,7 @@ export async function collectD1Sources(
 	const assetRows = (
 		await db
 			.prepare(
-				"SELECT id, title, stage, object_type, object_id FROM sponsorship_assets",
+				"SELECT id, title, stage, parent_object_type, parent_object_id FROM sponsorship_assets",
 			)
 			.all<SponsorshipAssetRow>()
 	).results;
