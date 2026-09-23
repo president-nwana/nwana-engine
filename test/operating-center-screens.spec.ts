@@ -138,7 +138,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	const liveCampaignsReader = async () => ({
 		ok: true,
 		customer_id: "6758500147",
-		date_range: "LAST_30_DAYS",
+		date_range: "2026-08-26 to 2026-09-23",
 		campaigns: [
 			{ id: "111", name: "NWANA 5K race, September 27", status: "ENABLED", daily_budget_usd: 10.97, impressions: 120, clicks: 9, conversions: 0, cost_usd: 122.89 },
 			{ id: "222", name: "NWANA 2026 Series", status: "PAUSED", daily_budget_usd: 10.97, impressions: 200, clicks: 13, conversions: 1, cost_usd: 126.08 },
@@ -147,7 +147,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	const emptyAccountReader = async () => ({
 		ok: true,
 		customer_id: "6758500147",
-		date_range: "LAST_30_DAYS",
+		date_range: "2026-08-26 to 2026-09-23",
 		campaigns: [] as Array<{
 			id: string; name: string; status: string; daily_budget_usd: number;
 			impressions: number; clicks: number; conversions: number; cost_usd: number;
@@ -156,7 +156,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	const failingAccountReader = async () => ({
 		ok: false,
 		customer_id: "6758500147",
-		date_range: "LAST_30_DAYS",
+		date_range: "2026-08-26 to 2026-09-23",
 		campaigns: [] as Array<{
 			id: string; name: string; status: string; daily_budget_usd: number;
 			impressions: number; clicks: number; conversions: number; cost_usd: number;
@@ -267,7 +267,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, liveCampaignsReader);
 		expect(data.live_account.available).toBe(true);
 		expect(data.live_account.customer_id).toBe("6758500147");
-		expect(data.live_account.date_range).toBe("LAST_30_DAYS");
+		expect(data.live_account.date_range).toBe("2026-08-26 to 2026-09-23");
 		expect(data.live_account.campaigns).toHaveLength(2);
 		const five = data.live_account.campaigns[0];
 		expect(five.name).toBe("NWANA 5K race, September 27");
@@ -312,11 +312,12 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		expect(report).toContain("Unrecognized field");
 	});
 
-	it("ads: live GAQL query filters the date range via segments.date", () => {
-		// GAQL requires the date range as a condition on segments.date;
-		// a bare DURING clause after FROM is invalid syntax.
+	it("ads: live GAQL query uses the exact UI date range", () => {
+		// The query must match the owner's Google Ads UI window exactly
+		// (Aug 26 - Sep 23, 2026); no predefined relative range.
 		const q = buildLiveCampaignsQuery();
-		expect(q).toContain("segments.date DURING LAST_30_DAYS");
+		expect(q).toContain("segments.date BETWEEN '2026-08-26' AND '2026-09-23'");
+		expect(q).not.toContain("LAST_30_DAYS");
 		expect(q).toContain("FROM campaign");
 		expect(q).toContain("WHERE campaign.status != 'REMOVED'");
 		for (const field of [
@@ -412,7 +413,7 @@ describe("reports (ADR-0027/0028): external-safe HTML documents", () => {
 		["ads", async () => buildAdsReport(await getAdsOverview({} as GoogleAdsEnv, connectedAdsReader, async () => ({
 			ok: true,
 			customer_id: "6758500147",
-			date_range: "LAST_30_DAYS",
+			date_range: "2026-08-26 to 2026-09-23",
 			campaigns: [
 				{ id: "111", name: "NWANA 5K race, September 27", status: "ENABLED", daily_budget_usd: 10.97, impressions: 120, clicks: 9, conversions: 0, cost_usd: 122.89 },
 			],
