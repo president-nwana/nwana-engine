@@ -691,6 +691,7 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - New JSON overview APIs `/api/operating-center/<screen>/overview` (7), all 401 without the owner key. No migration, no auth change.
 - Local verification: Vitest 246/246 (29 new tests in `test/operating-center-screens.spec.ts`), `tsc --noEmit` clean, `new Function` script-parse regression tests for all 7 new pages and the main page.
 - Production deployment: 2026-09-23, Worker `nwana-engine` version `9fb24bdc-52fb-4af3-9caf-0b47b8de3077` (commit `5ebfa9d1`, pushed as `3e5c18f7`). Live verification: all 7 new pages (`/sites`, `/social`, `/ads`, `/sellers`, `/partners`, `/fundraising`, `/groups`) return 200 with the 15-button menu; main page 200, dashboard-only with 15 summary cards; all 7 overview APIs and all 7 report endpoints return 401 without the owner key; other API 401s unchanged. Pre-deploy live version was `aed66454` (ADR-0026), post-deploy is `9fb24bdc` - no overwrite detected.
+- Production deployment: 2026-09-23, Worker `nwana-engine` version `f5bbf9a1-aad2-4c40-af6e-2434096ad804` (commit `ede7c5c2`, ADR-0028 meetings screen). Live verification: `/operating-center/meetings` 200 with the 16-button menu (meetings marked active on the page); main page 200, dashboard-only with the new meetings summary card linking to the page; `/api/operating-center/meetings/overview` and `/api/operating-center/report/meetings` 401 without the owner key; pre-deploy live version was `9fb24bdc` (ADR-0027), post-deploy is `f5bbf9a1` - no overwrite detected.
 
 ## DO NOT
 
