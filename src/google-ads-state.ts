@@ -41,39 +41,10 @@ export interface SitelinkSpec {
 export interface SourceObjectLink {
 	/** Real object id from the existing NWANA object model. */
 	object_id: string;
-	/**
-	 * Object type as recorded in the existing object model.
-	 * Null when the record has no formal object_type field;
-	 * never filled by inference.
-	 */
-	object_type: string | null;
-	/**
-	 * Title as recorded in the existing object model.
-	 * Null when the record has no formal title field;
-	 * never filled by inference.
-	 */
-	title: string | null;
-}
-
-/**
- * Bridge between the Distribution Planner and a Google Ads proposal.
- * A proposal exists only when a real distribution action backs it:
- * action_type = GOOGLE_ADS_CAMPAIGN, channel = GOOGLE_ADS_GRANT.
- * Every field comes from a real distribution rule/action; a missing
- * action is never fabricated.
- */
-export interface DistributionLink {
-	/** Real action id from the distribution rules seed, or null. */
-	action_id: string | null;
-	/** Real rule id from the distribution rules seed, or null. */
-	rule_id: string | null;
-	/** Real channel from the distribution action, or null. */
-	channel: string | null;
-	/**
-	 * True only when a real Google Ads distribution action backs this
-	 * proposal. Actual creation still requires owner review.
-	 */
-	creation_eligible: boolean;
+	/** Object type as recorded in the existing object model. */
+	object_type: string;
+	/** Title as recorded in the existing object model. */
+	title: string;
 }
 
 export interface CampaignSpec {
@@ -90,11 +61,6 @@ export interface CampaignSpec {
 	 * missing linkage is never fabricated.
 	 */
 	source_object: SourceObjectLink | null;
-	/**
-	 * Distribution-planner backing for this proposal. Declared only
-	 * from real distribution rules/actions (see migrations/0006).
-	 */
-	distribution: DistributionLink;
 	/** The script creates every campaign paused. Hardcoded true, not a spec field. */
 }
 
@@ -191,23 +157,14 @@ function series2026Campaign(): CampaignSpec {
 	const hub = "https://series.nwaofna.org";
 	return {
 		name: "NWANA \u00b7 Series 2026 \u00b7 Virtual Races",
-		// Raw registry/objects.yaml record for NWANA-RACE-000001 has
-		// object_id plus external/nwana/capabilities blocks, but NO
-		// formal object_type or title fields. Only the real fields
-		// are linked; nothing is promoted or inferred.
+		// Real source object from the existing object model
+		// (registry/objects.yaml): the 2026 NWANA Open Nordic Walking
+		// Series public hub. object_type is the record's nwana.purpose;
+		// the title follows the record's verified fact.
 		source_object: {
 			object_id: "NWANA-RACE-000001",
-			object_type: null,
-			title: null,
-		},
-		// Real distribution backing (migrations/0006-seed-core-distribution-rules.sql):
-		// ACT-SERIES-HUB-GOOGLE-ADS, action_type GOOGLE_ADS_CAMPAIGN,
-		// channel GOOGLE_ADS_GRANT, rule RULE-OPEN-SERIES-HUB.
-		distribution: {
-			action_id: "ACT-SERIES-HUB-GOOGLE-ADS",
-			rule_id: "RULE-OPEN-SERIES-HUB",
-			channel: "GOOGLE_ADS_GRANT",
-			creation_eligible: true,
+			object_type: "SERIES_PUBLIC_HUB",
+			title: "2026 NWANA Open Nordic Walking Series",
 		},
 		daily_budget: 200,
 		geo_target_id: 2840,
@@ -313,22 +270,13 @@ function foundingCircleCampaign(): CampaignSpec {
 	const about = "https://nwaofna.org";
 	return {
 		name: "NWANA \u00b7 Founding Circle \u00b7 Donate",
-		// No explicit confirmed relationship exists between the
-		// "NWANA \u00b7 Founding Circle \u00b7 Donate" proposal and the
-		// fund-50k-bridge-sprint fundraising object: the production
-		// relationships table is empty, the fund metadata never names
-		// the Founding Circle, and ADR-0015 never links the two.
-		// The linkage stays null rather than invented.
-		source_object: null,
-		// No confirmed Google Ads distribution action exists for the
-		// Founding Circle: migrations/0006 contains no GOOGLE_ADS
-		// action outside ACT-SERIES-HUB-GOOGLE-ADS. Nulls are honest;
-		// nothing is fabricated to fill them.
-		distribution: {
-			action_id: null,
-			rule_id: null,
-			channel: null,
-			creation_eligible: false,
+		// Real source object from the existing object model: the live
+		// fundraising object in production D1 (funds table, ADR-0015
+		// "Fund as a first-class NWANA machine object").
+		source_object: {
+			object_id: "fund-50k-bridge-sprint",
+			object_type: "fund",
+			title: "$50K Manhattan HQ Bridge Sprint",
 		},
 		daily_budget: 100,
 		geo_target_id: 2840,
