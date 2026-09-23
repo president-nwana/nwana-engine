@@ -38,6 +38,15 @@ export interface SitelinkSpec {
 	description?: string;
 }
 
+export interface SourceObjectLink {
+	/** Real object id from the existing NWANA object model. */
+	object_id: string;
+	/** Object type as recorded in the existing object model. */
+	object_type: string;
+	/** Title as recorded in the existing object model. */
+	title: string;
+}
+
 export interface CampaignSpec {
 	/** Stable identifier; the script finds campaigns by exact name. */
 	name: string;
@@ -46,8 +55,15 @@ export interface CampaignSpec {
 	sitelinks: SitelinkSpec[];
 	/** United States geo target constant. */
 	geo_target_id: number;
+	/**
+	 * Real NWANA object this proposal is built for, from the existing
+	 * object model. Null only when no suitable object exists yet; a
+	 * missing linkage is never fabricated.
+	 */
+	source_object: SourceObjectLink | null;
 	/** The script creates every campaign paused. Hardcoded true, not a spec field. */
 }
+
 
 export interface DesiredState {
 	version: string;
@@ -141,6 +157,15 @@ function series2026Campaign(): CampaignSpec {
 	const hub = "https://series.nwaofna.org";
 	return {
 		name: "NWANA \u00b7 Series 2026 \u00b7 Virtual Races",
+		// Real source object from the existing object model
+		// (registry/objects.yaml): the 2026 NWANA Open Nordic Walking
+		// Series public hub. object_type is the record's nwana.purpose;
+		// the title follows the record's verified fact.
+		source_object: {
+			object_id: "NWANA-RACE-000001",
+			object_type: "SERIES_PUBLIC_HUB",
+			title: "2026 NWANA Open Nordic Walking Series",
+		},
 		daily_budget: 200,
 		geo_target_id: 2840,
 		ad_groups: [
@@ -245,6 +270,14 @@ function foundingCircleCampaign(): CampaignSpec {
 	const about = "https://nwaofna.org";
 	return {
 		name: "NWANA \u00b7 Founding Circle \u00b7 Donate",
+		// Real source object from the existing object model: the live
+		// fundraising object in production D1 (funds table, ADR-0015
+		// "Fund as a first-class NWANA machine object").
+		source_object: {
+			object_id: "fund-50k-bridge-sprint",
+			object_type: "fund",
+			title: "$50K Manhattan HQ Bridge Sprint",
+		},
 		daily_budget: 100,
 		geo_target_id: 2840,
 		ad_groups: [
