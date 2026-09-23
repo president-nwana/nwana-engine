@@ -1,0 +1,1 @@
+{"name":"nwana-site","private":true,"scripts":{"deploy":"wrangler deploy","types":"wrangler types"},"version":"0.1.0"}

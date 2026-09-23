@@ -1,0 +1,1 @@
+{"$schema":"node_modules/wrangler/config-schema.json","assets":{"directory":"./public"},"compatibility_date":"2026-09-07","d1_databases":[{"binding":"nwana_site_db","database_id":"b3a8f158-185c-4a37-a61d-a29eb758de7e","database_name":"nwana-engine-db"}],"main":"src/index.ts","name":"nwana-site"}
