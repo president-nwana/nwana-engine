@@ -473,7 +473,7 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 	});
 }
 
-export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity" | "sites" | "social" | "ads" | "sellers" | "partners" | "fundraising" | "groups" | "meetings";
+export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity" | "sites" | "social" | "ads" | "sellers" | "partners" | "fundraising" | "groups" | "meetings" | "operations";
 
 /**
  * ADR-0023: shared button menu rendered directly under the header on every
@@ -500,6 +500,7 @@ export function operatingCenterMenu(active: OperatingCenterPageId): string {
 		{ id: "fundraising", label: "Fundraising", href: "/operating-center/fundraising" },
 		{ id: "groups", label: "Groups", href: "/operating-center/groups" },
 		{ id: "meetings", label: "Meetings", href: "/operating-center/meetings" },
+		{ id: "operations", label: "Operations", href: "/operating-center/operations" },
 	];
 	return (
 		'<nav class="oc-menu" aria-label="Operating center">' +
@@ -628,6 +629,11 @@ export function renderOperatingCenterHtml(): string {
 			<div id="meetings-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/meetings">Open meetings →</a></p>
 		</section>
+		<section class="panel" id="operations-card" style="margin-top:20px"><h2>Operations</h2>
+			<p class="meta">The operational queue: every current source, its required result, action, channel, status, and exact next step.</p>
+			<div id="operations-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/operations">Open operations →</a></p>
+		</section>
 		<section class="panel" id="board-summary-panel" style="margin-top:20px"><h2>Board workspace</h2>
 			<div id="board-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/board">Open board workspace →</a></p>
@@ -669,6 +675,7 @@ export function renderOperatingCenterHtml(): string {
 			loadFundraisingSummary();
 			loadGroupsSummary();
 			loadMeetingsSummary();
+			loadOperationsSummary();
 		}
 		async function pickNextMeetingLocal(meetings){
 			const today=new Date().toISOString().slice(0,10);
@@ -825,6 +832,19 @@ export function renderOperatingCenterHtml(): string {
 				const ladder=data.ladder||[];
 				box.innerHTML='<div class="meta">'+ladder.length+'-step license ladder</div>'+
 					'<div class="meta">Group counts: <span class="unavailable">not yet tracked</span></div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadOperationsSummary(){
+			const box=document.querySelector('#operations-summary');
+			try{
+				const data=await api('/api/operating-center/operations/overview');
+				const rows=(data.queue&&data.queue.rows)||[];
+				const counts={};rows.forEach(r=>{counts[r.status]=(counts[r.status]||0)+1});
+				let html='<div class="meta">'+rows.length+' operational rows</div>';
+				for(const st of ['READY_TO_ACT','NEEDS_OWNER_INPUT','BLOCKED_EXTERNAL']){
+					if(counts[st])html+='<div class="meta">'+st+': '+counts[st]+'</div>';
+				}
+				box.innerHTML=html;
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadMeetingsSummary(){

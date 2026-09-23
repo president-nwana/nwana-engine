@@ -87,6 +87,8 @@ import {
 	getGroupsOverview,
 	getMeetingsOverview,
 	renderMeetingsHtml,
+	getOperationsOverview,
+	renderOperationsHtml,
 	buildSitesReport,
 	buildSocialReport,
 	buildAdsReport,
@@ -95,6 +97,7 @@ import {
 	buildFundraisingReport,
 	buildGroupsReport,
 	buildMeetingsReport,
+	buildOperationsReport,
 } from "./operating-center-screens";
 import {
 	createMediaPlan,
@@ -5840,6 +5843,7 @@ export default {
 		if (request.method === "GET" && url.pathname === "/operating-center/fundraising") return htmlPage(renderFundraisingHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/groups") return htmlPage(renderGroupsHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/meetings") return htmlPage(renderMeetingsHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/operations") return htmlPage(renderOperationsHtml);
 
 		// ADR-0027: overview APIs for the seven new screens.
 		// ADR-0028: meetings overview.
@@ -5867,6 +5871,9 @@ export default {
 		if (request.method === "GET" && url.pathname === "/api/operating-center/meetings/overview") {
 			return json(await getMeetingsOverview(env.nwana_engine_db));
 		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/operations/overview") {
+			return json(await getOperationsOverview(env));
+		}
 
 		// ADR-0027: downloadable external-ready reports. Owner-key protected
 		// like every other /api/operating-center route; the content itself is
@@ -5881,7 +5888,7 @@ export default {
 				},
 			});
 		{
-			const m = url.pathname.match(/^\/api\/operating-center\/report\/(sites|social|ads|sellers|partners|fundraising|groups|meetings)$/);
+			const m = url.pathname.match(/^\/api\/operating-center\/report\/(sites|social|ads|sellers|partners|fundraising|groups|meetings|operations)$/);
 			if (m && request.method === "GET") {
 				const screen = m[1];
 				if (screen === "sites") {
@@ -5911,6 +5918,10 @@ export default {
 				if (screen === "meetings") {
 					const data = await getMeetingsOverview(env.nwana_engine_db);
 					return reportFile(buildMeetingsReport(data), screen, data.generated_at.slice(0, 10));
+				}
+				if (screen === "operations") {
+					const data = await getOperationsOverview(env);
+					return reportFile(buildOperationsReport(data), screen, data.generated_at.slice(0, 10));
 				}
 				const data = getGroupsOverview();
 				return reportFile(buildGroupsReport(data), screen, data.generated_at.slice(0, 10));
