@@ -13,9 +13,7 @@ import { getFundView } from "./fund";
 import { buildDesiredState } from "./google-ads-state";
 // ADR-0029: the Ads screen reads the real Google Ads connection state from
 // the existing live integration (src/google-ads.ts), never a hardcoded flag.
-// ADR-0030: the screen is a read-only operational view of the real account:
-// live campaigns come from the Google Ads API, never from the planned spec.
-import { getGoogleAdsStatus, getGoogleAdsAccountSnapshot, GOOGLE_ADS_LIVE_CUSTOMER_ID, type GoogleAdsEnv, type GoogleAdsLiveCampaign } from "./google-ads";
+import { getGoogleAdsStatus, type GoogleAdsEnv } from "./google-ads";
 
 export type ReportScreenId =
 	| "sites"
@@ -229,17 +227,6 @@ export interface AdsOverview {
 		note: string;
 	};
 	google_analytics: { connected: false; note: string };
-	// ADR-0030: live account snapshot from the Google Ads API (read-only).
-	// available=false when the integration is not connected; then the
-	// connection block above carries the state. error holds the real
-	// account-read failure, never invented zeros.
-	live_account: {
-		available: boolean;
-		customer_id: string;
-		date_range: string;
-		campaigns: GoogleAdsLiveCampaign[];
-		error?: string;
-	};
 	// ADR-0016: the machine's desired-state spec. These campaigns are
 	// PLANNED, not live: nothing has been created in any account.
 	// Never presented as live data.
@@ -255,12 +242,10 @@ export interface AdsOverview {
 }
 
 type AdsStatusReader = typeof getGoogleAdsStatus;
-type AdsAccountReader = typeof getGoogleAdsAccountSnapshot;
 
 export async function getAdsOverview(
 	env: GoogleAdsEnv,
 	readStatus: AdsStatusReader = getGoogleAdsStatus,
-	readAccount: AdsAccountReader = getGoogleAdsAccountSnapshot,
 ): Promise<AdsOverview> {
 	const spec = buildDesiredState();
 	const status = await readStatus(env);
@@ -278,26 +263,6 @@ export async function getAdsOverview(
 	} else {
 		note = "Configured but not connected: no OAuth credential stored yet.";
 	}
-	// ADR-0030: live account data is read only when the integration is
-	// connected, via one bounded read-only API request. No D1 writes.
-	let liveAccount: AdsOverview["live_account"];
-	if (status.connected) {
-		const snapshot = await readAccount(env, GOOGLE_ADS_LIVE_CUSTOMER_ID);
-		liveAccount = {
-			available: true,
-			customer_id: snapshot.customer_id,
-			date_range: snapshot.date_range,
-			campaigns: snapshot.campaigns,
-			...(snapshot.error ? { error: snapshot.error } : {}),
-		};
-	} else {
-		liveAccount = {
-			available: false,
-			customer_id: GOOGLE_ADS_LIVE_CUSTOMER_ID,
-			date_range: "LAST_30_DAYS",
-			campaigns: [],
-		};
-	}
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
@@ -314,7 +279,6 @@ export async function getAdsOverview(
 			connected: false,
 			note: "Not set up. No Analytics property is attached to the NWANA sites yet.",
 		},
-		live_account: liveAccount,
 		planned_campaigns: spec.campaigns.map((c) => ({
 			name: c.name,
 			daily_budget: c.daily_budget,
@@ -328,7 +292,6 @@ export async function getAdsOverview(
 			"Real Google Ads connection state (connected or the actual error)",
 			"Access level and accessible customer account(s)",
 			"Campaign creation/mutation status (currently disabled)",
-			"Live campaign data from the connected account (read-only)",
 			"Planned campaign spec — not created in any account",
 		],
 	};
@@ -347,25 +310,8 @@ const ADS_SCRIPT = `
 			html+='<div class="meta">Campaign creation/mutation: '+(ads.execution_allowed?'enabled':'disabled')+'</div>';
 			if(ads.error){html+='<div class="detail">Error: '+esc(ads.error)+'</div>';}
 			html+='</div>';
-			const live=data.live_account;
-			if(live&&live.available){
-				html+='<h3>LIVE GOOGLE ADS ACCOUNT</h3><p class="meta">Real data from account '+esc(live.customer_id)+', last 30 days. Read-only; the machine never changes campaigns.</p>';
-				if(live.error){
-					html+='<div class="item"><strong>Account data<span class="badge-warn">Read error</span></strong><div class="detail">Could not read account data: '+esc(live.error)+'</div></div>';
-				}else if((live.campaigns||[]).length===0){
-					html+='<div class="item"><div class="detail">No campaigns found in the connected Google Ads account.</div></div>';
-				}else{
-					for(const c of live.campaigns){
-						const st=c.status==='ENABLED'?'<span class="badge-ok">'+esc(c.status)+'</span>':'<span class="badge-warn">'+esc(c.status)+'</span>';
-						html+='<div class="item"><strong>'+esc(c.name)+' '+st+'</strong>'
-							+'<div class="meta">Budget: $'+Number(c.daily_budget_usd).toFixed(2)+'/day</div>'
-							+'<div class="detail">Impressions: '+esc(c.impressions)+' &middot; Clicks: '+esc(c.clicks)+' &middot; Conversions: '+esc(c.conversions)+' &middot; Spend: $'+Number(c.cost_usd).toFixed(2)+'</div>'
-							+'</div>';
-					}
-				}
-			}
 			html+='<div class="item"><strong>Google Analytics<span class="badge-warn">Not set up</span></strong><div class="detail">'+esc(data.google_analytics.note)+'</div></div>';
-			html+='<h3>PLANNED / NOT CREATED</h3><p class="meta">Machine spec only. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any ad account yet.</p>';
+			html+='<h3>Planned campaigns (machine spec, not created)</h3><p class="meta">Prepared under Ad Grants policy. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any ad account yet.</p>';
 			for(const c of (data.planned_campaigns||[])){
 				html+='<div class="item"><strong>'+esc(c.name)+'<span class="badge-warn">'+esc(c.status_in_account)+'</span></strong><div class="meta">$'+esc(c.daily_budget)+'/day planned</div>';
 				for(const g of (c.ad_groups||[])){
@@ -1225,7 +1171,6 @@ export function buildSocialReport(data: SocialOverview): string {
 
 export function buildAdsReport(data: AdsOverview): string {
 	const ads = data.google_ads;
-	const live = data.live_account;
 	let body = `<h2>Connection status</h2>`;
 	if (ads.connected) {
 		body += `<p><strong>Google Ads</strong> <span class="tag">Connected</span></p><p>${escHtml(ads.note)}</p>`;
@@ -1237,29 +1182,8 @@ export function buildAdsReport(data: AdsOverview): string {
 	if (ads.error) {
 		body += `<p>Error: ${escHtml(ads.error)}</p>`;
 	}
-	if (live.available) {
-		body += `<h2>LIVE GOOGLE ADS ACCOUNT</h2>`;
-		body += `<p class="note">Real data from account ${escHtml(live.customer_id)}, last 30 days. Read-only; the machine never changes campaigns.</p>`;
-		if (live.error) {
-			body += `<p><strong>Account data</strong> <span class="tag-warn">Read error</span></p><p>Could not read account data: ${escHtml(live.error)}</p>`;
-		} else if (live.campaigns.length === 0) {
-			body += `<p>No campaigns found in the connected Google Ads account.</p>`;
-		} else {
-			body += `<table><thead><tr><th>Campaign</th><th>Status</th><th>Budget/day</th><th>Impr.</th><th>Clicks</th><th>Conv.</th><th>Spend</th></tr></thead><tbody>`;
-			for (const c of live.campaigns) {
-				body += `<tr><td><strong>${escHtml(c.name)}</strong></td>` +
-					`<td><span class="${c.status === "ENABLED" ? "tag" : "tag-warn"}">${escHtml(c.status)}</span></td>` +
-					`<td>$${c.daily_budget_usd.toFixed(2)}</td>` +
-					`<td>${escHtml(c.impressions)}</td>` +
-					`<td>${escHtml(c.clicks)}</td>` +
-					`<td>${escHtml(c.conversions)}</td>` +
-					`<td>$${c.cost_usd.toFixed(2)}</td></tr>`;
-			}
-			body += `</tbody></table>`;
-		}
-	}
 	body += `<p><strong>Google Analytics</strong> <span class="tag-warn">Not set up</span></p><p>${escHtml(data.google_analytics.note)}</p>`;
-	body += `<h2>PLANNED / NOT CREATED</h2>`;
+	body += `<h2>Planned campaigns (machine spec — not live in any account)</h2>`;
 	body += `<p class="note">Prepared under Google Ad Grants policy. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any advertising account yet.</p>`;
 	for (const c of data.planned_campaigns) {
 		body += `<h3>${escHtml(c.name)} <span class="tag-warn">${escHtml(c.status_in_account)}</span></h3>`;

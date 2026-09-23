@@ -132,44 +132,6 @@ describe("new screens (ADR-0027/0028): valid inline scripts", () => {
 });
 
 describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
-	// ADR-0030: stub Google Ads account readers. The account reader is
-	// injectable so these tests never touch Google or D1.
-	const liveCampaignsReader = async () => ({
-		ok: true,
-		customer_id: "6758500147",
-		date_range: "LAST_30_DAYS",
-		campaigns: [
-			{ id: "111", name: "NWANA 5K race, September 27", status: "ENABLED", daily_budget_usd: 10.97, impressions: 120, clicks: 9, conversions: 0, cost_usd: 122.89 },
-			{ id: "222", name: "NWANA 2026 Series", status: "PAUSED", daily_budget_usd: 10.97, impressions: 200, clicks: 13, conversions: 1, cost_usd: 126.08 },
-		],
-	});
-	const emptyAccountReader = async () => ({
-		ok: true,
-		customer_id: "6758500147",
-		date_range: "LAST_30_DAYS",
-		campaigns: [] as Array<{
-			id: string; name: string; status: string; daily_budget_usd: number;
-			impressions: number; clicks: number; conversions: number; cost_usd: number;
-		}>,
-	});
-	const failingAccountReader = async () => ({
-		ok: false,
-		customer_id: "6758500147",
-		date_range: "LAST_30_DAYS",
-		campaigns: [] as Array<{
-			id: string; name: string; status: string; daily_budget_usd: number;
-			impressions: number; clicks: number; conversions: number; cost_usd: number;
-		}>,
-		error: "REQUEST_ERROR: Unrecognized field in the query.",
-	});
-	const connectedStatusReader = async () => ({
-		ok: true,
-		connected: true,
-		configured: true,
-		access_level: "EXPLORER" as const,
-		customers: ["customers/6758500147"],
-		execution_allowed: false as const,
-	});
 	it("sites: lists all 7 properties, analytics honestly not connected", () => {
 		const data = getSitesOverview();
 		expect(data.sites).toHaveLength(7);
@@ -194,7 +156,6 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		// ADR-0029 regression: the ADR-0027 screen hardcoded "Not connected"
 		// even though the live integration was connected. The status reader
 		// is injectable so the test never touches Google.
-		// ADR-0030: the account reader is injectable too; stubbed below.
 		const connectedReader = async () => ({
 			ok: true,
 			connected: true,
@@ -203,7 +164,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 			customers: ["customers/6758500147"],
 			execution_allowed: false as const,
 		});
-		const data = await getAdsOverview({} as GoogleAdsEnv, connectedReader, emptyAccountReader);
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedReader);
 		expect(data.google_ads.connected).toBe(true);
 		expect(data.google_ads.configured).toBe(true);
 		expect(data.google_ads.access_level).toBe("EXPLORER");
@@ -237,7 +198,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 			execution_allowed: false as const,
 			error: "invalid_grant: Token has been expired or revoked.",
 		});
-		const data = await getAdsOverview({} as GoogleAdsEnv, errorReader, emptyAccountReader);
+		const data = await getAdsOverview({} as GoogleAdsEnv, errorReader);
 		expect(data.google_ads.connected).toBe(false);
 		expect(data.google_ads.error).toContain("invalid_grant");
 		expect(data.google_ads.note).toContain("invalid_grant");
@@ -255,61 +216,11 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 			execution_allowed: false as const,
 			missing_configuration: ["GOOGLE_ADS_CLIENT_ID"],
 		});
-		const data = await getAdsOverview({} as GoogleAdsEnv, missingReader, emptyAccountReader);
+		const data = await getAdsOverview({} as GoogleAdsEnv, missingReader);
 		expect(data.google_ads.connected).toBe(false);
 		expect(data.google_ads.note).toContain("GOOGLE_ADS_CLIENT_ID");
 		const report = buildAdsReport(data);
 		expect(report).toContain("GOOGLE_ADS_CLIENT_ID");
-	});
-
-	it("ads: live account block shows real campaigns, planned stays separate", async () => {
-		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, liveCampaignsReader);
-		expect(data.live_account.available).toBe(true);
-		expect(data.live_account.customer_id).toBe("6758500147");
-		expect(data.live_account.date_range).toBe("LAST_30_DAYS");
-		expect(data.live_account.campaigns).toHaveLength(2);
-		const five = data.live_account.campaigns[0];
-		expect(five.name).toBe("NWANA 5K race, September 27");
-		expect(five.status).toBe("ENABLED");
-		expect(five.daily_budget_usd).toBeCloseTo(10.97);
-		expect(five.impressions).toBe(120);
-		expect(five.clicks).toBe(9);
-		expect(five.conversions).toBe(0);
-		expect(five.cost_usd).toBeCloseTo(122.89);
-		// Live campaigns are never mixed with the planned spec.
-		const plannedNames = data.planned_campaigns.map((c) => c.name);
-		for (const c of data.live_account.campaigns) {
-			expect(plannedNames).not.toContain(c.name);
-		}
-		const report = buildAdsReport(data);
-		expect(report).toContain("LIVE GOOGLE ADS ACCOUNT");
-		expect(report).toContain("NWANA 5K race, September 27");
-		expect(report).toContain("PLANNED / NOT CREATED");
-		// The screen renders the same live block client-side.
-		expect(renderAdsHtml()).toContain("LIVE GOOGLE ADS ACCOUNT");
-		expect(renderAdsHtml()).toContain("No campaigns found in the connected Google Ads account.");
-	});
-
-	it("ads: empty account renders the honest empty state", async () => {
-		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
-		expect(data.live_account.available).toBe(true);
-		expect(data.live_account.campaigns).toHaveLength(0);
-		expect(data.live_account.error).toBeUndefined();
-		const report = buildAdsReport(data);
-		expect(report).toContain("No campaigns found in the connected Google Ads account.");
-	});
-
-	it("ads: account-read error is shown separately from connection state", async () => {
-		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, failingAccountReader);
-		// The connection stays connected: the failure is in the account read.
-		expect(data.google_ads.connected).toBe(true);
-		expect(data.live_account.available).toBe(true);
-		expect(data.live_account.error).toContain("Unrecognized field");
-		// No invented zeros: the campaign list stays empty, not zero-filled.
-		expect(data.live_account.campaigns).toHaveLength(0);
-		const report = buildAdsReport(data);
-		expect(report).toContain("Read error");
-		expect(report).toContain("Unrecognized field");
 	});
 
 	it("sellers: real pipeline, Integrity 9 call dated, Zubie Five answers honest", () => {
@@ -388,14 +299,7 @@ describe("reports (ADR-0027/0028): external-safe HTML documents", () => {
 	const cases: Array<[string, () => string | Promise<string>]> = [
 		["sites", () => buildSitesReport(getSitesOverview())],
 		["social", () => buildSocialReport(getSocialOverview())],
-		["ads", async () => buildAdsReport(await getAdsOverview({} as GoogleAdsEnv, connectedAdsReader, async () => ({
-			ok: true,
-			customer_id: "6758500147",
-			date_range: "LAST_30_DAYS",
-			campaigns: [
-				{ id: "111", name: "NWANA 5K race, September 27", status: "ENABLED", daily_budget_usd: 10.97, impressions: 120, clicks: 9, conversions: 0, cost_usd: 122.89 },
-			],
-		})))],
+		["ads", async () => buildAdsReport(await getAdsOverview({} as GoogleAdsEnv, connectedAdsReader))],
 		["sellers", () => buildSellersReport(getSellersOverview())],
 		["partners", () => buildPartnersReport(getPartnersOverview())],
 		["groups", () => buildGroupsReport(getGroupsOverview())],
