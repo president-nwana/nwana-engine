@@ -56,11 +56,21 @@ export interface SourceObjectLink {
 }
 
 /**
+ * Where a Google Ads proposal comes from.
+ *
+ * OBJECT_DERIVED: the proposal exists because an NWANA object drives it
+ * (source_object is required).
+ *
+ * OWNER_DIRECTIVE: the proposal exists because the owner directly ordered
+ * it. A prior distribution rule and a source object are not required.
+ */
+export type ProposalOrigin = "OBJECT_DERIVED" | "OWNER_DIRECTIVE";
+
+/**
  * Bridge between the Distribution Planner and a Google Ads proposal.
- * A proposal exists only when a real distribution action backs it:
- * action_type = GOOGLE_ADS_CAMPAIGN, channel = GOOGLE_ADS_GRANT.
- * Every field comes from a real distribution rule/action; a missing
- * action is never fabricated.
+ * Provenance metadata only: a proposal's eligibility never depends on
+ * the presence of a distribution rule. Every field comes from a real
+ * distribution rule/action; a missing action is never fabricated.
  */
 export interface DistributionLink {
 	/** Real action id from the distribution rules seed, or null. */
@@ -69,11 +79,6 @@ export interface DistributionLink {
 	rule_id: string | null;
 	/** Real channel from the distribution action, or null. */
 	channel: string | null;
-	/**
-	 * True only when a real Google Ads distribution action backs this
-	 * proposal. Actual creation still requires owner review.
-	 */
-	creation_eligible: boolean;
 }
 
 export interface CampaignSpec {
@@ -91,10 +96,16 @@ export interface CampaignSpec {
 	 */
 	source_object: SourceObjectLink | null;
 	/**
-	 * Distribution-planner backing for this proposal. Declared only
-	 * from real distribution rules/actions (see migrations/0006).
+	 * Distribution-planner backing for this proposal. Provenance
+	 * metadata only (see migrations/0006); eligibility never depends
+	 * on it.
 	 */
 	distribution: DistributionLink;
+	/**
+	 * Where this proposal comes from. Null/unknown origin always
+	 * means not eligible.
+	 */
+	origin: ProposalOrigin | null;
 	/** The script creates every campaign paused. Hardcoded true, not a spec field. */
 }
 
@@ -120,6 +131,46 @@ export const AD_GRANTS_POLICY = {
 } as const;
 
 const NWANA_PREFIX = "NWANA \u00b7 ";
+
+/** Most common final URL across all ads; the campaign's target URL. */
+export function proposalTargetUrl(spec: CampaignSpec): string {
+	const counts = new Map<string, number>();
+	for (const group of spec.ad_groups) {
+		for (const ad of group.ads) {
+			counts.set(ad.final_url, (counts.get(ad.final_url) ?? 0) + 1);
+		}
+	}
+	let best = "";
+	let bestCount = -1;
+	for (const [url, count] of counts) {
+		if (count > bestCount) {
+			best = url;
+			bestCount = count;
+		}
+	}
+	return best;
+}
+
+/**
+ * A proposal is creation-eligible when it has a valid HTTPS target URL,
+ * passes the Ad Grants policy validator with zero violations, and its
+ * origin is known: OBJECT_DERIVED with a real source object, or
+ * OWNER_DIRECTIVE. Distribution provenance never affects eligibility.
+ * Actual creation still requires owner review.
+ */
+export function isCreationEligible(campaign: CampaignSpec): boolean {
+	const origin = campaign.origin;
+	const originOk =
+		(origin === "OBJECT_DERIVED" && campaign.source_object !== null) ||
+		origin === "OWNER_DIRECTIVE";
+	if (!originOk) {
+		return false;
+	}
+	if (!/^https:\/\//.test(proposalTargetUrl(campaign))) {
+		return false;
+	}
+	return validateCampaignSpec(campaign).length === 0;
+}
 
 export function validateCampaignSpec(spec: CampaignSpec): string[] {
 	const violations: string[] = [];
@@ -203,12 +254,13 @@ function series2026Campaign(): CampaignSpec {
 		// Real distribution backing (migrations/0006-seed-core-distribution-rules.sql):
 		// ACT-SERIES-HUB-GOOGLE-ADS, action_type GOOGLE_ADS_CAMPAIGN,
 		// channel GOOGLE_ADS_GRANT, rule RULE-OPEN-SERIES-HUB.
+		// Provenance metadata only; eligibility never depends on it.
 		distribution: {
 			action_id: "ACT-SERIES-HUB-GOOGLE-ADS",
 			rule_id: "RULE-OPEN-SERIES-HUB",
 			channel: "GOOGLE_ADS_GRANT",
-			creation_eligible: true,
 		},
+		origin: "OBJECT_DERIVED",
 		daily_budget: 200,
 		geo_target_id: 2840,
 		ad_groups: [
@@ -322,14 +374,15 @@ function foundingCircleCampaign(): CampaignSpec {
 		source_object: null,
 		// No confirmed Google Ads distribution action exists for the
 		// Founding Circle: migrations/0006 contains no GOOGLE_ADS
-		// action outside ACT-SERIES-HUB-GOOGLE-ADS. Nulls are honest;
-		// nothing is fabricated to fill them.
+		// action outside ACT-SERIES-HUB-GOOGLE-ADS. Provenance stays
+		// null; nothing is fabricated to fill it. This proposal exists
+		// by direct owner directive, so no prior rule is required.
 		distribution: {
 			action_id: null,
 			rule_id: null,
 			channel: null,
-			creation_eligible: false,
 		},
+		origin: "OWNER_DIRECTIVE",
 		daily_budget: 100,
 		geo_target_id: 2840,
 		ad_groups: [
