@@ -105,8 +105,8 @@ describe("Ad Grants policy guardrails", () => {
 });
 
 describe("machine desired state", () => {
-	it("builds a policy-compliant state with one campaign per object", () => {
-		const state = buildDesiredState();
+	it("builds a policy-compliant state with one campaign per object", async () => {
+		const state = await buildDesiredState(null);
 		expect(state.campaigns.length).toBe(2);
 		expect(validateDesiredState(state)).toEqual([]);
 		const names = state.campaigns.map((campaign) => campaign.name);

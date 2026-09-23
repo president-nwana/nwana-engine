@@ -67,6 +67,32 @@ SOURCE / OWNER TASK
   Series conflict branch is deleted; the Series verified mapping lives in
   `VERIFIED_CONFLICT_MAPPINGS` in `google-ads-proposals.ts` as data.
 
+## Amendment 2026-09-23: factual partial intents and D1-backed production feed
+
+- `GOOGLE_ADS_CHANNEL_INPUTS` is no longer an eligibility gate. A decided
+  source without channel inputs produces a factual partial intent built only
+  from confirmed facts (identity, factual name, purpose, confirmed target
+  URL, source facts); missing campaign fields stay `null`/empty, nothing is
+  invented. Such incomplete intents reach the ADR-0031 proposal engine as
+  `INSUFFICIENT_INPUT` with the exact missing fields, and they are skipped
+  in the reconcile-facing desired state (they stay visible as proposals).
+- `orchestrationGoogleAdsIntents(db)` is async and uses
+  `collectSources(db)` (static plus D1-backed sources), so D1-backed
+  canonical sources participate in the production proposal pipeline. Feed
+  entries are deduped by proposal identity; when two decisions resolve to
+  one proposal, the stronger evidence wins
+  (`OWNER_DIRECTIVE > DISTRIBUTION_ACTION > DISTRIBUTION_RULE >
+  GENERIC_RULE`); the feed order follows the winning decision's
+  `decision_id`, so adding generic-rule decisions never reorders existing
+  intents. `currentProposalIntents(db)` and `buildDesiredState(db)` are
+  async; all production callers were updated.
+- `RULE_DERIVED_ASSET` was added to `IntentSourceKind` with the
+  `adaptRuleDerivedAsset()` adapter so rule-derived assets travel the same
+  factual path (partial or complete).
+- `evidenceBundle()` now includes the committed generic rules; the
+  `GENERIC_RULE` evidence kind is a first-class evidence reference in
+  proposals.
+
 ## Non-goals
 
 No orchestration/channel-decision layer, no external paid AI/API, no
