@@ -699,6 +699,13 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Do not infer that source_id 209464 is a race.
 - Do not treat REGISTRATION as active for 209464: it is platform-available but hidden, unconfigured for NWANA use, and not a public conversion path.
 
+## ADR-0030 — ADS SCREEN SHOWS THE REAL LIVE ACCOUNT, READ-ONLY (2026-09-23)
+
+- `src/google-ads.ts` gains `getGoogleAdsAccountSnapshot()`: one bounded read-only GAQL request per call via the existing OAuth integration (no mutations, no polling, nothing written to D1). It returns per-campaign name, status, daily budget, impressions, clicks, conversions, cost for `DURING LAST_30_DAYS`, excluding REMOVED campaigns, from `customers/6758500147`.
+- `/operating-center/ads` now has a `LIVE GOOGLE ADS ACCOUNT` block with the real campaigns. Empty account shows "No campaigns found in the connected Google Ads account." A read failure shows the real error separately from the connection state; no invented zeros. `PLANNED / NOT CREATED` stays below, never mixed with live campaigns. The downloadable report carries the same live snapshot.
+- Regression tests in `test/operating-center-screens.spec.ts`: real campaigns returned, empty account, account-read error, planned-vs-live separation.
+- No campaigns created or changed, execution/mutation stays disabled, OAuth credentials untouched, Google Analytics untouched, no other screens modified, no cron/polling. ADR: `docs/adr/ADR-0030-ads-live-account-view.md`.
+
 ## ADR-0029 — ADS SCREEN READS THE LIVE GOOGLE ADS INTEGRATION (2026-09-23)
 
 - The ADR-0027 Ads screen hardcoded `google_ads.connected = false` ("Not connected. The owner login ... is not established"), which contradicted the verified integration state (GOOGLE ADS API — VERIFIED 2026-09-19: connected=true, access_level=EXPLORER, customers/6758500147). That stale state is fixed: `/operating-center/ads` and its downloadable report now read the existing live integration via `getGoogleAdsStatus()` (`src/google-ads.ts`).
