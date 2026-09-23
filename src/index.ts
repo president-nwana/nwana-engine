@@ -26,7 +26,7 @@ import {
         googleAdsAuthorizationUrl,
         handleGoogleAdsCallback,
 } from "./google-ads";
-import { buildDesiredState } from "./google-ads-state";
+import { buildDesiredState } from "./google-ads-current";
 import {
 	advanceFundProspect,
 	getFundView,

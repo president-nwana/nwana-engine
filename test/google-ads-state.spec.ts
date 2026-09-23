@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
 	AD_GRANTS_POLICY,
-	buildDesiredState,
 	validateCampaignSpec,
 	validateDesiredState,
 	type CampaignSpec,
 } from "../src/google-ads-state";
+import { buildDesiredState } from "../src/google-ads-current";
 
 function validCampaign(): CampaignSpec {
 	return {
