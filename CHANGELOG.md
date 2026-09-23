@@ -1,14 +1,5 @@
 # NWANA Engine Changelog
 
-## 2026-09-23 — Every operating-center panel gets its own screen (ADR-0026)
-
-- The main `/operating-center` page was overloaded on the owner's phone. Every panel now has its own screen; the main page is a dashboard of summary cards only.
-- New page `/operating-center/sponsorship`: the full generate form, the asset list with package details (audience, delivers, reference pricing, next action), and per-asset "Move to <stage>" buttons against the existing `/api/operating-center/sponsorship-assets/advance` endpoint. The main page keeps only a compact card: asset counts by stage + "Open sponsorship →".
-- New page `/operating-center/activity`: the full feed moved verbatim off the main page - "Requires reading" with "Mark as read" buttons and "What is new" (30 newest items). The main page keeps only a compact card: requires-reading count (highlighted when nonzero) + 3 newest headlines + "Open activity →".
-- The shared button menu grows to 8: Overview, Results, Funds, Media, Board, Uploads, Sponsorship, Activity - under the header on every operating-center page, current page marked with `aria-current="page"`.
-- No migration, no new API endpoints, no auth change (new GET page routes added to the public-HTML allowlist next to the other page routes; APIs still 401 without the owner key).
-- Verified: Vitest 217/217 (12 new tests in `test/operating-center-split.spec.ts`), TypeScript clean, `new Function` script-parse regression tests for both new pages.
-
 ## 2026-09-23 — Self-running weekly Board loop (ADR-0025)
 
 - The Board cycle now runs itself: migration 0031 adds `board_settings` holding the meeting cadence (weekly, Sunday, 14:00, America/New_York, "Weekly Board meeting"); `getBoardCadence()` reads it with the same values as code defaults when the table is missing.
