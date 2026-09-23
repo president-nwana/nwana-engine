@@ -6298,7 +6298,7 @@ export default {
 
 		if (request.method === "GET" && url.pathname === "/api/operating-center/google-ads/desired-state") {
 			try {
-				return json({ ok: true, ...buildDesiredState() });
+				return json({ ok: true, ...(await buildDesiredState(env.nwana_engine_db)) });
 			} catch (error) {
 				return json({ ok: false, error: error instanceof Error ? error.message : "Desired state failed" }, 500);
 			}
