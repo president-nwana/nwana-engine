@@ -31,6 +31,7 @@ import {
 	REPORT_SCREENS,
 } from "../src/operating-center-screens";
 import type { GoogleAdsEnv } from "../src/google-ads";
+import { buildLiveCampaignsQuery } from "../src/google-ads";
 
 function extractScripts(html: string): string[] {
 	return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
@@ -299,8 +300,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		expect(report).toContain("No campaigns found in the connected Google Ads account.");
 	});
 
-	it("ads: account-read error is shown separately from connection state", async () => {
-		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, failingAccountReader);
+	it("ads: account-read error is shown separately from connection state", async () => {		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, failingAccountReader);
 		// The connection stays connected: the failure is in the account read.
 		expect(data.google_ads.connected).toBe(true);
 		expect(data.live_account.available).toBe(true);
@@ -310,6 +310,27 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		const report = buildAdsReport(data);
 		expect(report).toContain("Read error");
 		expect(report).toContain("Unrecognized field");
+	});
+
+	it("ads: live GAQL query filters the date range via segments.date", () => {
+		// GAQL requires the date range as a condition on segments.date;
+		// a bare DURING clause after FROM is invalid syntax.
+		const q = buildLiveCampaignsQuery();
+		expect(q).toContain("segments.date DURING LAST_30_DAYS");
+		expect(q).toContain("FROM campaign");
+		expect(q).toContain("WHERE campaign.status != 'REMOVED'");
+		for (const field of [
+			"campaign.id",
+			"campaign.name",
+			"campaign.status",
+			"campaign_budget.amount_micros",
+			"metrics.impressions",
+			"metrics.clicks",
+			"metrics.conversions",
+			"metrics.cost_micros",
+		]) {
+			expect(q).toContain(field);
+		}
 	});
 
 	it("sellers: real pipeline, Integrity 9 call dated, Zubie Five answers honest", () => {
