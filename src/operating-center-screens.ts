@@ -10,7 +10,7 @@
 
 import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
 import { getFundView } from "./fund";
-import { buildDesiredState, validateCampaignSpec, type CampaignSpec, type DesiredState } from "./google-ads-state";
+import { buildDesiredState, validateCampaignSpec, type CampaignSpec, type DesiredState, type SourceObjectLink } from "./google-ads-state";
 // ADR-0029: the Ads screen reads the real Google Ads connection state from
 // the existing live integration (src/google-ads.ts), never a hardcoded flag.
 // ADR-0030: the screen is a read-only operational view of the real account:
@@ -274,8 +274,8 @@ export interface MachineProposal {
 	next_action: string;
 	daily_budget: number;
 	target_url: string;
-	/** Present only if the current spec really carries a source; never invented. */
-	source: string | null;
+	/** Real source object from the spec, or null when not yet linked (never fabricated). */
+	source_object: SourceObjectLink | null;
 	ad_groups: MachineProposalAdGroup[];
 	/** Result of the existing Ad Grants policy validator (validateCampaignSpec). */
 	policy_violations: string[];
@@ -305,7 +305,7 @@ function proposalTargetUrl(spec: CampaignSpec): string {
 	return best;
 }
 
-function buildMachineProposals(
+export function buildMachineProposals(
 	spec: DesiredState,
 	liveCampaigns: GoogleAdsLiveCampaign[],
 ): MachineProposal[] {
@@ -330,7 +330,7 @@ function buildMachineProposals(
 			next_action: nextAction,
 			daily_budget: campaign.daily_budget,
 			target_url: proposalTargetUrl(campaign),
-			source: null,
+			source_object: campaign.source_object,
 			ad_groups: campaign.ad_groups.map((g) => ({
 				name: g.name,
 				default_cpc: g.default_cpc,
@@ -456,7 +456,8 @@ const ADS_SCRIPT = `
 				const st=p.status==='PROPOSED'?'<span class="badge-ok">'+esc(p.status)+'</span>':'<span class="badge-warn">'+esc(p.status)+'</span>';
 				html+='<div class="item"><strong>'+esc(p.name)+' '+st+'</strong>'
 					+'<div class="meta">Budget: $'+Number(p.daily_budget).toFixed(2)+'/day &middot; Target: '+esc(p.target_url)+'</div>';
-				if(p.source){html+='<div class="meta">Source: '+esc(p.source)+'</div>';}
+				if(p.source_object){html+='<div class="meta">Source object: '+esc(p.source_object.title)+' ('+esc(p.source_object.object_id)+', '+esc(p.source_object.object_type)+')</div>';}
+				else{html+='<div class="meta">Source object: not yet linked</div>';}
 				for(const g of (p.ad_groups||[])){
 					const kws=(g.keywords||[]).map(function(k){return esc(k.text)+' ('+esc(k.match_type)+')';}).join(', ');
 					html+='<div class="detail"><b>'+esc(g.name)+':</b> max CPC $'+Number(g.default_cpc).toFixed(2)+', '+g.ads_count+' ads<br>Keywords: '+kws+'</div>';
@@ -1359,8 +1360,10 @@ export function buildAdsReport(data: AdsOverview): string {
 	for (const p of data.machine_proposals) {
 		body += `<h3>${escHtml(p.name)} <span class="${p.status === "PROPOSED" ? "tag" : "tag-warn"}">${escHtml(p.status)}</span></h3>`;
 		body += `<p>Daily budget: $${p.daily_budget.toFixed(2)}; target URL: ${escHtml(p.target_url)}</p>`;
-		if (p.source) {
-			body += `<p>Source: ${escHtml(p.source)}</p>`;
+		if (p.source_object) {
+			body += `<p>Source object: ${escHtml(p.source_object.title)} (${escHtml(p.source_object.object_id)}, ${escHtml(p.source_object.object_type)})</p>`;
+		} else {
+			body += `<p>Source object: not yet linked</p>`;
 		}
 		for (const g of p.ad_groups) {
 			const kws = g.keywords.map((k) => `${escHtml(k.text)} (${escHtml(k.match_type)})`).join(", ");
