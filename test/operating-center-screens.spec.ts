@@ -369,32 +369,43 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
 		const series = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
 		expect(series).toBeDefined();
-		// Real object from the existing object model (registry/objects.yaml):
-		// the 2026 NWANA Open Nordic Walking Series public hub.
+		// Only the real object_id from registry/objects.yaml. The record
+		// has no formal object_type or title fields, so those stay null.
 		expect(series!.source_object).toEqual({
 			object_id: "NWANA-RACE-000001",
-			object_type: "SERIES_PUBLIC_HUB",
-			title: "2026 NWANA Open Nordic Walking Series",
+			object_type: null,
+			title: null,
 		});
-		const report = buildAdsReport(data);
-		expect(report).toContain("NWANA-RACE-000001");
-		expect(report).toContain("2026 NWANA Open Nordic Walking Series");
 	});
 
-	it("ads: Founding Circle proposal resolves to the real fundraising object", async () => {
+	it("ads: inferred registry purpose is not silently promoted to object_type", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const series = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
+		expect(series!.source_object!.object_id).toBe("NWANA-RACE-000001");
+		expect(series!.source_object!.object_type).not.toBe("SERIES_PUBLIC_HUB");
+		expect(series!.source_object!.object_type).toBeNull();
+	});
+
+	it("ads: missing title/type remains absent, never invented", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const series = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
+		expect(series!.source_object!.title).toBeNull();
+		const report = buildAdsReport(data);
+		expect(report).toContain("Source object: NWANA-RACE-000001");
+		expect(report).not.toContain("SERIES_PUBLIC_HUB");
+	});
+
+	it("ads: Founding Circle stays unlinked without an explicit relationship", async () => {
 		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
 		const fc = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Founding Circle \u00b7 Donate");
 		expect(fc).toBeDefined();
-		// Real object from the existing object model: the live fundraising
-		// object in production D1 (funds table, ADR-0015).
-		expect(fc!.source_object).toEqual({
-			object_id: "fund-50k-bridge-sprint",
-			object_type: "fund",
-			title: "$50K Manhattan HQ Bridge Sprint",
-		});
+		// No explicit confirmed relationship exists between the Founding
+		// Circle proposal and fund-50k-bridge-sprint (relationships table
+		// empty, fund metadata silent, ADR-0015 silent), so no linkage.
+		expect(fc!.source_object).toBeNull();
 		const report = buildAdsReport(data);
-		expect(report).toContain("fund-50k-bridge-sprint");
-		expect(report).toContain("$50K Manhattan HQ Bridge Sprint");
+		expect(report).toContain("Source object: not yet linked");
+		expect(report).not.toContain("fund-50k-bridge-sprint");
 	});
 
 	it("ads: missing source object stays null instead of being fabricated", async () => {
