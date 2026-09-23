@@ -704,6 +704,7 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - `src/google-ads.ts` gains `getGoogleAdsAccountSnapshot()`: one bounded read-only GAQL request per call via the existing OAuth integration (no mutations, no polling, nothing written to D1). It returns per-campaign name, status, daily budget, impressions, clicks, conversions, cost for `DURING LAST_30_DAYS`, excluding REMOVED campaigns, from `customers/6758500147`.
 - `/operating-center/ads` now has a `LIVE GOOGLE ADS ACCOUNT` block with the real campaigns. Empty account shows "No campaigns found in the connected Google Ads account." A read failure shows the real error separately from the connection state; no invented zeros. `PLANNED / NOT CREATED` stays below, never mixed with live campaigns. The downloadable report carries the same live snapshot.
 - Regression tests in `test/operating-center-screens.spec.ts`: real campaigns returned, empty account, account-read error, planned-vs-live separation.
+- Bugfix 2026-09-23 (same ADR, no architecture change): the GAQL query used an invalid bare `DURING LAST_30_DAYS` clause; fixed to `AND segments.date DURING LAST_30_DAYS`. Regression test pins the exact query shape and the unchanged field list.
 - No campaigns created or changed, execution/mutation stays disabled, OAuth credentials untouched, Google Analytics untouched, no other screens modified, no cron/polling. ADR: `docs/adr/ADR-0030-ads-live-account-view.md`.
 
 ## ADR-0029 — ADS SCREEN READS THE LIVE GOOGLE ADS INTEGRATION (2026-09-23)
