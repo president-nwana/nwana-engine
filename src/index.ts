@@ -5735,7 +5735,8 @@ export default {
 					url.pathname === "/operating-center/partners" ||
 					url.pathname === "/operating-center/fundraising" ||
 					url.pathname === "/operating-center/groups" ||
-					url.pathname === "/operating-center/meetings")
+					url.pathname === "/operating-center/meetings" ||
+					url.pathname === "/operating-center/operations")
 			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
