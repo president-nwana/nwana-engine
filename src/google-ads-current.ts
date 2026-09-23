@@ -16,7 +16,6 @@ import {
 	type DesiredState,
 } from "./google-ads-state";
 import {
-	proposalIdentity,
 	type NormalizedCampaignIntent,
 } from "./google-ads-intent";
 import { buildCampaignSpecFromIntent } from "./google-ads-proposals";
@@ -25,27 +24,34 @@ import { orchestrationGoogleAdsIntents } from "./orchestration-google-ads";
 /**
  * Thin projection of the orchestration output. No manual campaign list:
  * which intents exist is decided by orchestration evidence, not by this
- * module.
+ * module. D1-backed canonical sources flow into the same feed; `db`
+ * may be null (for example in tests), then only static sources feed it.
  */
-export function currentProposalIntents(): NormalizedCampaignIntent[] {
-	return orchestrationGoogleAdsIntents();
+export async function currentProposalIntents(
+	db: D1Database | null,
+): Promise<NormalizedCampaignIntent[]> {
+	return orchestrationGoogleAdsIntents(db);
 }
 
 /**
  * Reconcile-facing desired state, built from the current intents
- * through the generic builder. Output is identical to the previous
- * hardcoded builders: same campaign names, budgets, geo, ad groups,
+ * through the generic builder. Partial intents (INSUFFICIENT_INPUT)
+ * stay visible as proposals but never enter the reconcile-facing
+ * desired state: only fully buildable campaign specs are desired.
+ * Output is identical to the previous hardcoded builders for the
+ * existing full intents: same campaign names, budgets, geo, ad groups,
  * keywords, ads, and sitelinks.
  */
-export function buildDesiredState(): DesiredState {
+export async function buildDesiredState(db: D1Database | null): Promise<DesiredState> {
 	const campaigns: CampaignSpec[] = [];
-	for (const intent of currentProposalIntents()) {
+	for (const intent of await currentProposalIntents(db)) {
 		const built = buildCampaignSpecFromIntent(intent);
 		if (!built.ok) {
-			throw new Error(
-				`Google Ads desired state: intent ${proposalIdentity(intent)} ` +
-				`has insufficient input: ${built.missing_fields.join(", ")}`,
-			);
+			// Partial intent: proposal-visible (INSUFFICIENT_INPUT with
+			// the exact missing fields), but not a creatable campaign,
+			// so it is excluded from the desired state rather than
+			// failing the whole feed.
+			continue;
 		}
 		campaigns.push(built.spec);
 	}
