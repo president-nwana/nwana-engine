@@ -33,8 +33,8 @@ const SERIES_PROPOSAL_ID = "OBJECT_DERIVED:NWANA-RACE-000001:VIRTUAL_RACES";
 const FC_PROPOSAL_ID = "OWNER_DIRECTIVE:DIR-FOUNDING-CIRCLE-2026:FOUNDING_CIRCLE";
 
 describe("adapters", () => {
-	it("adapts the Series registry object to a normalized intent", async () => {
-		const intents = await currentProposalIntents(null);
+	it("adapts the Series registry object to a normalized intent", () => {
+		const intents = currentProposalIntents();
 		const series = intents[0];
 		expect(series.source_kind).toBe("REGISTRY_OBJECT");
 		expect(series.origin).toBe("OBJECT_DERIVED");
@@ -52,8 +52,8 @@ describe("adapters", () => {
 		expect(proposalIdentity(series)).toBe(SERIES_PROPOSAL_ID);
 	});
 
-	it("adapts the Founding Circle owner directive to a normalized intent", async () => {
-		const intents = await currentProposalIntents(null);
+	it("adapts the Founding Circle owner directive to a normalized intent", () => {
+		const intents = currentProposalIntents();
 		const fc = intents[1];
 		expect(fc.source_kind).toBe("OWNER_DIRECTIVE");
 		expect(fc.origin).toBe("OWNER_DIRECTIVE");
@@ -142,8 +142,8 @@ describe("adapters", () => {
 });
 
 describe("deterministic proposal identity", () => {
-	it("is origin:source_identity:purpose with no timestamps or randomness", async () => {
-		const intents = await currentProposalIntents(null);
+	it("is origin:source_identity:purpose with no timestamps or randomness", () => {
+		const intents = currentProposalIntents();
 		const a = proposalIdentity(intents[0]);
 		const b = proposalIdentity(intents[0]);
 		expect(a).toBe(b);
@@ -156,21 +156,21 @@ describe("deterministic proposal identity", () => {
 describe("generic campaign builder", () => {
 	it("builds the Series spec byte-identical to the former hardcoded builder", async () => {
 		const { buildDesiredState } = await import("../src/google-ads-current");
-		const intents = await currentProposalIntents(null);
+		const intents = currentProposalIntents();
 		const built = buildCampaignSpecFromIntent(intents[0]);
 		expect(built.ok).toBe(true);
 		if (!built.ok) throw new Error(built.missing_fields.join(","));
-		const state = await buildDesiredState(null);
+		const state = buildDesiredState();
 		expect(built.spec).toEqual(state.campaigns[0]);
 	});
 
 	it("builds the Founding Circle spec byte-identical to the former hardcoded builder", async () => {
 		const { buildDesiredState } = await import("../src/google-ads-current");
-		const intents = await currentProposalIntents(null);
+		const intents = currentProposalIntents();
 		const built = buildCampaignSpecFromIntent(intents[1]);
 		expect(built.ok).toBe(true);
 		if (!built.ok) throw new Error(built.missing_fields.join(","));
-		const state = await buildDesiredState(null);
+		const state = buildDesiredState();
 		expect(built.spec).toEqual(state.campaigns[1]);
 	});
 
@@ -209,8 +209,8 @@ describe("state precedence", () => {
 		expect(p.next_action).toContain("Supply the missing factual input");
 	});
 
-	it("policy violations beat conflict and proposed: POLICY_REVIEW", async () => {
-		const intents = await currentProposalIntents(null);
+	it("policy violations beat conflict and proposed: POLICY_REVIEW", () => {
+		const intents = currentProposalIntents();
 		const broken: NormalizedCampaignIntent = {
 			...intents[1],
 			campaign_name_hint: "Generic Campaign Without Namespace",
@@ -221,8 +221,8 @@ describe("state precedence", () => {
 		expect(p.next_action).toContain("policy");
 	});
 
-	it("a confirmed live conflict beats proposed: POSSIBLE DUPLICATE / REVIEW", async () => {
-		const intents = await currentProposalIntents(null);
+	it("a confirmed live conflict beats proposed: POSSIBLE DUPLICATE / REVIEW", () => {
+		const intents = currentProposalIntents();
 		const p = buildProposal(intents[0], [LIVE_SERIES]);
 		expect(p.state).toBe("POSSIBLE DUPLICATE / REVIEW");
 		expect(p.conflict).not.toBeNull();
@@ -230,8 +230,8 @@ describe("state precedence", () => {
 		expect(p.conflict!.via).toBe("VERIFIED_MAPPING");
 	});
 
-	it("a clean proposal is PROPOSED", async () => {
-		const intents = await currentProposalIntents(null);
+	it("a clean proposal is PROPOSED", () => {
+		const intents = currentProposalIntents();
 		const p = buildProposal(intents[1], []);
 		expect(p.state).toBe("PROPOSED");
 		expect(p.creation_eligible).toBe(true);
@@ -240,8 +240,8 @@ describe("state precedence", () => {
 });
 
 describe("generic duplicate check", () => {
-	it("flags an exact campaign-name match without any mapping", async () => {
-		const intents = await currentProposalIntents(null);
+	it("flags an exact campaign-name match without any mapping", () => {
+		const intents = currentProposalIntents();
 		const live: GoogleAdsLiveCampaign = {
 			...LIVE_SERIES,
 			name: "NWANA \u00b7 Founding Circle \u00b7 Donate",
@@ -256,8 +256,8 @@ describe("generic duplicate check", () => {
 		expect(conflict!.via).toBe("EXACT_NAME");
 	});
 
-	it("does not invent conflicts from similar names: no false duplicates", async () => {
-		const intents = await currentProposalIntents(null);
+	it("does not invent conflicts from similar names: no false duplicates", () => {
+		const intents = currentProposalIntents();
 		const live: GoogleAdsLiveCampaign = { ...LIVE_SERIES, name: "2026 NWANA Nordic Walking Series" };
 		const conflict = findLiveConflict(
 			proposalIdentity(intents[0]),
@@ -295,8 +295,8 @@ describe("generic duplicate check", () => {
 		expect(mapping!.live_campaign_name).toBe("2026 NWANA Open Nordic Walking Series");
 	});
 
-	it("the verified mapping flags the proposal even when the snapshot does not include the campaign", async () => {
-		const intents = await currentProposalIntents(null);
+	it("the verified mapping flags the proposal even when the snapshot does not include the campaign", () => {
+		const intents = currentProposalIntents();
 		const p = buildProposal(intents[0], []);
 		expect(p.state).toBe("POSSIBLE DUPLICATE / REVIEW");
 		expect(p.conflict).not.toBeNull();
@@ -307,8 +307,8 @@ describe("generic duplicate check", () => {
 describe("production pipeline", () => {
 	it("both production proposals go through the same pipeline", async () => {
 		const { buildDesiredState } = await import("../src/google-ads-current");
-		const state = await buildDesiredState(null);
-		const proposals = buildProposals(await currentProposalIntents(null), []);
+		const state = buildDesiredState();
+		const proposals = buildProposals(currentProposalIntents(), []);
 		expect(proposals).toHaveLength(2);
 		const series = proposals[0];
 		const fc = proposals[1];
@@ -346,7 +346,7 @@ describe("production pipeline", () => {
 		// Pure: same inputs always yield the same proposals, with no
 		// network or side effects (the functions are synchronous and
 		// take only intents plus a live snapshot).
-		const intents = await currentProposalIntents(null);
+		const intents = currentProposalIntents();
 		const first = buildProposals(intents, [LIVE_SERIES]);
 		const second = buildProposals(intents, [LIVE_SERIES]);
 		expect(second).toEqual(first);

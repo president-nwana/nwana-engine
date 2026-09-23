@@ -10,7 +10,11 @@
 
 import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
 import { getFundView } from "./fund";
-import { buildDesiredState, isCreationEligible, proposalTargetUrl, validateCampaignSpec, type CampaignSpec, type DesiredState, type DistributionLink, type ProposalOrigin, type SourceObjectLink } from "./google-ads-state";
+import { validateCampaignSpec, type CampaignSpec, type DesiredState, type DistributionLink, type ProposalOrigin, type SourceObjectLink } from "./google-ads-state";
+import { buildDesiredState } from "./google-ads-current";
+import { currentProposalIntents } from "./google-ads-current";
+import { buildProposals, type ProposalRecord } from "./google-ads-proposals";
+import type { NormalizedCampaignIntent } from "./google-ads-intent";
 // ADR-0029: the Ads screen reads the real Google Ads connection state from
 // the existing live integration (src/google-ads.ts), never a hardcoded flag.
 // ADR-0030: the screen is a read-only operational view of the real account:
@@ -261,80 +265,23 @@ export interface AdsOverview {
 type AdsStatusReader = typeof getGoogleAdsStatus;
 type AdsAccountReader = typeof getGoogleAdsAccountSnapshot;
 
-export interface MachineProposalAdGroup {
-	name: string;
-	default_cpc: number;
-	keywords: Array<{ text: string; match_type: string }>;
-	ads_count: number;
-}
+/**
+ * Universal machine proposal, produced by the generic Google Ads
+ * proposal pipeline (google-ads-proposals.ts) from a normalized
+ * intent. The screen renders this record; it never builds proposals
+ * itself.
+ */
+export type MachineProposal = ProposalRecord;
 
-export interface MachineProposal {
-	name: string;
-	status: string;
-	next_action: string;
-	daily_budget: number;
-	target_url: string;
-	/** Real source object from the spec, or null when not yet linked (never fabricated). */
-	source_object: SourceObjectLink | null;
-	/** Distribution-planner backing from the spec: provenance metadata only. */
-	distribution: DistributionLink;
-	/** Where this proposal comes from: OBJECT_DERIVED or OWNER_DIRECTIVE. */
-	origin: ProposalOrigin | null;
-	/**
-	 * Computed eligibility (valid HTTPS target URL, zero policy
-	 * violations, known origin). Actual creation still requires
-	 * owner review.
-	 */
-	creation_eligible: boolean;
-	ad_groups: MachineProposalAdGroup[];
-	/** Result of the existing Ad Grants policy validator (validateCampaignSpec). */
-	policy_violations: string[];
-}
-
-// Confirmed conflict: the live account already contains the real campaign
-// "2026 NWANA Open Nordic Walking Series", so this desired-state proposal
-// is flagged for review instead of shown as a fresh proposal. Hardcoded on
-// purpose: no automatic equivalence detection at this step.
-const SERIES_PROPOSAL_NAME = "NWANA \u00b7 Series 2026 \u00b7 Virtual Races";
-
+/**
+ * Runs normalized intents through the generic proposal pipeline.
+ * Thin presentation-layer wrapper around buildProposals.
+ */
 export function buildMachineProposals(
-	spec: DesiredState,
+	intents: ReadonlyArray<NormalizedCampaignIntent>,
 	liveCampaigns: GoogleAdsLiveCampaign[],
 ): MachineProposal[] {
-	return spec.campaigns.map((campaign) => {
-		let status: string;
-		let nextAction: string;
-		if (campaign.name === SERIES_PROPOSAL_NAME) {
-			status = "POSSIBLE DUPLICATE / REVIEW";
-			nextAction = "Review against existing live Series campaign before any creation";
-		} else if (liveCampaigns.some((c) => c.name === campaign.name)) {
-			// Exact name identity only, never similarity: a live campaign
-			// with precisely this name already exists.
-			status = "POSSIBLE DUPLICATE / REVIEW";
-			nextAction = "Review against the existing live campaign before any creation";
-		} else {
-			status = "PROPOSED";
-			nextAction = "Needs owner review before creation";
-		}
-		return {
-			name: campaign.name,
-			status,
-			next_action: nextAction,
-			daily_budget: campaign.daily_budget,
-			target_url: proposalTargetUrl(campaign),
-			source_object: campaign.source_object,
-			distribution: campaign.distribution,
-			origin: campaign.origin,
-			creation_eligible: isCreationEligible(campaign),
-			ad_groups: campaign.ad_groups.map((g) => ({
-				name: g.name,
-				default_cpc: g.default_cpc,
-				keywords: g.keywords.map((k) => ({ text: k.text, match_type: k.match_type })),
-				ads_count: g.ads.length,
-			})),
-			policy_violations: validateCampaignSpec(campaign),
-		};
-	});
+	return buildProposals(intents, liveCampaigns);
 }
 
 export async function getAdsOverview(
@@ -404,7 +351,7 @@ export async function getAdsOverview(
 				keywords: g.keywords.map((k) => k.text + " [" + k.match_type + "]"),
 			})),
 		})),
-		machine_proposals: buildMachineProposals(spec, liveAccount.campaigns),
+		machine_proposals: buildMachineProposals(currentProposalIntents(), liveAccount.campaigns),
 		capabilities: [
 			"Real Google Ads connection state (connected or the actual error)",
 			"Access level and accessible customer account(s)",
@@ -448,9 +395,11 @@ const ADS_SCRIPT = `
 			html+='<div class="item"><strong>Google Analytics<span class="badge-warn">Not set up</span></strong><div class="detail">'+esc(data.google_analytics.note)+'</div></div>';
 			html+='<h3>MACHINE PROPOSALS</h3><p class="meta">What the machine proposes to create. Campaign creation is disabled; the owner reviews every proposal before anything is created.</p>';
 			for(const p of (data.machine_proposals||[])){
-				const st=p.status==='PROPOSED'?'<span class="badge-ok">'+esc(p.status)+'</span>':'<span class="badge-warn">'+esc(p.status)+'</span>';
-				html+='<div class="item"><strong>'+esc(p.name)+' '+st+'</strong>'
-					+'<div class="meta">Budget: $'+Number(p.daily_budget).toFixed(2)+'/day &middot; Target: '+esc(p.target_url)+'</div>';
+				const st=p.state==='PROPOSED'?'<span class="badge-ok">'+esc(p.state)+'</span>':'<span class="badge-warn">'+esc(p.state)+'</span>';
+				html+='<div class="item"><strong>'+esc(p.name||'(unnamed proposal)')+' '+st+'</strong>'
+					+'<div class="meta">Proposal ID: '+esc(p.proposal_id)+'</div>'
+					+'<div class="meta">Budget: $'+(p.daily_budget!=null?Number(p.daily_budget).toFixed(2):'?')+'/day &middot; Target: '+esc(p.target_url||'none')+'</div>';
+				html+='<div class="meta">Origin: '+(p.origin?esc(p.origin):'unknown')+' &middot; Source: '+esc(p.source_kind)+' / '+esc(p.source_identity)+'</div>';
 				if(p.source_object){
 					var label='Source object: '+esc(p.source_object.object_id);
 					if(p.source_object.object_type){label+=' ('+esc(p.source_object.object_type)+')';}
@@ -458,11 +407,17 @@ const ADS_SCRIPT = `
 					html+='<div class="meta">'+label+'</div>';
 				}
 				else{html+='<div class="meta">Source object: not yet linked</div>';}
-				html+='<div class="meta">Origin: '+(p.origin?esc(p.origin):'unknown')+'</div>';
+				html+='<div class="meta">Purpose: '+esc(p.purpose)+'</div>';
 				html+='<div class="meta">Distribution rule: '+(p.distribution.rule_id?esc(p.distribution.rule_id):'none')+'</div>';
 				html+='<div class="meta">Distribution action: '+(p.distribution.action_id?esc(p.distribution.action_id):'none')+'</div>';
 				html+='<div class="meta">Channel: '+(p.distribution.channel?esc(p.distribution.channel):'none')+'</div>';
 				html+='<div class="meta">Creation eligibility: '+(p.creation_eligible?'eligible':'not eligible')+'</div>';
+				if(p.conflict){
+					html+='<div class="meta">Live conflict: '+esc(p.conflict.live_campaign_name)+' ('+(p.conflict.via==='VERIFIED_MAPPING'?'verified mapping':'exact name')+')</div>';
+				}
+				if((p.missing_fields||[]).length>0){
+					html+='<div class="meta">Missing fields: '+p.missing_fields.map(esc).join(', ')+'</div>';
+				}
 				for(const g of (p.ad_groups||[])){
 					const kws=(g.keywords||[]).map(function(k){return esc(k.text)+' ('+esc(k.match_type)+')';}).join(', ');
 					html+='<div class="detail"><b>'+esc(g.name)+':</b> max CPC $'+Number(g.default_cpc).toFixed(2)+', '+g.ads_count+' ads<br>Keywords: '+kws+'</div>';
@@ -1363,8 +1318,10 @@ export function buildAdsReport(data: AdsOverview): string {
 	body += `<h2>MACHINE PROPOSALS</h2>`;
 	body += `<p class="note">What the machine proposes to create. Campaign creation is disabled; the owner reviews every proposal before anything is created.</p>`;
 	for (const p of data.machine_proposals) {
-		body += `<h3>${escHtml(p.name)} <span class="${p.status === "PROPOSED" ? "tag" : "tag-warn"}">${escHtml(p.status)}</span></h3>`;
-		body += `<p>Daily budget: $${p.daily_budget.toFixed(2)}; target URL: ${escHtml(p.target_url)}</p>`;
+		body += `<h3>${escHtml(p.name ?? "(unnamed proposal)")} <span class="${p.state === "PROPOSED" ? "tag" : "tag-warn"}">${escHtml(p.state)}</span></h3>`;
+		body += `<p>Proposal ID: ${escHtml(p.proposal_id)}</p>`;
+		body += `<p>Daily budget: ${p.daily_budget != null ? "$" + p.daily_budget.toFixed(2) : "n/a"}; target URL: ${p.target_url ? escHtml(p.target_url) : "none"}</p>`;
+		body += `<p>Origin: ${p.origin ? escHtml(p.origin) : "unknown"}; source: ${escHtml(p.source_kind)} / ${escHtml(p.source_identity)}</p>`;
 		if (p.source_object) {
 			let label = `Source object: ${escHtml(p.source_object.object_id)}`;
 			if (p.source_object.object_type) {
@@ -1377,11 +1334,17 @@ export function buildAdsReport(data: AdsOverview): string {
 		} else {
 			body += `<p>Source object: not yet linked</p>`;
 		}
-		body += `<p>Origin: ${p.origin ? escHtml(p.origin) : "unknown"}</p>`;
+		body += `<p>Purpose: ${escHtml(p.purpose)}</p>`;
 		body += `<p>Distribution rule: ${p.distribution.rule_id ? escHtml(p.distribution.rule_id) : "none"}</p>`;
 		body += `<p>Distribution action: ${p.distribution.action_id ? escHtml(p.distribution.action_id) : "none"}</p>`;
 		body += `<p>Channel: ${p.distribution.channel ? escHtml(p.distribution.channel) : "none"}</p>`;
 		body += `<p>Creation eligibility: ${p.creation_eligible ? "eligible" : "not eligible"}</p>`;
+		if (p.conflict) {
+			body += `<p>Live conflict: ${escHtml(p.conflict.live_campaign_name)} (${p.conflict.via === "VERIFIED_MAPPING" ? "verified mapping" : "exact name"})</p>`;
+		}
+		if (p.missing_fields.length > 0) {
+			body += `<p>Missing fields: ${p.missing_fields.map(escHtml).join(", ")}</p>`;
+		}
 		for (const g of p.ad_groups) {
 			const kws = g.keywords.map((k) => `${escHtml(k.text)} (${escHtml(k.match_type)})`).join(", ");
 			body += `<p><strong>${escHtml(g.name)}:</strong> max CPC $${g.default_cpc.toFixed(2)}, ${g.ads_count} ads<br>Keywords: ${kws}</p>`;
