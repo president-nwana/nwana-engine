@@ -445,7 +445,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	it("ads: invalid HTTPS target URL makes a proposal ineligible", async () => {
 		const { buildDesiredState } = await import("../src/google-ads-current");
 		const { isCreationEligible } = await import("../src/google-ads-state");
-		const spec = buildDesiredState();
+		const spec = await buildDesiredState(null);
 		const broken = {
 			...spec.campaigns[1],
 			ad_groups: spec.campaigns[1].ad_groups.map((g) => ({
@@ -459,7 +459,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	it("ads: policy violations make a proposal ineligible", async () => {
 		const { buildDesiredState } = await import("../src/google-ads-current");
 		const { isCreationEligible } = await import("../src/google-ads-state");
-		const spec = buildDesiredState();
+		const spec = await buildDesiredState(null);
 		const broken = { ...spec.campaigns[1], name: "Generic Donate Campaign" };
 		expect(isCreationEligible(broken)).toBe(false);
 	});
@@ -467,7 +467,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	it("ads: unknown origin makes a proposal ineligible", async () => {
 		const { buildDesiredState } = await import("../src/google-ads-current");
 		const { isCreationEligible } = await import("../src/google-ads-state");
-		const spec = buildDesiredState();
+		const spec = await buildDesiredState(null);
 		expect(isCreationEligible({ ...spec.campaigns[0], origin: null })).toBe(false);
 		expect(isCreationEligible({ ...spec.campaigns[1], origin: null })).toBe(false);
 	});
@@ -475,14 +475,14 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	it("ads: OBJECT_DERIVED without a source object is ineligible", async () => {
 		const { buildDesiredState } = await import("../src/google-ads-current");
 		const { isCreationEligible } = await import("../src/google-ads-state");
-		const spec = buildDesiredState();
+		const spec = await buildDesiredState(null);
 		expect(isCreationEligible({ ...spec.campaigns[0], source_object: null })).toBe(false);
 	});
 
 	it("ads: missing source object stays null instead of being fabricated", async () => {
 		const { currentProposalIntents } = await import("../src/google-ads-current");
 		const { adaptRegistryObject } = await import("../src/google-ads-intent");
-		const intents = currentProposalIntents();
+		const intents = await currentProposalIntents(null);
 		const orphan = adaptRegistryObject({
 			object_id: "NWANA-RACE-000001",
 			object_type: null,
@@ -512,7 +512,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	it("ads: proposal policy result comes from the existing validator", async () => {
 		const { validateCampaignSpec } = await import("../src/google-ads-state");
 		const { buildDesiredState } = await import("../src/google-ads-current");
-		const spec = buildDesiredState();
+		const spec = await buildDesiredState(null);
 		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
 		expect(data.machine_proposals).toHaveLength(spec.campaigns.length);
 		for (let i = 0; i < spec.campaigns.length; i++) {

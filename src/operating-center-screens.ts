@@ -298,7 +298,7 @@ export async function getAdsOverview(
 	readStatus: AdsStatusReader = getGoogleAdsStatus,
 	readAccount: AdsAccountReader = getGoogleAdsAccountSnapshot,
 ): Promise<AdsOverview> {
-	const spec = buildDesiredState();
+	const spec = await buildDesiredState(env.nwana_engine_db);
 	const status = await readStatus(env);
 	const customers = status.customers ?? [];
 	let note: string;
@@ -337,7 +337,10 @@ export async function getAdsOverview(
 	// ADR-0032: build proposals once, then attach the downstream proposal
 	// state to the Google Ads orchestration decisions so the owner sees
 	// decision -> intent -> proposal as separate logical layers in one view.
-	const proposals = buildMachineProposals(currentProposalIntents(), liveAccount.campaigns);
+	const proposals = buildMachineProposals(
+		await currentProposalIntents(env.nwana_engine_db),
+		liveAccount.campaigns,
+	);
 	const downstream = new Map(proposals.map((p) => [p.proposal_id, p.state]));
 	const orchestration = await getOrchestrationDecisions(env.nwana_engine_db, downstream);
 	return {

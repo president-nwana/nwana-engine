@@ -9,6 +9,7 @@
  * It evaluates the evidence a NormalizedSource carries:
  * - explicit distribution actions (from the committed distribution config),
  * - an explicit owner directive,
+ * - owner-approved generic rules (source-type agnostic machine policies),
  * and turns each evidence item into one decision with a deterministic
  * identity. When a source carries no evidence, the result is NO_DECISION.
  * When required decision data is incomplete, the result is
@@ -39,7 +40,8 @@ export type DecisionState = "DECIDED" | "NO_DECISION" | "MISSING_DECISION_INPUT"
 export type DecisionEvidenceKind =
 	| "DISTRIBUTION_ACTION"
 	| "OWNER_DIRECTIVE"
-	| "DISTRIBUTION_RULE";
+	| "DISTRIBUTION_RULE"
+	| "GENERIC_RULE";
 
 /** Exact, traceable reference to the evidence behind a decision. */
 export interface DecisionEvidence {
@@ -86,7 +88,47 @@ export interface OrchestrationDecision {
 export interface OrchestrationEvidence {
 	actions: readonly DistributionActionConfig[];
 	directives: readonly OwnerDirectiveConfig[];
+	/** Owner-approved generic machine policies, evaluated for every source. */
+	genericRules: readonly GenericRuleConfig[];
 }
+
+/**
+ * One owner-approved generic machine policy.
+ *
+ * A generic rule is source-type agnostic: it never branches on source
+ * kind, source id, or source name. It evaluates only the confirmed
+ * facts a NormalizedSource carries. Adapters expose facts; the core
+ * makes the decision.
+ */
+export interface GenericRuleConfig {
+	/** Stable rule id, e.g. "RULE-FUNDRAISING-PUBLIC-DONATION-GOOGLE-ADS". */
+	rule_id: string;
+	required_result: string;
+	candidate_action: string;
+	channel: OrchestrationChannel;
+}
+
+/**
+ * Owner-approved generic rule: any normalized source with a confirmed
+ * fundraising/donation purpose or capability AND a confirmed public
+ * donation destination gets a Google Ads donor-acquisition decision.
+ * A source with the fundraising fact but no confirmed destination gets
+ * an explicit missing-destination result, never a guessed URL and never
+ * a homepage substitution.
+ */
+export const GENERIC_RULE_FUNDRAISING_PUBLIC_DONATION_GOOGLE_ADS: GenericRuleConfig = {
+	rule_id: "RULE-FUNDRAISING-PUBLIC-DONATION-GOOGLE-ADS",
+	required_result: "Raise donations",
+	candidate_action: "Acquire donors via search",
+	channel: "GOOGLE_ADS",
+};
+
+export const GENERIC_RULES: ReadonlyArray<GenericRuleConfig> = [
+	GENERIC_RULE_FUNDRAISING_PUBLIC_DONATION_GOOGLE_ADS,
+];
+
+/** Exact missing-input string for the generic fundraising rule. */
+export const GENERIC_RULE_MISSING_DESTINATION = "confirmed public donation destination missing";
 
 /**
  * Maps the raw channel vocabulary of the distribution config onto the
@@ -238,6 +280,16 @@ export function orchestrate(
 			}
 		}
 
+		// Owner-approved generic rules: evaluated for every source, after
+		// explicit actions and directives. Source-type agnostic: the rule
+		// sees only confirmed facts, never kind, id, or name.
+		for (const rule of evidence.genericRules) {
+			const genericDecision = decideFromGenericRule(source, rule);
+			if (genericDecision) {
+				sourceDecisions.push(genericDecision);
+			}
+		}
+
 		if (sourceDecisions.length === 0) {
 			sourceDecisions.push(noDecision(source));
 		}
@@ -366,10 +418,87 @@ function decideFromDirective(
 	};
 }
 
-function noDecision(source: NormalizedSource): OrchestrationDecision {
-	const checked: string[] = ["distribution actions", "owner directive"];
+/**
+ * The confirmed fundraising/donation fact a source carries, as a stable
+ * verbatim string for evidence. Null when the source carries no such
+ * fact. Source-type agnostic: only purpose and capabilities are read,
+ * never the source kind, id, or name.
+ */
+function fundraisingFactOf(source: NormalizedSource): string | null {
+	if (source.purpose === "FUNDRAISING") return "purpose FUNDRAISING";
+	if (source.capabilities.includes("FUNDRAISING")) return "capability FUNDRAISING";
+	if (source.capabilities.includes("DONATION")) return "capability DONATION";
+	return null;
+}
+
+/**
+ * Evaluates one owner-approved generic rule against one normalized
+ * source. Returns null when the rule does not apply. When the
+ * fundraising/donation fact is confirmed but the public donation
+ * destination is not, the result is MISSING_DECISION_INPUT with the
+ * exact missing-destination string: no homepage substitution, no
+ * guessed URL, no invented destination.
+ */
+function decideFromGenericRule(
+	source: NormalizedSource,
+	rule: GenericRuleConfig,
+): OrchestrationDecision | null {
+	const fact = fundraisingFactOf(source);
+	if (!fact) return null;
+	const destination = source.donation_destinations[0] ?? null;
+	const state: DecisionState = destination ? "DECIDED" : "MISSING_DECISION_INPUT";
+	const evidence: DecisionEvidence[] = [
+		{
+			kind: "GENERIC_RULE",
+			reference: rule.rule_id,
+			detail:
+				`confirmed fundraising/donation fact "${fact}"` +
+				(destination
+					? `; confirmed public donation destination "${destination.url}" ` +
+						`(provenance store=${destination.provenance.store}, ` +
+						`reader=${destination.provenance.reader}, ` +
+						`adapter=${destination.provenance.adapter})`
+					: `; ${GENERIC_RULE_MISSING_DESTINATION}`),
+		},
+	];
 	const factual_reason =
-		`No distribution action, matching distribution rule, or owner directive assigns a ` +
+		state === "DECIDED"
+			? `Generic rule ${rule.rule_id} applies to source ${source.source_identity}: ` +
+				`confirmed fundraising/donation fact "${fact}" and confirmed public ` +
+				`donation destination "${destination!.url}".`
+			: `Generic rule ${rule.rule_id} applies to source ${source.source_identity} ` +
+				`(confirmed fundraising/donation fact "${fact}"), but ` +
+				`${GENERIC_RULE_MISSING_DESTINATION}. No homepage is substituted ` +
+				`and no URL is guessed or constructed.`;
+	return {
+		decision_id: decisionIdForEvidence(
+			source.source_identity,
+			rule.rule_id,
+			rule.required_result,
+			rule.candidate_action,
+			rule.channel,
+		),
+		source_identity: source.source_identity,
+		source_kind: source.source_kind,
+		purpose: source.purpose,
+		required_result: rule.required_result,
+		candidate_action: rule.candidate_action,
+		channel: rule.channel,
+		priority: null,
+		factual_reason,
+		evidence,
+		execution_mode: null,
+		state,
+		channel_intent_id: null,
+		missing_decision_input: destination ? [] : [GENERIC_RULE_MISSING_DESTINATION],
+		downstream: null,
+	};
+}
+
+function noDecision(source: NormalizedSource): OrchestrationDecision {
+	const checked: string[] = ["distribution actions", "owner directive", "generic rules"];
+	const factual_reason =
+		`No distribution action, owner directive, or generic rule assigns a ` +
 		`channel to source ${source.source_identity}. Checked: ${checked.join(", ")}. ` +
 		`Existence of the source is not decision evidence.`;
 	return {
