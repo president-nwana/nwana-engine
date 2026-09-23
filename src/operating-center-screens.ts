@@ -456,7 +456,12 @@ const ADS_SCRIPT = `
 				const st=p.status==='PROPOSED'?'<span class="badge-ok">'+esc(p.status)+'</span>':'<span class="badge-warn">'+esc(p.status)+'</span>';
 				html+='<div class="item"><strong>'+esc(p.name)+' '+st+'</strong>'
 					+'<div class="meta">Budget: $'+Number(p.daily_budget).toFixed(2)+'/day &middot; Target: '+esc(p.target_url)+'</div>';
-				if(p.source_object){html+='<div class="meta">Source object: '+esc(p.source_object.title)+' ('+esc(p.source_object.object_id)+', '+esc(p.source_object.object_type)+')</div>';}
+				if(p.source_object){
+					var label='Source object: '+esc(p.source_object.object_id);
+					if(p.source_object.object_type){label+=' ('+esc(p.source_object.object_type)+')';}
+					if(p.source_object.title){label+=' - '+esc(p.source_object.title);}
+					html+='<div class="meta">'+label+'</div>';
+				}
 				else{html+='<div class="meta">Source object: not yet linked</div>';}
 				for(const g of (p.ad_groups||[])){
 					const kws=(g.keywords||[]).map(function(k){return esc(k.text)+' ('+esc(k.match_type)+')';}).join(', ');
@@ -1361,7 +1366,14 @@ export function buildAdsReport(data: AdsOverview): string {
 		body += `<h3>${escHtml(p.name)} <span class="${p.status === "PROPOSED" ? "tag" : "tag-warn"}">${escHtml(p.status)}</span></h3>`;
 		body += `<p>Daily budget: $${p.daily_budget.toFixed(2)}; target URL: ${escHtml(p.target_url)}</p>`;
 		if (p.source_object) {
-			body += `<p>Source object: ${escHtml(p.source_object.title)} (${escHtml(p.source_object.object_id)}, ${escHtml(p.source_object.object_type)})</p>`;
+			let label = `Source object: ${escHtml(p.source_object.object_id)}`;
+			if (p.source_object.object_type) {
+				label += ` (${escHtml(p.source_object.object_type)})`;
+			}
+			if (p.source_object.title) {
+				label += ` - ${escHtml(p.source_object.title)}`;
+			}
+			body += `<p>${label}</p>`;
 		} else {
 			body += `<p>Source object: not yet linked</p>`;
 		}
