@@ -315,8 +315,8 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 
 	it("ads: Series proposal shows POSSIBLE DUPLICATE / REVIEW", async () => {
 		// The live account already contains "2026 NWANA Open Nordic Walking
-		// Series": the hardcoded Series proposal is a confirmed conflict,
-		// never shown as a fresh proposal.
+		// Series": the Series proposal is a confirmed conflict via the
+		// verified mapping, never shown as a fresh proposal.
 		const accountWithSeries = async () => ({
 			ok: true,
 			customer_id: "6758500147",
@@ -328,23 +328,24 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, accountWithSeries);
 		const series = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
 		expect(series).toBeDefined();
-		expect(series!.status).toBe("POSSIBLE DUPLICATE / REVIEW");
-		expect(series!.next_action).toBe("Review against existing live Series campaign before any creation");
-		// The hardcoded conflict holds even when the live read is empty:
+		expect(series!.state).toBe("POSSIBLE DUPLICATE / REVIEW");
+		expect(series!.next_action).toContain("2026 NWANA Open Nordic Walking Series");
+		expect(series!.next_action).toContain("Review against");
+		// The verified mapping holds even when the live read is empty:
 		// no automatic equivalence detection is built at this step.
 		const empty = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
 		const seriesEmpty = empty.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
-		expect(seriesEmpty!.status).toBe("POSSIBLE DUPLICATE / REVIEW");
+		expect(seriesEmpty!.state).toBe("POSSIBLE DUPLICATE / REVIEW");
 		const report = buildAdsReport(data);
 		expect(report).toContain("POSSIBLE DUPLICATE / REVIEW");
-		expect(report).toContain("Review against existing live Series campaign before any creation");
+		expect(report).toContain("2026 NWANA Open Nordic Walking Series");
 	});
 
 	it("ads: Founding Circle proposal is PROPOSED when the name is not live", async () => {
 		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
 		const fc = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Founding Circle \u00b7 Donate");
 		expect(fc).toBeDefined();
-		expect(fc!.status).toBe("PROPOSED");
+		expect(fc!.state).toBe("PROPOSED");
 		expect(fc!.next_action).toBe("Needs owner review before creation");
 		const report = buildAdsReport(data);
 		expect(report).toContain("NWANA \u00b7 Founding Circle \u00b7 Donate");
@@ -414,8 +415,9 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		expect(series!.origin).toBe("OBJECT_DERIVED");
 		expect(series!.creation_eligible).toBe(true);
 		// Duplicate review unchanged: the live account holds a Series campaign.
-		expect(series!.status).toBe("POSSIBLE DUPLICATE / REVIEW");
-		expect(series!.next_action).toBe("Review against existing live Series campaign before any creation");
+		expect(series!.state).toBe("POSSIBLE DUPLICATE / REVIEW");
+		expect(series!.next_action).toContain("2026 NWANA Open Nordic Walking Series");
+		expect(series!.next_action).toContain("Review against");
 	});
 
 	it("ads: Series channel = GOOGLE_ADS_GRANT", async () => {
@@ -429,7 +431,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		const fc = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Founding Circle \u00b7 Donate");
 		expect(fc!.origin).toBe("OWNER_DIRECTIVE");
 		expect(fc!.creation_eligible).toBe(true);
-		expect(fc!.status).toBe("PROPOSED");
+		expect(fc!.state).toBe("PROPOSED");
 		expect(fc!.next_action).toBe("Needs owner review before creation");
 	});
 
@@ -441,7 +443,8 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	});
 
 	it("ads: invalid HTTPS target URL makes a proposal ineligible", async () => {
-		const { buildDesiredState, isCreationEligible } = await import("../src/google-ads-state");
+		const { buildDesiredState } = await import("../src/google-ads-current");
+		const { isCreationEligible } = await import("../src/google-ads-state");
 		const spec = buildDesiredState();
 		const broken = {
 			...spec.campaigns[1],
@@ -454,30 +457,50 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	});
 
 	it("ads: policy violations make a proposal ineligible", async () => {
-		const { buildDesiredState, isCreationEligible } = await import("../src/google-ads-state");
+		const { buildDesiredState } = await import("../src/google-ads-current");
+		const { isCreationEligible } = await import("../src/google-ads-state");
 		const spec = buildDesiredState();
 		const broken = { ...spec.campaigns[1], name: "Generic Donate Campaign" };
 		expect(isCreationEligible(broken)).toBe(false);
 	});
 
 	it("ads: unknown origin makes a proposal ineligible", async () => {
-		const { buildDesiredState, isCreationEligible } = await import("../src/google-ads-state");
+		const { buildDesiredState } = await import("../src/google-ads-current");
+		const { isCreationEligible } = await import("../src/google-ads-state");
 		const spec = buildDesiredState();
 		expect(isCreationEligible({ ...spec.campaigns[0], origin: null })).toBe(false);
 		expect(isCreationEligible({ ...spec.campaigns[1], origin: null })).toBe(false);
 	});
 
 	it("ads: OBJECT_DERIVED without a source object is ineligible", async () => {
-		const { buildDesiredState, isCreationEligible } = await import("../src/google-ads-state");
+		const { buildDesiredState } = await import("../src/google-ads-current");
+		const { isCreationEligible } = await import("../src/google-ads-state");
 		const spec = buildDesiredState();
 		expect(isCreationEligible({ ...spec.campaigns[0], source_object: null })).toBe(false);
 	});
 
 	it("ads: missing source object stays null instead of being fabricated", async () => {
-		const { buildDesiredState } = await import("../src/google-ads-state");
-		const spec = buildDesiredState();
-		const orphan = { ...spec.campaigns[0], source_object: null };
-		const proposals = buildMachineProposals({ ...spec, campaigns: [orphan] }, []);
+		const { currentProposalIntents } = await import("../src/google-ads-current");
+		const { adaptRegistryObject } = await import("../src/google-ads-intent");
+		const intents = currentProposalIntents();
+		const orphan = adaptRegistryObject({
+			object_id: "NWANA-RACE-000001",
+			object_type: null,
+			title: null,
+			distribution: null,
+			purpose: "VIRTUAL_RACES",
+			name: "NWANA \u00b7 Orphan \u00b7 Test",
+			target_url: "https://series.nwaofna.org",
+			cta: "Visit",
+			audience: null,
+			source_facts: [],
+			daily_budget: 100,
+			geo_target_id: 2840,
+			ad_groups: intents[0].ad_groups,
+			sitelinks: intents[0].sitelinks,
+		});
+		if (!orphan.ok) throw new Error(orphan.error);
+		const proposals = buildMachineProposals([{ ...orphan.intent, source_object: null }], []);
 		expect(proposals).toHaveLength(1);
 		expect(proposals[0].source_object).toBeNull();
 		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
@@ -488,7 +511,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 
 	it("ads: proposal policy result comes from the existing validator", async () => {
 		const { validateCampaignSpec } = await import("../src/google-ads-state");
-		const { buildDesiredState } = await import("../src/google-ads-state");
+		const { buildDesiredState } = await import("../src/google-ads-current");
 		const spec = buildDesiredState();
 		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
 		expect(data.machine_proposals).toHaveLength(spec.campaigns.length);
