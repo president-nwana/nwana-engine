@@ -673,6 +673,15 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Migration 0031 applied to remote D1 via raw `d1 execute --remote --file` and recorded in the `d1_migrations` journal as `0031-add-board-settings` (journal uses no-`.sql`-extension names). All five settings rows verified present remotely. Journal note: remote `d1_migrations` is missing rows for 0022 and 0026-0030 (applied raw earlier without journal rows); do not "repair" it by re-running old migrations.
 - Local verification: Vitest 205/205 (11 new tests in `test/board-weekly-loop.spec.ts`: next-day math incl. DST edge, cadence defaults/override, idempotent ensure, submission auto-attach, weekly sweep, close rollover, inline-script checks), `npx tsc --noEmit` clean.
 
+## PER-PANEL SCREENS — IMPLEMENTED 2026-09-23 (ADR-0026)
+
+- The owner found the main `/operating-center` page overloaded on his phone; every panel now has its own screen and the main page is a dashboard of summary cards only.
+- New `GET /operating-center/sponsorship` (`src/operating-center-sponsorship.ts`): full generate form, asset list with package/audience/delivers/reference-pricing/next-action, per-asset "Move to <stage>" buttons against the existing `/api/operating-center/sponsorship-assets/advance` (server validates transitions). Main page keeps only a compact card: asset counts by stage + "Open sponsorship →".
+- New `GET /operating-center/activity` (`src/operating-center-activity.ts`): the full feed moved verbatim off the main page - "Requires reading" with "Mark as read" buttons (`POST /api/operating-center/activity/acknowledge`), "What is new" (30 newest items). Main page keeps only a compact card: requires-reading count (highlighted when nonzero) + 3 newest headlines + "Open activity →".
+- Shared `operatingCenterMenu()` is now 8 buttons: Overview, Results, Funds, Media, Board, Uploads, Sponsorship, Activity - under the header on every operating-center page, current page marked with `aria-current="page"`.
+- No migration, no new API endpoints, no auth change. The two new GET page routes were added to the public-HTML allowlist in `src/index.ts` (pages render with the in-page key gate; APIs still 401 without the owner key).
+- Local verification: Vitest 217/217 (12 new tests in `test/operating-center-split.spec.ts`: menu lists all 8 pages with correct active state under the header on every page, main page carries only summary cards, both new pages carry full functionality, `new Function` script-parse regression tests for both new pages), `npx tsc --noEmit` clean.
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.

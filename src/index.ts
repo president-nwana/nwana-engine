@@ -66,6 +66,8 @@ import {
 } from "./operating-center";
 import { renderFundsHtml } from "./operating-center-funds";
 import { renderMediaHtml } from "./operating-center-media";
+import { renderSponsorshipHtml } from "./operating-center-sponsorship";
+import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
 import { renderUploadsHtml } from "./operating-center-uploads";
 import {
@@ -5694,7 +5696,9 @@ export default {
 					url.pathname === "/operating-center/funds" ||
 					url.pathname === "/operating-center/media" ||
 					url.pathname === "/operating-center/board" ||
-					url.pathname === "/operating-center/uploads")
+					url.pathname === "/operating-center/uploads" ||
+					url.pathname === "/operating-center/sponsorship" ||
+					url.pathname === "/operating-center/activity")
 			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
@@ -5757,6 +5761,28 @@ export default {
 		// the overview shows only a compact summary).
 		if (request.method === "GET" && url.pathname === "/operating-center/uploads") {
 			return new Response(renderUploadsHtml(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		}
+
+		// ADR-0026: sponsorship assets live on their own page (the overview
+		// shows only a compact summary card).
+		if (request.method === "GET" && url.pathname === "/operating-center/sponsorship") {
+			return new Response(renderSponsorshipHtml(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		}
+
+		// ADR-0026: the activity feed lives on its own page (the overview
+		// shows only a compact summary card).
+		if (request.method === "GET" && url.pathname === "/operating-center/activity") {
+			return new Response(renderActivityHtml(), {
 				headers: {
 					"content-type": "text/html; charset=utf-8",
 					"cache-control": "no-store",

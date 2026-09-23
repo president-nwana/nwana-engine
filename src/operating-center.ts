@@ -473,7 +473,7 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 	});
 }
 
-export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads";
+export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity";
 
 /**
  * ADR-0023: shared button menu rendered directly under the header on every
@@ -487,6 +487,8 @@ export function operatingCenterMenu(active: OperatingCenterPageId): string {
 		{ id: "media", label: "Media", href: "/operating-center/media" },
 		{ id: "board", label: "Board", href: "/operating-center/board" },
 		{ id: "uploads", label: "Uploads", href: "/operating-center/uploads" },
+		{ id: "sponsorship", label: "Sponsorship", href: "/operating-center/sponsorship" },
+		{ id: "activity", label: "Activity", href: "/operating-center/activity" },
 	];
 	return (
 		'<nav class="oc-menu" aria-label="Operating center">' +
@@ -550,19 +552,17 @@ export function renderOperatingCenterHtml(): string {
 			<div id="media-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/media">Open media workspace →</a></p>
 		</section>
-		<section class="panel" id="activity-panel" style="margin-top:20px"><h2>Activity: what is happening</h2>
-			<p class="meta">Newest first. Items flagged "requires reading" need the owner's eyes.</p>
-			<h3>Requires reading</h3>
-			<div id="activity-reading">Loading…</div>
-			<h3>What is new</h3>
-			<div id="activity-new">Loading…</div>
+		<section class="panel" id="activity-card" style="margin-top:20px"><h2>Activity</h2>
+			<p class="meta">What is happening, what is new, and what requires the owner's eyes. The full feed lives on its own page.</p>
+			<div id="activity-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/activity">Open activity →</a></p>
 		</section>
 		<section class="panel" id="member-actions-panel" style="margin-top:20px"><h2>What board members can do</h2>
 			<p class="meta">The operating center is the board's cockpit. Every member can:</p>
 			<ul>
 				<li><strong>Submit to the board:</strong> open the <a href="/operating-center/board">Board workspace</a> to add questions, initiatives, or wishes. Submissions are collected into the weekly Sunday protocol.</li>
 				<li><strong>Upload files:</strong> open the <a href="/operating-center/uploads">Uploads</a> page to share contact lists, task lists, meeting material, or media drafts. The machine classifies and routes each file automatically.</li>
-				<li><strong>Review activity:</strong> check "Activity: what is happening" for new submissions, decisions, and uploads. Items under "Requires reading" need attention; mark them read when done.</li>
+				<li><strong>Review activity:</strong> open the <a href="/operating-center/activity">Activity</a> page for new submissions, decisions, and uploads. Items under "Requires reading" need attention; mark them read when done.</li>
 				<li><strong>Track the media plan:</strong> open the <a href="/operating-center/media">Media plan</a> page to see article drafts, approvals, site publication, and press distribution.</li>
 				<li><strong>Track funds:</strong> open the <a href="/operating-center/funds">Funds</a> page for the full fundraising pipeline.</li>
 			</ul>
@@ -572,18 +572,10 @@ export function renderOperatingCenterHtml(): string {
 			<div id="uploads-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/uploads">Open uploads →</a></p>
 		</section>
-		<section class="panel" id="sponsorship-panel" style="margin-top:20px"><h2>Sponsorship assets</h2>
-			<p class="meta">Machine-generated seller packages, one per object. Stages: draft → packaged → offered → negotiating → committed → fulfilled → renewal. The machine generates and tracks; seller conversations stay human.</p>
-			<form id="sponsorship-generate-form" style="margin-bottom:12px">
-				<label for="sponsorship-object-type">Object type</label>
-				<select id="sponsorship-object-type" name="object_type"><option value="series">series</option><option value="fund">fund</option></select>
-				<label for="sponsorship-object-id">Object id</label>
-				<input id="sponsorship-object-id" name="object_id" required maxlength="120" placeholder="SERIES_2026 or a fund id">
-				<button type="submit">Generate package</button>
-				<div class="message" id="sponsorship-generate-message" aria-live="polite"></div>
-			</form>
-			<div><span class="message" id="sponsorship-message" aria-live="polite"></span></div>
-			<div id="sponsorship-assets">Loading…</div>
+		<section class="panel" id="sponsorship-card" style="margin-top:20px"><h2>Sponsorship assets</h2>
+			<p class="meta">Machine-generated seller packages, one per object. Stages: draft → packaged → offered → negotiating → committed → fulfilled → renewal. The full list and stage advancement live on their own page.</p>
+			<div id="sponsorship-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/sponsorship">Open sponsorship →</a></p>
 		</section>
 		<section class="panel" id="board-summary-panel" style="margin-top:20px"><h2>Board workspace</h2>
 			<div id="board-summary">Loading…</div>
@@ -614,10 +606,10 @@ export function renderOperatingCenterHtml(): string {
 			loadLifecycleSummary();
 			loadFundSummary();
 			loadMediaSummary();
-			loadActivity();
+			loadActivitySummary();
 			loadBoardSummary();
 			loadUploadsSummary();
-			loadSponsorshipAssets();
+			loadSponsorshipSummary();
 		}
 		async function pickNextMeetingLocal(meetings){
 			const today=new Date().toISOString().slice(0,10);
@@ -686,46 +678,30 @@ export function renderOperatingCenterHtml(): string {
 				box.innerHTML=data.plans.map(p=>'<div class="item"><strong>'+esc(p.title)+'</strong><div class="meta">'+esc(p.status)+' · '+p.article_count+' article'+(p.article_count===1?'':'s')+' ('+p.ready_count+' ready, '+p.published_count+' published)</div></div>').join('');
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
-		async function loadActivity(){
-			const reading=document.querySelector('#activity-reading');
-			const fresh=document.querySelector('#activity-new');
+		async function loadActivitySummary(){
+			const box=document.querySelector('#activity-summary');
 			try{
 				const data=await api('/api/operating-center/activity');
-				const req=data.items.filter(i=>i.requires_reading);
-				const rest=data.items.filter(i=>!i.requires_reading);
-				reading.innerHTML=req.length?req.map(i=>'<div class="item"><strong>'+esc(i.label)+'</strong>'+(i.detail?'<div class="meta">'+esc(i.detail)+'</div>':'')+'<div class="meta">'+esc(i.ts)+'</div><button data-ack="'+esc(i.id)+'" style="width:auto">Mark as read</button></div>').join(''):'<div class="unavailable">Nothing requires reading.</div>';
-				fresh.innerHTML=rest.length?rest.slice(0,10).map(i=>'<div class="item">'+esc(i.label)+'<div class="meta">'+esc(i.ts)+'</div></div>').join(''):'<div class="unavailable">No recent activity.</div>';
-				reading.querySelectorAll('[data-ack]').forEach(btn=>btn.addEventListener('click',()=>ackRead(btn.dataset.ack)));
-			}catch(err){reading.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>';fresh.innerHTML=''}
+				const items=data.items||[];
+				const req=items.filter(i=>i.requires_reading);
+				const fresh=items.filter(i=>!i.requires_reading).slice(0,3);
+				box.innerHTML='<div class="meta'+(req.length?' followup-due':'')+'">'+req.length+' item'+(req.length===1?'':'s')+' require'+(req.length===1?'s':'')+' reading</div>'+
+					(fresh.length?fresh.map(i=>'<div class="meta">· '+esc(i.label)+'</div>').join(''):'<div class="unavailable">No recent activity.</div>');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
-		async function ackRead(itemId){
-			try{
-				await api('/api/operating-center/activity/acknowledge',{method:'POST',body:JSON.stringify({item_id:itemId})});
-				loadActivity();
-			}catch(err){alert('Failed: '+err.message)}
-		}
-		async function loadSponsorshipAssets(){
-			const box=document.querySelector('#sponsorship-assets');
+		async function loadSponsorshipSummary(){
+			const box=document.querySelector('#sponsorship-summary');
 			const label={draft:'Draft',packaged:'Packaged',offered:'Offered',negotiating:'Negotiating',committed:'Committed',fulfilled:'Fulfilled',renewal:'Renewal'};
 			try{
 				const data=await api('/api/operating-center/sponsorship-assets');
-				if(!data.assets.length){box.innerHTML='<div class="unavailable">No sponsorship assets yet. Generate one above.</div>';return}
+				const assets=data.assets||[];
+				if(!assets.length){box.innerHTML='<div class="unavailable">No sponsorship assets yet. Generate one on the sponsorship page.</div>';return}
 				const byStage={};
-				data.assets.forEach(a=>{byStage[a.stage]=(byStage[a.stage]||0)+1});
-				const summary=Object.entries(byStage).map(([s,c])=>esc(label[s]||s)+': <strong>'+c+'</strong>').join(' · ');
-				box.innerHTML='<div class="meta">'+summary+'</div><div class="meta">'+data.assets.length+' total assets. Use the Generate form above to create new packages; stage advancement is available on the full asset view.</div>';
+				assets.forEach(a=>{byStage[a.stage]=(byStage[a.stage]||0)+1});
+				box.innerHTML='<div class="meta">'+Object.entries(byStage).map(([s,c])=>esc(label[s]||s)+': <strong>'+c+'</strong>').join(' · ')+'</div>'+
+					'<div class="meta">'+assets.length+' total asset'+(assets.length===1?'':'s')+'</div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
-		document.querySelector('#sponsorship-generate-form').addEventListener('submit',async(e)=>{
-			e.preventDefault();
-			const m=document.querySelector('#sponsorship-generate-message');m.textContent='Generating…';
-			try{
-				const fd=formJson(e.target);
-				const data=await api('/api/operating-center/sponsorship-assets/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({object_type:fd.object_type,object_id:fd.object_id})});
-				m.textContent=data.generated?'Package generated.':'Package already exists.';
-				await loadSponsorshipAssets();
-			}catch(err){m.textContent=err.message}
-		});
 		async function loadLifecycleSummary(){
 			const box=document.querySelector('#lifecycle-summary');
 			try{
