@@ -1,5 +1,14 @@
 # NWANA Engine Changelog
 
+## 2026-09-23 — Meetings operating-center screen with downloadable report (ADR-0028)
+
+- New screen: Meetings (`/operating-center/meetings`). Two sections, both real: external meetings (Integrity 9 call Fri 2026-09-25 2:00-3:00pm CT, confirmed; Zubie Five intro call proposed Tue-Thu week of Sep 28, awaiting scheduling) and board meetings read live from the D1 `board_meetings` table (upcoming DRAFT/OPEN with date/time, title, agenda count; past CLOSED with date, minutes recorded/absent, decision count; honest "No board meetings recorded yet" on an empty table).
+- The Integrity 9 Teams join link, meeting ID, and passcode render on the owner-gated screen only; they are excluded from the downloadable report by construction (verified by test). The read-only board-meetings SELECT triggers no meeting creation or side effects.
+- "Download report" button: `GET /api/operating-center/report/meetings` (owner-key protected) returns a self-contained, print-friendly HTML document with current real data, the report date, and nothing internal (no join links/IDs/passcodes, no keys, no notes, no email addresses). Saved as `nwana-meetings-report-YYYY-MM-DD.html`.
+- The shared button menu grows to 16 (Meetings added), wrapping flex row under the header on every page, current page marked `aria-current="page"`. The main `/operating-center` page keeps one compact meetings summary card (tracked external meetings, next upcoming, board-meeting count) and stays a dashboard.
+- New JSON overview API `/api/operating-center/meetings/overview` (401 without the owner key). No migration, no auth change.
+- Verified: Vitest 250/250 (4 new tests in `test/operating-center-screens.spec.ts`: 16-button menu, meetings page `new Function` script-parse, meetings overview honesty, meetings report external-safety), TypeScript clean. Worker version recorded in SYSTEM_STATE.md.
+
 ## 2026-09-23 — Seven new operating-center screens, each with a downloadable report (ADR-0027)
 
 - New screens: Sites, Social, Ads, Sellers, Partners, Fundraising, NW Groups (`/operating-center/sites|social|ads|sellers|partners|fundraising|groups`). The main page stays a dashboard: 7 new compact summary cards with links, nothing else moved.

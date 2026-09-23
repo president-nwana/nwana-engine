@@ -1,7 +1,7 @@
 // ADR-0027: seven new operating-center screens, each with a downloadable
 // external-ready report (Sites, Social, Ads, Sellers, Partners,
-// Fundraising, Groups). Sponsorship already has its own page (ADR-0026)
-// and is untouched.
+// Fundraising, Groups). ADR-0028 adds an eighth screen: Meetings.
+// Sponsorship already has its own page (ADR-0026) and is untouched.
 //
 // OWNER'S HARD RULE: every number on every screen comes from a real
 // source (D1, a connected API, or a repo fact). Where the source is not
@@ -19,7 +19,8 @@ export type ReportScreenId =
 	| "sellers"
 	| "partners"
 	| "fundraising"
-	| "groups";
+	| "groups"
+	| "meetings";
 
 export const REPORT_SCREENS: Array<{
 	id: ReportScreenId;
@@ -35,6 +36,7 @@ export const REPORT_SCREENS: Array<{
 	{ id: "partners", page: "partners", label: "Partners", path: "/operating-center/partners", reportPath: "/api/operating-center/report/partners" },
 	{ id: "fundraising", page: "fundraising", label: "Fundraising", path: "/operating-center/fundraising", reportPath: "/api/operating-center/report/fundraising" },
 	{ id: "groups", page: "groups", label: "Groups", path: "/operating-center/groups", reportPath: "/api/operating-center/report/groups" },
+	{ id: "meetings", page: "meetings", label: "Meetings", path: "/operating-center/meetings", reportPath: "/api/operating-center/report/meetings" },
 ];
 
 function escHtml(v: unknown): string {
@@ -46,7 +48,7 @@ function escHtml(v: unknown): string {
 		.replace(/'/g, "&#39;");
 }
 
-// Shared page shell for the seven new screens: header, 15-button menu,
+// Shared page shell for the ADR-0027/0028 screens: header, 16-button menu,
 // owner-key gate, app container, and the common client prelude (esc, key
 // storage, api() with the owner key, downloadReport()). Page-specific UI
 // goes in panelsHtml; page-specific logic (which must define boot()) goes
@@ -818,6 +820,221 @@ export function renderPartnersHtml(): string {
 }
 
 // ---------------------------------------------------------------------------
+// 8. Meetings (ADR-0028)
+//
+// Two sources, both real:
+//   - External meetings: curated code data from the outreach registry and
+//     the owner's confirmed correspondence. Join links, meeting IDs, and
+//     passcodes are shown on the owner-gated SCREEN only; they never go
+//     into the downloadable report.
+//   - Board meetings: read-only SELECT over the D1 board_meetings table.
+//     No side effects, no meeting creation.
+// ---------------------------------------------------------------------------
+
+export interface ExternalMeetingRecord {
+	id: string;
+	title: string;
+	counterparty: string;
+	// Human-readable date/time, e.g. "Fri 2026-09-25, 2:00-3:00pm CT (3:00-4:00pm ET)".
+	display_when: string;
+	location: string;
+	purpose: string;
+	// "confirmed" | "awaiting scheduling" | "done"
+	status: string;
+	next_step: string | null;
+	// SCREEN ONLY: never rendered by buildMeetingsReport (external-safe).
+	join_url: string | null;
+	join_access: string | null;
+}
+
+export const EXTERNAL_MEETINGS: ExternalMeetingRecord[] = [
+	{
+		id: "integrity9-2026-09-25",
+		title: "Integrity 9 — exclusive sponsorship seller discussion",
+		counterparty: "Integrity 9 · David Hayob, Chief Revenue Officer",
+		display_when: "Fri 2026-09-25, 2:00-3:00pm CT (3:00-4:00pm ET, 10:00-11:00pm Riga)",
+		location: "Microsoft Teams",
+		purpose: "Discuss an exclusive sponsorship seller partnership for NWANA's commercial rights.",
+		status: "confirmed",
+		next_step: "Join the call with the Latvian board members. Exclusivity terms (minimum commitments, milestones, termination rights) are decided only if they ask.",
+		join_url: "https://teams.microsoft.com/meet/214553368452049?p=YT6qRnvYGwa2tq3PU9",
+		join_access: "Meeting ID 214 553 368 452 049 · Passcode LC7pm2C9",
+	},
+	{
+		id: "zubie-five-intro",
+		title: "Zubie Five — sponsorship partnership intro call",
+		counterparty: "Zubie Five · Adam Zubiate, Founder",
+		display_when: "Proposed: Tue-Thu, week of Sep 28, 2026",
+		location: "Online — booking page",
+		purpose: "First call to talk through NWANA's sponsorship assets and outline a commission-based partnership.",
+		status: "awaiting scheduling",
+		next_step: "Send the numbers Adam asked for (the sellers report answers them) and book the call.",
+		join_url: "https://zubiefive.com/meet",
+		join_access: null,
+	},
+];
+
+export interface BoardMeetingSummary {
+	meeting_id: string;
+	title: string;
+	scheduled_for: string | null;
+	status: string;
+	opened_at: string | null;
+	closed_at: string | null;
+	// Minutes content never leaves the board workspace; the screen and the
+	// report only say whether minutes were recorded.
+	minutes_present: boolean;
+	attendees: string | null;
+	agenda_count: number;
+	decision_count: number;
+	created_at: string;
+}
+
+function parseMeetingAttendees(metadata: string | null): string | null {
+	if (!metadata) return null;
+	try {
+		const parsed = JSON.parse(metadata) as { attendees?: unknown };
+		return typeof parsed.attendees === "string" && parsed.attendees.trim()
+			? parsed.attendees
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+export interface MeetingsOverview {
+	ok: true;
+	generated_at: string;
+	external_meetings: ExternalMeetingRecord[];
+	// DRAFT/OPEN meetings: date/time, title, agenda count.
+	board_upcoming: BoardMeetingSummary[];
+	// CLOSED meetings: date, minutes recorded/absent, decision count.
+	board_past: BoardMeetingSummary[];
+}
+
+export async function getMeetingsOverview(db: D1Database): Promise<MeetingsOverview> {
+	// Read-only SELECT. Mirrors listBoardMeetings() in board.ts but stays a
+	// plain data getter: no meeting creation, no side effects.
+	const result = await db
+		.prepare(
+			`SELECT m.meeting_id, m.title, m.scheduled_for, m.status,
+			        m.opened_at, m.closed_at, m.minutes, m.metadata, m.created_at,
+			        (SELECT COUNT(*) FROM board_submissions s WHERE s.meeting_id = m.meeting_id AND s.status = 'AGENDA') AS agenda_count,
+			        (SELECT COUNT(*) FROM board_decisions d WHERE d.meeting_id = m.meeting_id) AS decision_count
+			 FROM board_meetings m
+			 ORDER BY COALESCE(m.scheduled_for, '9999-12-31') DESC, m.created_at DESC
+			 LIMIT 100`,
+		)
+		.all<{
+			meeting_id: string;
+			title: string;
+			scheduled_for: string | null;
+			status: string;
+			opened_at: string | null;
+			closed_at: string | null;
+			minutes: string | null;
+			metadata: string | null;
+			created_at: string;
+			agenda_count: number;
+			decision_count: number;
+		}>();
+	const meetings: BoardMeetingSummary[] = result.results.map((m) => ({
+		meeting_id: m.meeting_id,
+		title: m.title,
+		scheduled_for: m.scheduled_for,
+		status: m.status,
+		opened_at: m.opened_at,
+		closed_at: m.closed_at,
+		minutes_present: typeof m.minutes === "string" && m.minutes.trim().length > 0,
+		attendees: parseMeetingAttendees(m.metadata),
+		agenda_count: Number(m.agenda_count ?? 0),
+		decision_count: Number(m.decision_count ?? 0),
+		created_at: m.created_at,
+	}));
+	return {
+		ok: true,
+		generated_at: new Date().toISOString(),
+		external_meetings: EXTERNAL_MEETINGS,
+		board_upcoming: meetings.filter((m) => m.status === "DRAFT" || m.status === "OPEN"),
+		board_past: meetings.filter((m) => m.status === "CLOSED"),
+	};
+}
+
+function boardStatusLabel(status: string): string {
+	if (status === "DRAFT") return "draft";
+	if (status === "OPEN") return "open";
+	if (status === "CLOSED") return "done";
+	return status.toLowerCase();
+}
+
+const MEETINGS_SCRIPT = `
+	async function boot(){
+		const ext=document.querySelector('#meetings-external-list');
+		const bup=document.querySelector('#meetings-board-upcoming');
+		const bpast=document.querySelector('#meetings-board-past');
+		try{
+			const data=await api('/api/operating-center/meetings/overview');
+			let html='';
+			for(const m of (data.external_meetings||[])){
+				const badge=m.status==='confirmed'?'<span class="badge">'+esc(m.status)+'</span>':'<span class="badge-warn">'+esc(m.status)+'</span>';
+				html+='<div class="item"><strong>'+esc(m.title)+badge+'</strong>'+
+					'<div class="meta">'+esc(m.counterparty)+'</div>'+
+					'<div class="detail"><b>When:</b> '+esc(m.display_when)+'</div>'+
+					'<div class="detail"><b>Where:</b> '+esc(m.location)+'</div>'+
+					'<div class="detail">'+esc(m.purpose)+'</div>'+
+					(m.join_url?'<div class="detail"><b>Join:</b> <a href="'+esc(m.join_url)+'" target="_blank" rel="noopener">Open meeting link</a>'+(m.join_access?' · '+esc(m.join_access):'')+'</div>':'')+
+					(m.next_step?'<div class="detail"><b>Next:</b> '+esc(m.next_step)+'</div>':'')+'</div>';
+			}
+			ext.innerHTML=html||'<div class="unavailable">No external meetings tracked.</div>';
+			const up=data.board_upcoming||[];
+			let upHtml='';
+			for(const m of up){
+				const label=m.status==='DRAFT'?'draft':(m.status==='OPEN'?'open':m.status.toLowerCase());
+				upHtml+='<div class="item"><strong>'+esc(m.title)+'<span class="badge">'+esc(label)+'</span></strong>'+
+					'<div class="detail"><b>When:</b> '+esc(m.scheduled_for||'Not scheduled')+'</div>'+
+					'<div class="detail"><b>Agenda items:</b> '+esc(m.agenda_count)+'</div></div>';
+			}
+			bup.innerHTML=up.length?upHtml:'<div class="unavailable">No upcoming board meetings (draft or open).</div>';
+			const past=data.board_past||[];
+			let pastHtml='';
+			for(const m of past){
+				const minutes=m.minutes_present?'recorded':'not recorded';
+				pastHtml+='<div class="item"><strong>'+esc(m.title)+'<span class="badge">done</span></strong>'+
+					'<div class="detail"><b>Date:</b> '+esc(m.scheduled_for||String(m.closed_at||'').slice(0,10)||'Unknown')+'</div>'+
+					'<div class="detail"><b>Minutes:</b> '+esc(minutes)+'</div>'+
+					'<div class="detail"><b>Decisions:</b> '+esc(m.decision_count)+'</div></div>';
+			}
+			bpast.innerHTML=past.length?pastHtml:'<div class="unavailable">No board meetings recorded yet.</div>';
+		}catch(err){
+			ext.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>';
+			bup.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>';
+			bpast.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>';
+		}
+	}
+`;
+
+export function renderMeetingsHtml(): string {
+	return ocScreenShell({
+		page: "meetings",
+		title: "Meetings",
+		subtitle: "External meetings on the calendar and the board meeting log: what is confirmed, what is upcoming, what was decided.",
+		panelsHtml: `<section class="panel">
+			<h2>External meetings</h2>
+			<div id="meetings-external-list">Loading…</div>
+		</section>
+		<section class="panel">
+			<h2>Board meetings</h2>
+			<h3>Upcoming</h3>
+			<div id="meetings-board-upcoming">Loading…</div>
+			<h3>Past</h3>
+			<div id="meetings-board-past">Loading…</div>
+		</section>`,
+		script: MEETINGS_SCRIPT,
+		reportId: "meetings",
+	});
+}
+
+// ---------------------------------------------------------------------------
 // Downloadable reports: self-contained, print-friendly HTML documents with
 // the screen's current real data, the report date, and nothing internal
 // (no owner keys, no internal notes, no email addresses).
@@ -1000,4 +1217,51 @@ export function buildGroupsReport(data: GroupsOverview): string {
 	body += `<h2>Group statistics</h2>`;
 	body += `<p><span class="tag-warn">Not yet tracked</span></p><p>${escHtml(data.stats.note)}</p>`;
 	return reportDoc("NWANA group network", reportDate(data.generated_at), body);
+}
+
+export function buildMeetingsReport(data: MeetingsOverview): string {
+	// External-safe by construction: join_url and join_access are never
+	// rendered here (they stay on the owner-gated screen only). Meeting
+	// minutes content stays in the board workspace; only recorded/absent
+	// is reported.
+	let body = `<h2>External meetings</h2>`;
+	body += `<table><thead><tr><th>Meeting</th><th>When</th><th>Where</th><th>Status</th></tr></thead><tbody>`;
+	for (const m of data.external_meetings) {
+		body += `<tr><td><strong>${escHtml(m.title)}</strong><br><span class="note">${escHtml(m.counterparty)}</span></td>` +
+			`<td>${escHtml(m.display_when)}</td>` +
+			`<td>${escHtml(m.location)}</td>` +
+			`<td><span class="${m.status === "confirmed" ? "tag" : "tag-warn"}">${escHtml(m.status)}</span><br><span class="note">${escHtml(m.purpose)}</span>` +
+			(m.next_step ? `<br><span class="note">Next: ${escHtml(m.next_step)}</span>` : "") + `</td></tr>`;
+	}
+	body += `</tbody></table>`;
+	body += `<p class="note">Meeting links, IDs, and passcodes never leave the operating center; they are shown on the owner-gated screen only.</p>`;
+	body += `<h2>Board meetings</h2>`;
+	if (!data.board_upcoming.length && !data.board_past.length) {
+		body += `<p class="note">No board meetings recorded yet.</p>`;
+	} else {
+		if (data.board_upcoming.length) {
+			body += `<h3>Upcoming (draft or open)</h3>`;
+			body += `<table><thead><tr><th>Meeting</th><th>When</th><th>Status</th><th>Agenda items</th></tr></thead><tbody>`;
+			for (const m of data.board_upcoming) {
+				body += `<tr><td><strong>${escHtml(m.title)}</strong></td>` +
+					`<td>${m.scheduled_for ? escHtml(m.scheduled_for) : "Not scheduled"}</td>` +
+					`<td>${escHtml(boardStatusLabel(m.status))}</td>` +
+					`<td>${escHtml(m.agenda_count)}</td></tr>`;
+			}
+			body += `</tbody></table>`;
+		}
+		if (data.board_past.length) {
+			body += `<h3>Past (closed)</h3>`;
+			body += `<table><thead><tr><th>Meeting</th><th>Date</th><th>Minutes</th><th>Decisions</th></tr></thead><tbody>`;
+			for (const m of data.board_past) {
+				const date = m.scheduled_for ?? (m.closed_at ? m.closed_at.slice(0, 10) : "Unknown");
+				body += `<tr><td><strong>${escHtml(m.title)}</strong></td>` +
+					`<td>${escHtml(date)}</td>` +
+					`<td>${m.minutes_present ? "recorded" : "not recorded"}</td>` +
+					`<td>${escHtml(m.decision_count)}</td></tr>`;
+			}
+			body += `</tbody></table>`;
+		}
+	}
+	return reportDoc("NWANA meetings", reportDate(data.generated_at), body);
 }

@@ -85,6 +85,8 @@ import {
 	getPartnersOverview,
 	getFundraisingOverview,
 	getGroupsOverview,
+	getMeetingsOverview,
+	renderMeetingsHtml,
 	buildSitesReport,
 	buildSocialReport,
 	buildAdsReport,
@@ -92,6 +94,7 @@ import {
 	buildPartnersReport,
 	buildFundraisingReport,
 	buildGroupsReport,
+	buildMeetingsReport,
 } from "./operating-center-screens";
 import {
 	createMediaPlan,
@@ -5728,7 +5731,8 @@ export default {
 					url.pathname === "/operating-center/sellers" ||
 					url.pathname === "/operating-center/partners" ||
 					url.pathname === "/operating-center/fundraising" ||
-					url.pathname === "/operating-center/groups")
+					url.pathname === "/operating-center/groups" ||
+					url.pathname === "/operating-center/meetings")
 			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
@@ -5835,8 +5839,10 @@ export default {
 		if (request.method === "GET" && url.pathname === "/operating-center/partners") return htmlPage(renderPartnersHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/fundraising") return htmlPage(renderFundraisingHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/groups") return htmlPage(renderGroupsHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/meetings") return htmlPage(renderMeetingsHtml);
 
 		// ADR-0027: overview APIs for the seven new screens.
+		// ADR-0028: meetings overview.
 		if (request.method === "GET" && url.pathname === "/api/operating-center/sites/overview") {
 			return json(getSitesOverview());
 		}
@@ -5858,10 +5864,14 @@ export default {
 		if (request.method === "GET" && url.pathname === "/api/operating-center/groups/overview") {
 			return json(getGroupsOverview());
 		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/meetings/overview") {
+			return json(await getMeetingsOverview(env.nwana_engine_db));
+		}
 
 		// ADR-0027: downloadable external-ready reports. Owner-key protected
 		// like every other /api/operating-center route; the content itself is
 		// external-safe (no keys, no internal notes, no email addresses).
+		// ADR-0028: meetings report joins the same pattern.
 		const reportFile = (html: string, screen: string, date: string) =>
 			new Response(html, {
 				headers: {
@@ -5871,7 +5881,7 @@ export default {
 				},
 			});
 		{
-			const m = url.pathname.match(/^\/api\/operating-center\/report\/(sites|social|ads|sellers|partners|fundraising|groups)$/);
+			const m = url.pathname.match(/^\/api\/operating-center\/report\/(sites|social|ads|sellers|partners|fundraising|groups|meetings)$/);
 			if (m && request.method === "GET") {
 				const screen = m[1];
 				if (screen === "sites") {
@@ -5897,6 +5907,10 @@ export default {
 				if (screen === "fundraising") {
 					const data = await getFundraisingOverview(env.nwana_engine_db);
 					return reportFile(buildFundraisingReport(data), screen, data.generated_at.slice(0, 10));
+				}
+				if (screen === "meetings") {
+					const data = await getMeetingsOverview(env.nwana_engine_db);
+					return reportFile(buildMeetingsReport(data), screen, data.generated_at.slice(0, 10));
 				}
 				const data = getGroupsOverview();
 				return reportFile(buildGroupsReport(data), screen, data.generated_at.slice(0, 10));

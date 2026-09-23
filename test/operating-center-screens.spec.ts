@@ -11,6 +11,7 @@ import {
 	renderPartnersHtml,
 	renderFundraisingHtml,
 	renderGroupsHtml,
+	renderMeetingsHtml,
 	getSitesOverview,
 	getSocialOverview,
 	getAdsOverview,
@@ -18,6 +19,7 @@ import {
 	getPartnersOverview,
 	getFundraisingOverview,
 	getGroupsOverview,
+	getMeetingsOverview,
 	buildSitesReport,
 	buildSocialReport,
 	buildAdsReport,
@@ -25,6 +27,7 @@ import {
 	buildPartnersReport,
 	buildFundraisingReport,
 	buildGroupsReport,
+	buildMeetingsReport,
 	REPORT_SCREENS,
 } from "../src/operating-center-screens";
 
@@ -40,6 +43,7 @@ const NEW_PAGES: Array<[string, string, string, () => string]> = [
 	["partners", "Partners", "/operating-center/partners", renderPartnersHtml],
 	["fundraising", "Fundraising", "/operating-center/fundraising", renderFundraisingHtml],
 	["groups", "Groups", "/operating-center/groups", renderGroupsHtml],
+	["meetings", "Meetings", "/operating-center/meetings", renderMeetingsHtml],
 ];
 
 const ALL_FIFTEEN: Array<[string, string, string]> = [
@@ -54,7 +58,7 @@ const ALL_FIFTEEN: Array<[string, string, string]> = [
 	...NEW_PAGES.map(([id, label, href]) => [id, label, href] as [string, string, string]),
 ];
 
-describe("operating center menu (ADR-0027): 15 buttons", () => {
+describe("operating center menu (ADR-0028): 16 buttons", () => {
 	it("lists a button for every operating-center page", () => {
 		const menu = operatingCenterMenu("overview");
 		for (const [, label, href] of ALL_FIFTEEN) {
@@ -83,7 +87,7 @@ describe("operating center menu (ADR-0027): 15 buttons", () => {
 	});
 });
 
-describe("new screens (ADR-0027): valid inline scripts", () => {
+describe("new screens (ADR-0027/0028): valid inline scripts", () => {
 	for (const [id, , , render] of NEW_PAGES) {
 		it(`${id} page embeds syntactically valid JavaScript`, () => {
 			const scripts = extractScripts(render());
@@ -117,6 +121,8 @@ describe("new screens (ADR-0027): valid inline scripts", () => {
 		expect(html).not.toContain('id="partners-list"');
 		expect(html).not.toContain('id="fundraising-list"');
 		expect(html).not.toContain('id="groups-list"');
+		expect(html).not.toContain('id="meetings-external-list"');
+		expect(html).not.toContain('id="meetings-board-upcoming"');
 		const scripts = extractScripts(html);
 		for (const body of scripts) {
 			expect(() => new Function(body)).not.toThrow();
@@ -124,7 +130,7 @@ describe("new screens (ADR-0027): valid inline scripts", () => {
 	});
 });
 
-describe("new screens (ADR-0027): honest data, no fabrication", () => {
+describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	it("sites: lists all 7 properties, analytics honestly not connected", () => {
 		const data = getSitesOverview();
 		expect(data.sites).toHaveLength(7);
@@ -196,9 +202,30 @@ describe("new screens (ADR-0027): honest data, no fabrication", () => {
 		expect(data.funnel.member_org).toBe("https://runsignup.com/MemberOrg/NWANANWGroups");
 		expect(data.stats.connected).toBe(false);
 	});
+
+	it("meetings: two real external entries, Integrity 9 confirmed with owner-gated join data", async () => {
+		const fakeDb = {
+			prepare: () => ({
+				all: async () => ({ results: [] }),
+			}),
+		};
+		const data = await getMeetingsOverview(fakeDb as never);
+		expect(data.ok).toBe(true);
+		expect(data.external_meetings).toHaveLength(2);
+		const i9 = data.external_meetings.find((m) => m.id === "integrity9-2026-09-25");
+		expect(i9?.status).toBe("confirmed");
+		expect(i9?.display_when).toContain("2026-09-25");
+		expect(i9?.join_url).toContain("teams.microsoft.com");
+		expect(i9?.join_access).toContain("LC7pm2C9");
+		const zubie = data.external_meetings.find((m) => m.id === "zubie-five-intro");
+		expect(zubie?.status).toBe("awaiting scheduling");
+		// Board log empty in tests: honest empty states, no fabrication.
+		expect(data.board_upcoming).toHaveLength(0);
+		expect(data.board_past).toHaveLength(0);
+	});
 });
 
-describe("reports (ADR-0027): external-safe HTML documents", () => {
+describe("reports (ADR-0027/0028): external-safe HTML documents", () => {
 	const cases: Array<[string, () => string]> = [
 		["sites", () => buildSitesReport(getSitesOverview())],
 		["social", () => buildSocialReport(getSocialOverview())],
@@ -206,10 +233,34 @@ describe("reports (ADR-0027): external-safe HTML documents", () => {
 		["sellers", () => buildSellersReport(getSellersOverview())],
 		["partners", () => buildPartnersReport(getPartnersOverview())],
 		["groups", () => buildGroupsReport(getGroupsOverview())],
+		[
+			"meetings",
+			() =>
+				buildMeetingsReport({
+					ok: true,
+					generated_at: new Date().toISOString(),
+					external_meetings: [
+						{
+							id: "integrity9-2026-09-25",
+							title: "Integrity 9 — exclusive sponsorship seller discussion",
+							counterparty: "Integrity 9 · David Hayob, Chief Revenue Officer",
+							display_when: "Fri 2026-09-25, 2:00-3:00pm CT (3:00-4:00pm ET, 10:00-11:00pm Riga)",
+							location: "Microsoft Teams",
+							purpose: "Discuss an exclusive sponsorship seller partnership.",
+							status: "confirmed",
+							next_step: null,
+							join_url: "https://teams.microsoft.com/meet/214553368452049?p=YT6qRnvYGwa2tq3PU9",
+							join_access: "Meeting ID 214 553 368 452 049 · Passcode LC7pm2C9",
+						},
+					],
+					board_upcoming: [],
+					board_past: [],
+				}),
+		],
 	];
 
-	it("REPORT_SCREENS covers all 7 screens with page and report paths", () => {
-		expect(REPORT_SCREENS).toHaveLength(7);
+	it("REPORT_SCREENS covers all 8 screens with page and report paths", () => {
+		expect(REPORT_SCREENS).toHaveLength(8);
 		for (const s of REPORT_SCREENS) {
 			expect(s.reportPath).toBe(`/api/operating-center/report/${s.id}`);
 			expect(s.path).toBe(`/operating-center/${s.id}`);
@@ -235,6 +286,30 @@ describe("reports (ADR-0027): external-safe HTML documents", () => {
 		expect(html).toContain("Integrity 9");
 		expect(html).toContain("2026-09-25");
 		expect(html).toMatch(/not yet tracked/i);
+	});
+
+	it("meetings report: dated, print-friendly, excludes join links/IDs/passcodes", async () => {
+		const fakeDb = {
+			prepare: () => ({
+				all: async () => ({ results: [] }),
+			}),
+		};
+		const data = await getMeetingsOverview(fakeDb as never);
+		const html = buildMeetingsReport(data);
+		expect(html).toContain("<!doctype html>");
+		expect(html).toContain("Report date:");
+		expect(html).toContain("@media print");
+		expect(html).toContain("Integrity 9");
+		expect(html).toContain("Zubie Five");
+		expect(html).toContain("No board meetings recorded yet");
+		// Join data stays on the owner-gated screen only.
+		expect(html).not.toContain("teams.microsoft.com");
+		expect(html).not.toContain("LC7pm2C9");
+		expect(html).not.toContain("214 553 368 452 049");
+		expect(html).not.toContain("zubiefive.com/meet");
+		expect(html).not.toContain("owner_key");
+		expect(html).not.toContain("Bearer");
+		expect(html).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
 	});
 
 	it("fundraising report shows goal, pipeline, and dated prospects without emails", async () => {

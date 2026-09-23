@@ -473,13 +473,14 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 	});
 }
 
-export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity" | "sites" | "social" | "ads" | "sellers" | "partners" | "fundraising" | "groups";
+export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity" | "sites" | "social" | "ads" | "sellers" | "partners" | "fundraising" | "groups" | "meetings";
 
 /**
  * ADR-0023: shared button menu rendered directly under the header on every
  * operating-center page. Same markup everywhere so the cockpit navigates as one.
  * ADR-0027: 15 buttons (7 new screens: sites, social, ads, sellers,
  * partners, fundraising, groups).
+ * ADR-0028: 16 buttons (meetings added).
  */
 export function operatingCenterMenu(active: OperatingCenterPageId): string {
 	const items: Array<{ id: OperatingCenterPageId; label: string; href: string }> = [
@@ -498,6 +499,7 @@ export function operatingCenterMenu(active: OperatingCenterPageId): string {
 		{ id: "partners", label: "Partners", href: "/operating-center/partners" },
 		{ id: "fundraising", label: "Fundraising", href: "/operating-center/fundraising" },
 		{ id: "groups", label: "Groups", href: "/operating-center/groups" },
+		{ id: "meetings", label: "Meetings", href: "/operating-center/meetings" },
 	];
 	return (
 		'<nav class="oc-menu" aria-label="Operating center">' +
@@ -621,6 +623,11 @@ export function renderOperatingCenterHtml(): string {
 			<div id="groups-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/groups">Open groups →</a></p>
 		</section>
+		<section class="panel" id="meetings-card" style="margin-top:20px"><h2>Meetings</h2>
+			<p class="meta">External meetings on the calendar and the board meeting log, each with a downloadable report.</p>
+			<div id="meetings-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/meetings">Open meetings →</a></p>
+		</section>
 		<section class="panel" id="board-summary-panel" style="margin-top:20px"><h2>Board workspace</h2>
 			<div id="board-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/board">Open board workspace →</a></p>
@@ -661,6 +668,7 @@ export function renderOperatingCenterHtml(): string {
 			loadPartnersSummary();
 			loadFundraisingSummary();
 			loadGroupsSummary();
+			loadMeetingsSummary();
 		}
 		async function pickNextMeetingLocal(meetings){
 			const today=new Date().toISOString().slice(0,10);
@@ -817,6 +825,19 @@ export function renderOperatingCenterHtml(): string {
 				const ladder=data.ladder||[];
 				box.innerHTML='<div class="meta">'+ladder.length+'-step license ladder</div>'+
 					'<div class="meta">Group counts: <span class="unavailable">not yet tracked</span></div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadMeetingsSummary(){
+			const box=document.querySelector('#meetings-summary');
+			try{
+				const data=await api('/api/operating-center/meetings/overview');
+				const ext=data.external_meetings||[];
+				const actionable=ext.filter(m=>m.status==='confirmed'||m.status==='awaiting scheduling');
+				const boardCount=(data.board_upcoming||[]).length+(data.board_past||[]).length;
+				let html='<div class="meta">'+ext.length+' external meeting'+(ext.length===1?'':'s')+' tracked ('+actionable.length+' upcoming)</div>';
+				if(actionable.length)html+='<div class="meta">Next: '+esc(actionable[0].title)+' · '+esc(actionable[0].display_when)+'</div>';
+				html+='<div class="meta">Board meetings in the log: '+boardCount+'</div>';
+				box.innerHTML=html;
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadLifecycleSummary(){
