@@ -285,7 +285,7 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		const report = buildAdsReport(data);
 		expect(report).toContain("LIVE GOOGLE ADS ACCOUNT");
 		expect(report).toContain("NWANA 5K race, September 27");
-		expect(report).toContain("PLANNED / NOT CREATED");
+		expect(report).toContain("MACHINE PROPOSALS");
 		// The screen renders the same live block client-side.
 		expect(renderAdsHtml()).toContain("LIVE GOOGLE ADS ACCOUNT");
 		expect(renderAdsHtml()).toContain("No campaigns found in the connected Google Ads account.");
@@ -310,6 +310,87 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		const report = buildAdsReport(data);
 		expect(report).toContain("Read error");
 		expect(report).toContain("Unrecognized field");
+	});
+
+	it("ads: Series proposal shows POSSIBLE DUPLICATE / REVIEW", async () => {
+		// The live account already contains "2026 NWANA Open Nordic Walking
+		// Series": the hardcoded Series proposal is a confirmed conflict,
+		// never shown as a fresh proposal.
+		const accountWithSeries = async () => ({
+			ok: true,
+			customer_id: "6758500147",
+			date_range: "2026-08-26 to 2026-09-23",
+			campaigns: [
+				{ id: "999", name: "2026 NWANA Open Nordic Walking Series", status: "ENABLED", daily_budget_usd: 10.97, impressions: 500, clicks: 40, conversions: 2, cost_usd: 400.0 },
+			],
+		});
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, accountWithSeries);
+		const series = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
+		expect(series).toBeDefined();
+		expect(series!.status).toBe("POSSIBLE DUPLICATE / REVIEW");
+		expect(series!.next_action).toBe("Review against existing live Series campaign before any creation");
+		// The hardcoded conflict holds even when the live read is empty:
+		// no automatic equivalence detection is built at this step.
+		const empty = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const seriesEmpty = empty.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
+		expect(seriesEmpty!.status).toBe("POSSIBLE DUPLICATE / REVIEW");
+		const report = buildAdsReport(data);
+		expect(report).toContain("POSSIBLE DUPLICATE / REVIEW");
+		expect(report).toContain("Review against existing live Series campaign before any creation");
+	});
+
+	it("ads: Founding Circle proposal stays PROPOSED when the name is not live", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const fc = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Founding Circle \u00b7 Donate");
+		expect(fc).toBeDefined();
+		expect(fc!.status).toBe("PROPOSED");
+		expect(fc!.next_action).toBe("Needs owner review before creation");
+		const report = buildAdsReport(data);
+		expect(report).toContain("NWANA \u00b7 Founding Circle \u00b7 Donate");
+	});
+
+	it("ads: live campaigns and machine proposals stay separate layers", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, liveCampaignsReader);
+		const liveNames = data.live_account.campaigns.map((c) => c.name);
+		const proposalNames = data.machine_proposals.map((p) => p.name);
+		for (const name of proposalNames) {
+			expect(liveNames).not.toContain(name);
+		}
+		const report = buildAdsReport(data);
+		expect(report).toContain("LIVE GOOGLE ADS ACCOUNT");
+		expect(report).toContain("MACHINE PROPOSALS");
+		expect(report).not.toContain("PLANNED / NOT CREATED");
+		expect(renderAdsHtml()).toContain("MACHINE PROPOSALS");
+		expect(renderAdsHtml()).not.toContain("PLANNED / NOT CREATED");
+	});
+
+	it("ads: proposal policy result comes from the existing validator", async () => {
+		const { validateCampaignSpec } = await import("../src/google-ads-state");
+		const { buildDesiredState } = await import("../src/google-ads-state");
+		const spec = buildDesiredState();
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		expect(data.machine_proposals).toHaveLength(spec.campaigns.length);
+		for (let i = 0; i < spec.campaigns.length; i++) {
+			expect(data.machine_proposals[i].policy_violations).toEqual(
+				validateCampaignSpec(spec.campaigns[i]),
+			);
+		}
+		const report = buildAdsReport(data);
+		expect(report).toContain("Ad Grants policy: PASS");
+	});
+
+	it("ads: the screen performs zero Google Ads mutations", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, liveCampaignsReader);
+		expect(data.google_ads.execution_allowed).toBe(false);
+		// No mutation endpoints, method calls, or creation CTAs anywhere
+		// in the screen script or the downloadable report.
+		const html = renderAdsHtml();
+		expect(html).not.toContain("googleAds:mutate");
+		expect(html).not.toContain("mutate");
+		expect(html).not.toContain("Create campaign");
+		const report = buildAdsReport(data);
+		expect(report).not.toContain("googleAds:mutate");
+		expect(report).not.toContain("Create campaign");
 	});
 
 	it("ads: live GAQL query uses the exact UI date range", () => {
