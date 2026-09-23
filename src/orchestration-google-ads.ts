@@ -12,18 +12,13 @@
  * 2026, Founding Circle) is carried here as explicit channel-input
  * data, keyed by source identity. It is supplied input, not a
  * manually maintained campaign list: which campaigns exist is decided
- * by the orchestration evidence, not by this file. A DECIDED source
- * without recorded channel inputs yields a partial intent carrying
- * only confirmed facts (identity, purpose, confirmed donation
- * destination); the ADR-0031 pipeline reports it as INSUFFICIENT_INPUT
- * with the exact missing fields instead of inventing campaign content.
+ * by the orchestration evidence, not by this file.
  */
 
 import {
 	adaptFund,
 	adaptOwnerDirective,
 	adaptRegistryObject,
-	adaptRuleDerivedAsset,
 	adaptSponsorshipAsset,
 	proposalIdentity,
 	type AdapterResult,
@@ -34,12 +29,11 @@ import {
 import { DISTRIBUTION_ACTIONS, type DistributionActionConfig } from "./distribution-evidence";
 import {
 	collectSources,
-	NWANA_RUNSIGNUP_DONATION_URL,
+	collectStaticSources,
 	OWNER_DIRECTIVES,
 	type NormalizedSource,
 } from "./orchestration-sources";
 import {
-	GENERIC_RULES,
 	orchestrate,
 	type OrchestrationDecision,
 	type OrchestrationEvidence,
@@ -164,7 +158,7 @@ const seriesSitelinks: SitelinkHint[] = [
 // Founding Circle: owner directive source (DIR-FOUNDING-CIRCLE-2026)
 // ---------------------------------------------------------------------------
 
-const FC_DONATE = NWANA_RUNSIGNUP_DONATION_URL;
+const FC_DONATE = "https://sport.nwaofna.org/Race/Donate/FL/SaintPetersburg/NWANANordicWalkingSPORT";
 const FC_ABOUT = "https://nwaofna.org";
 
 const foundingCircleAdGroups: AdGroupHint[] = [
@@ -311,25 +305,20 @@ function findAction(actionId: string): DistributionActionConfig | undefined {
  * Builds the channel-specific Google Ads intent for one DECIDED decision.
  * Dispatches on the source kind through the registered adapters; adding
  * a new source kind means adding an adapter, not editing a switch.
- *
- * Recorded channel inputs (GOOGLE_ADS_CHANNEL_INPUTS) are used when
- * present. A DECIDED source without recorded inputs is NOT an error:
- * the intent is built partial, carrying only confirmed facts from the
- * normalized source (identity, factual name, purpose, confirmed
- * donation destination, source facts). Missing campaign fields stay
- * missing; the ADR-0031 pipeline turns the partial intent into an
- * INSUFFICIENT_INPUT proposal with the exact missing fields.
  */
 export function buildGoogleAdsIntent(
 	source: NormalizedSource,
 	decision: OrchestrationDecision,
 ): AdapterResult {
 	const inputs = GOOGLE_ADS_CHANNEL_INPUTS[source.source_identity];
-	// Partial-intent fallbacks: confirmed facts only, never invented.
-	const partialName = inputs?.name ?? source.factual_title ?? null;
-	const partialTargetUrl =
-		inputs?.target_url ?? source.donation_destinations[0]?.url ?? null;
-	const partialFacts = inputs ? inputs.source_facts : [...source.source_facts];
+	if (!inputs) {
+		return {
+			ok: false,
+			error:
+				`No Google Ads channel inputs recorded for source ${source.source_identity}. ` +
+				`Intent production stops rather than inventing campaign content.`,
+		};
+	}
 
 	if (source.source_kind === "REGISTRY_OBJECT") {
 		const actionEvidence = decision.evidence.find(
@@ -349,15 +338,15 @@ export function buildGoogleAdsIntent(
 				? { action_id: action.action_id, rule_id: action.rule_id, channel: action.channel }
 				: undefined,
 			purpose: source.purpose ?? "",
-			name: partialName,
-			target_url: partialTargetUrl,
-			cta: inputs?.cta ?? null,
-			audience: inputs?.audience ?? null,
-			source_facts: partialFacts,
-			daily_budget: inputs?.daily_budget ?? null,
-			geo_target_id: inputs?.geo_target_id ?? null,
-			ad_groups: inputs?.ad_groups ?? [],
-			sitelinks: inputs?.sitelinks ?? [],
+			name: inputs.name,
+			target_url: inputs.target_url,
+			cta: inputs.cta,
+			audience: inputs.audience,
+			source_facts: inputs.source_facts,
+			daily_budget: inputs.daily_budget,
+			geo_target_id: inputs.geo_target_id,
+			ad_groups: inputs.ad_groups,
+			sitelinks: inputs.sitelinks,
 		});
 	}
 
@@ -365,35 +354,19 @@ export function buildGoogleAdsIntent(
 		return adaptOwnerDirective({
 			directive_id: source.source_identity,
 			purpose: source.purpose ?? "",
-			campaign_name: partialName,
-			target_url: partialTargetUrl,
-			cta: inputs?.cta ?? null,
-			audience: inputs?.audience ?? null,
-			source_facts: partialFacts,
-			daily_budget: inputs?.daily_budget ?? null,
-			geo_target_id: inputs?.geo_target_id ?? null,
-			ad_groups: inputs?.ad_groups ?? [],
-			sitelinks: inputs?.sitelinks ?? [],
+			campaign_name: inputs.name,
+			target_url: inputs.target_url,
+			cta: inputs.cta,
+			audience: inputs.audience,
+			source_facts: inputs.source_facts,
+			daily_budget: inputs.daily_budget,
+			geo_target_id: inputs.geo_target_id,
+			ad_groups: inputs.ad_groups,
+			sitelinks: inputs.sitelinks,
 			// No explicit confirmed source object relationship and no
 			// confirmed Google Ads distribution action: both stay null
 			// rather than invented.
 			source_object: null,
-		});
-	}
-
-	if (source.source_kind === "RULE_DERIVED_ASSET") {
-		return adaptRuleDerivedAsset({
-			asset_id: source.source_identity,
-			name: partialName,
-			purpose: source.purpose ?? "",
-			target_url: partialTargetUrl,
-			cta: inputs?.cta ?? null,
-			audience: inputs?.audience ?? null,
-			source_facts: partialFacts,
-			daily_budget: inputs?.daily_budget ?? null,
-			geo_target_id: inputs?.geo_target_id ?? null,
-			ad_groups: inputs?.ad_groups ?? [],
-			sitelinks: inputs?.sitelinks ?? [],
 		});
 	}
 
@@ -402,15 +375,15 @@ export function buildGoogleAdsIntent(
 			fund_id: source.source_identity,
 			name: source.factual_title,
 			purpose: source.purpose ?? "",
-			campaign_name: partialName,
-			target_url: partialTargetUrl,
-			cta: inputs?.cta ?? null,
-			audience: inputs?.audience ?? null,
-			source_facts: partialFacts,
-			daily_budget: inputs?.daily_budget ?? null,
-			geo_target_id: inputs?.geo_target_id ?? null,
-			ad_groups: inputs?.ad_groups ?? [],
-			sitelinks: inputs?.sitelinks ?? [],
+			campaign_name: inputs.name,
+			target_url: inputs.target_url,
+			cta: inputs.cta,
+			audience: inputs.audience,
+			source_facts: inputs.source_facts,
+			daily_budget: inputs.daily_budget,
+			geo_target_id: inputs.geo_target_id,
+			ad_groups: inputs.ad_groups,
+			sitelinks: inputs.sitelinks,
 		});
 	}
 
@@ -419,15 +392,15 @@ export function buildGoogleAdsIntent(
 			asset_id: source.source_identity,
 			name: source.factual_title,
 			purpose: source.purpose ?? "",
-			campaign_name: partialName,
-			target_url: partialTargetUrl,
-			cta: inputs?.cta ?? null,
-			audience: inputs?.audience ?? null,
-			source_facts: partialFacts,
-			daily_budget: inputs?.daily_budget ?? null,
-			geo_target_id: inputs?.geo_target_id ?? null,
-			ad_groups: inputs?.ad_groups ?? [],
-			sitelinks: inputs?.sitelinks ?? [],
+			campaign_name: inputs.name,
+			target_url: inputs.target_url,
+			cta: inputs.cta,
+			audience: inputs.audience,
+			source_facts: inputs.source_facts,
+			daily_budget: inputs.daily_budget,
+			geo_target_id: inputs.geo_target_id,
+			ad_groups: inputs.ad_groups,
+			sitelinks: inputs.sitelinks,
 		});
 	}
 
@@ -440,47 +413,20 @@ export function buildGoogleAdsIntent(
 }
 
 export function evidenceBundle(): OrchestrationEvidence {
-	return {
-		actions: DISTRIBUTION_ACTIONS,
-		directives: OWNER_DIRECTIVES,
-		genericRules: GENERIC_RULES,
-	};
+	return { actions: DISTRIBUTION_ACTIONS, directives: OWNER_DIRECTIVES };
 }
 
 /**
- * Explicit owner evidence outranks generic rule evidence for the same
- * logical campaign: when two decisions resolve to the same proposal
- * identity, the intent shaped by the stronger evidence wins.
+ * The production Google Ads intent feed: static sources -> orchestration
+ * -> DECIDED GOOGLE_ADS decisions -> channel intents. Synchronous because
+ * the current Google Ads decisions rest on static evidence only; D1-backed
+ * sources carry no Google Ads evidence in this step.
  */
-function evidenceRank(decision: OrchestrationDecision): number {
-	const ranks: Record<string, number> = {
-		OWNER_DIRECTIVE: 0,
-		DISTRIBUTION_ACTION: 1,
-		DISTRIBUTION_RULE: 2,
-		GENERIC_RULE: 3,
-	};
-	const kinds = decision.evidence.map((e) => ranks[e.kind] ?? 99);
-	return kinds.length > 0 ? Math.min(...kinds) : 99;
-}
-
-/**
- * The production Google Ads intent feed: all canonical sources (static
- * plus live D1 stores) -> orchestration -> DECIDED GOOGLE_ADS decisions
- * -> channel intents. D1-backed sources flow into the same feed as
- * static sources; no source kind is excluded.
- *
- * One intent per logical campaign: decisions that resolve to the same
- * proposal identity are deduplicated (explicit evidence wins over
- * generic rule evidence), so the generic fundraising rule can never
- * create a duplicate proposal for a campaign the owner already ordered.
- */
-export async function orchestrationGoogleAdsIntents(
-	db: D1Database | null,
-): Promise<NormalizedCampaignIntent[]> {
-	const sources = await collectSources(db);
+export function orchestrationGoogleAdsIntents(): NormalizedCampaignIntent[] {
+	const sources = collectStaticSources();
 	const decisions = orchestrate(sources, evidenceBundle());
 	const byIdentity = new Map(sources.map((s) => [s.source_identity, s]));
-	const deduped = new Map<string, { decision: OrchestrationDecision; intent: NormalizedCampaignIntent }>();
+	const intents: NormalizedCampaignIntent[] = [];
 	for (const decision of decisions) {
 		if (decision.state !== "DECIDED" || decision.channel !== "GOOGLE_ADS") continue;
 		const source = byIdentity.get(decision.source_identity);
@@ -495,24 +441,9 @@ export async function orchestrationGoogleAdsIntents(
 				`Google Ads intent for decision ${decision.decision_id} failed: ${built.error}`,
 			);
 		}
-		const id = proposalIdentity(built.intent);
-		const existing = deduped.get(id);
-		if (!existing || evidenceRank(decision) < evidenceRank(existing.decision)) {
-			deduped.set(id, { decision, intent: built.intent });
-		}
+		intents.push(built.intent);
 	}
-	// Feed order follows the winning decision's decision_id order, exactly
-	// as before deduplication: adding generic-rule decisions never
-	// reorders the intents existing consumers already see.
-	return [...deduped.values()]
-		.sort((a, b) =>
-			a.decision.decision_id < b.decision.decision_id
-				? -1
-				: a.decision.decision_id > b.decision.decision_id
-					? 1
-					: 0,
-		)
-		.map((entry) => entry.intent);
+	return intents;
 }
 
 /**
