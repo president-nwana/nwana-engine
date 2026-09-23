@@ -50,8 +50,13 @@ SELECT campaign.id, campaign.name, campaign.status,
        metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
 FROM campaign
 WHERE campaign.status != 'REMOVED'
-DURING LAST_30_DAYS
+AND segments.date DURING LAST_30_DAYS
 ```
+
+Bugfix 2026-09-23: the first version of this ADR shipped the date range as a
+bare `DURING LAST_30_DAYS` clause after FROM, which is invalid GAQL. The
+Google Ads API requires the date range as a condition on `segments.date`.
+Only the query changed; fields, endpoint, and everything else are untouched.
 
 Endpoint: `POST https://googleads.googleapis.com/v22/customers/6758500147/googleAds:search`
 with `Authorization: Bearer <refreshed access token>`.
