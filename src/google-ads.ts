@@ -355,7 +355,12 @@ export const GOOGLE_ADS_REDIRECT_URI = REDIRECT_URI;
 // ---------------------------------------------------------------------------
 
 export const GOOGLE_ADS_LIVE_CUSTOMER_ID = "6758500147";
-export const GOOGLE_ADS_METRICS_RANGE = "LAST_30_DAYS";
+// Exact range matching the owner's Google Ads UI (Aug 26 - Sep 23, 2026),
+// so live metrics line up with what the UI shows. No predefined relative
+// range: relative ranges drift away from the UI's fixed window.
+export const GOOGLE_ADS_METRICS_START = "2026-08-26";
+export const GOOGLE_ADS_METRICS_END = "2026-09-23";
+export const GOOGLE_ADS_METRICS_LABEL = `${GOOGLE_ADS_METRICS_START} to ${GOOGLE_ADS_METRICS_END}`;
 
 export interface GoogleAdsLiveCampaign {
 	id: string;
@@ -383,7 +388,7 @@ export function buildLiveCampaignsQuery(): string {
 		"metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros",
 		"FROM campaign",
 		"WHERE campaign.status != 'REMOVED'",
-		`AND segments.date DURING ${GOOGLE_ADS_METRICS_RANGE}`,
+		`AND segments.date BETWEEN '${GOOGLE_ADS_METRICS_START}' AND '${GOOGLE_ADS_METRICS_END}'`,
 	].join(" ");
 }
 
@@ -435,7 +440,7 @@ export async function getGoogleAdsAccountSnapshot(
 		return {
 			ok: false,
 			customer_id: customerId,
-			date_range: GOOGLE_ADS_METRICS_RANGE,
+			date_range: GOOGLE_ADS_METRICS_LABEL,
 			campaigns: [],
 			error: `Not connected: ${missing.join(", ")} missing.`,
 		};
@@ -454,7 +459,7 @@ export async function getGoogleAdsAccountSnapshot(
 			return {
 				ok: false,
 				customer_id: customerId,
-				date_range: GOOGLE_ADS_METRICS_RANGE,
+				date_range: GOOGLE_ADS_METRICS_LABEL,
 				campaigns: [],
 				error: "Not connected: no OAuth credential stored yet.",
 			};
@@ -469,14 +474,14 @@ export async function getGoogleAdsAccountSnapshot(
 		return {
 			ok: true,
 			customer_id: customerId,
-			date_range: GOOGLE_ADS_METRICS_RANGE,
+			date_range: GOOGLE_ADS_METRICS_LABEL,
 			campaigns,
 		};
 	} catch (error) {
 		return {
 			ok: false,
 			customer_id: customerId,
-			date_range: GOOGLE_ADS_METRICS_RANGE,
+			date_range: GOOGLE_ADS_METRICS_LABEL,
 			campaigns: [],
 			error: error instanceof Error ? error.message : "Google Ads account read failed",
 		};
