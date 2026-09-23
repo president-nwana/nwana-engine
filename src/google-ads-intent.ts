@@ -21,7 +21,6 @@ import type {
 /** Source kinds the adapters currently know how to normalize. */
 export type IntentSourceKind =
 	| "REGISTRY_OBJECT"
-	| "RULE_DERIVED_ASSET"
 	| "FUND"
 	| "SPONSORSHIP_ASSET"
 	| "OWNER_DIRECTIVE";
@@ -318,59 +317,6 @@ export function adaptSponsorshipAsset(input: SponsorshipAssetInput): AdapterResu
 	const facts: string[] = [...(input.source_facts ?? [])];
 	if (input.description) facts.push(input.description);
 	intent.source_facts = facts;
-	intent.daily_budget = input.daily_budget ?? null;
-	intent.geo_target_id = input.geo_target_id ?? null;
-	intent.ad_groups = [...(input.ad_groups ?? [])];
-	intent.sitelinks = [...(input.sitelinks ?? [])];
-	return { ok: true, intent };
-}
-
-// ---------------------------------------------------------------------------
-// Rule-derived asset adapter
-// ---------------------------------------------------------------------------
-
-export interface RuleDerivedAssetInput {
-	/** Stable asset id, e.g. "instructor-growth-fund". Required. */
-	asset_id: string;
-	name?: string | null;
-	/** Campaign purpose, e.g. "FUNDRAISING". Required. */
-	purpose: string;
-	/** Confirmed donation destination, when the source carries one. */
-	target_url?: string | null;
-	cta?: string | null;
-	audience?: string | null;
-	source_facts?: string[];
-	daily_budget?: number | null;
-	geo_target_id?: number | null;
-	ad_groups?: AdGroupHint[];
-	sitelinks?: SitelinkHint[];
-}
-
-/**
- * Normalizes a rule-derived asset (a machine asset that exists only as
- * the named asset of a distribution rule). Carries only confirmed facts:
- * the asset id, name, purpose, and confirmed destination when one is
- * recorded. Missing campaign inputs surface as INSUFFICIENT_INPUT
- * later; they are never invented here.
- */
-export function adaptRuleDerivedAsset(input: RuleDerivedAssetInput): AdapterResult {
-	const asset_id = requireIdentity(input.asset_id, "asset_id");
-	if (!asset_id) {
-		return { ok: false, error: "rule-derived asset adapter: asset_id is required" };
-	}
-	const purpose = requireIdentity(input.purpose, "purpose");
-	if (!purpose) {
-		return { ok: false, error: "rule-derived asset adapter: purpose is required" };
-	}
-	const intent = baseIntent("RULE_DERIVED_ASSET", "OBJECT_DERIVED");
-	intent.source_identity = asset_id;
-	intent.source_object = { object_id: asset_id, object_type: null, title: input.name ?? null };
-	intent.purpose = purpose;
-	intent.name = input.name ?? null;
-	intent.target_url = input.target_url ?? null;
-	intent.cta = input.cta ?? null;
-	intent.audience = input.audience ?? null;
-	intent.source_facts = [...(input.source_facts ?? [])];
 	intent.daily_budget = input.daily_budget ?? null;
 	intent.geo_target_id = input.geo_target_id ?? null;
 	intent.ad_groups = [...(input.ad_groups ?? [])];
