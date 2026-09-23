@@ -15,7 +15,7 @@ import { buildDesiredState } from "./google-ads-state";
 // the existing live integration (src/google-ads.ts), never a hardcoded flag.
 // ADR-0030: the screen is a read-only operational view of the real account:
 // live campaigns come from the Google Ads API, never from the planned spec.
-import { getGoogleAdsStatus, getGoogleAdsAccountSnapshot, GOOGLE_ADS_LIVE_CUSTOMER_ID, type GoogleAdsEnv, type GoogleAdsLiveCampaign } from "./google-ads";
+import { getGoogleAdsStatus, getGoogleAdsAccountSnapshot, GOOGLE_ADS_LIVE_CUSTOMER_ID, GOOGLE_ADS_METRICS_LABEL, type GoogleAdsEnv, type GoogleAdsLiveCampaign } from "./google-ads";
 
 export type ReportScreenId =
 	| "sites"
@@ -294,7 +294,7 @@ export async function getAdsOverview(
 		liveAccount = {
 			available: false,
 			customer_id: GOOGLE_ADS_LIVE_CUSTOMER_ID,
-			date_range: "LAST_30_DAYS",
+			date_range: GOOGLE_ADS_METRICS_LABEL,
 			campaigns: [],
 		};
 	}
@@ -349,7 +349,7 @@ const ADS_SCRIPT = `
 			html+='</div>';
 			const live=data.live_account;
 			if(live&&live.available){
-				html+='<h3>LIVE GOOGLE ADS ACCOUNT</h3><p class="meta">Real data from account '+esc(live.customer_id)+', last 30 days. Read-only; the machine never changes campaigns.</p>';
+				html+='<h3>LIVE GOOGLE ADS ACCOUNT</h3><p class="meta">Real data from account '+esc(live.customer_id)+', '+esc(live.date_range)+'. Read-only; the machine never changes campaigns.</p>';
 				if(live.error){
 					html+='<div class="item"><strong>Account data<span class="badge-warn">Read error</span></strong><div class="detail">Could not read account data: '+esc(live.error)+'</div></div>';
 				}else if((live.campaigns||[]).length===0){
@@ -1239,7 +1239,7 @@ export function buildAdsReport(data: AdsOverview): string {
 	}
 	if (live.available) {
 		body += `<h2>LIVE GOOGLE ADS ACCOUNT</h2>`;
-		body += `<p class="note">Real data from account ${escHtml(live.customer_id)}, last 30 days. Read-only; the machine never changes campaigns.</p>`;
+		body += `<p class="note">Real data from account ${escHtml(live.customer_id)}, ${escHtml(live.date_range)}. Read-only; the machine never changes campaigns.</p>`;
 		if (live.error) {
 			body += `<p><strong>Account data</strong> <span class="tag-warn">Read error</span></p><p>Could not read account data: ${escHtml(live.error)}</p>`;
 		} else if (live.campaigns.length === 0) {
