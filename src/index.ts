@@ -5850,7 +5850,7 @@ export default {
 			return json(getSocialOverview());
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/ads/overview") {
-			return json(getAdsOverview());
+			return json(await getAdsOverview(env));
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/sellers/overview") {
 			return json(getSellersOverview());
@@ -5893,7 +5893,7 @@ export default {
 					return reportFile(buildSocialReport(data), screen, data.generated_at.slice(0, 10));
 				}
 				if (screen === "ads") {
-					const data = getAdsOverview();
+					const data = await getAdsOverview(env);
 					return reportFile(buildAdsReport(data), screen, data.generated_at.slice(0, 10));
 				}
 				if (screen === "sellers") {

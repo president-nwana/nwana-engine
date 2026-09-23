@@ -30,6 +30,7 @@ import {
 	buildMeetingsReport,
 	REPORT_SCREENS,
 } from "../src/operating-center-screens";
+import type { GoogleAdsEnv } from "../src/google-ads";
 
 function extractScripts(html: string): string[] {
 	return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
@@ -151,16 +152,75 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		expect(youtube?.url).toBeNull();
 	});
 
-	it("ads: not connected, planned campaigns labeled as not live", () => {
-		const data = getAdsOverview();
-		expect(data.google_ads.connected).toBe(false);
+	it("ads: reads the real Google Ads status, never a hardcoded flag", async () => {
+		// ADR-0029 regression: the ADR-0027 screen hardcoded "Not connected"
+		// even though the live integration was connected. The status reader
+		// is injectable so the test never touches Google.
+		const connectedReader = async () => ({
+			ok: true,
+			connected: true,
+			configured: true,
+			access_level: "EXPLORER" as const,
+			customers: ["customers/6758500147"],
+			execution_allowed: false as const,
+		});
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedReader);
+		expect(data.google_ads.connected).toBe(true);
+		expect(data.google_ads.configured).toBe(true);
+		expect(data.google_ads.access_level).toBe("EXPLORER");
+		expect(data.google_ads.customers).toContain("customers/6758500147");
+		expect(data.google_ads.execution_allowed).toBe(false);
+		// A connected integration must never render "Not connected".
+		expect(JSON.stringify(data.google_ads)).not.toContain("Not connected");
+		expect(data.google_ads.note).toContain("customers/6758500147");
+		const report = buildAdsReport(data);
+		expect(report).toContain("Connected");
+		expect(report).not.toMatch(/Google Ads<\/strong> <span class="tag-warn">Not connected/);
+		expect(report).toContain("customers/6758500147");
+		expect(report).not.toContain("owner login");
+		// Planned campaigns stay a separate section, clearly not created.
 		expect(data.google_analytics.connected).toBe(false);
 		expect(data.planned_campaigns).toHaveLength(2);
 		for (const c of data.planned_campaigns) {
 			expect(c.status_in_account).toContain("Not created");
 			expect(c.daily_budget).toBeGreaterThan(0);
 		}
-		expect(data.will_show_once_connected.length).toBeGreaterThan(0);
+		expect(data.capabilities.length).toBeGreaterThan(0);
+	});
+
+	it("ads: a real connection error surfaces the real error", async () => {
+		const errorReader = async () => ({
+			ok: false,
+			connected: false,
+			configured: true,
+			access_level: "EXPLORER" as const,
+			customers: [] as string[],
+			execution_allowed: false as const,
+			error: "invalid_grant: Token has been expired or revoked.",
+		});
+		const data = await getAdsOverview({} as GoogleAdsEnv, errorReader);
+		expect(data.google_ads.connected).toBe(false);
+		expect(data.google_ads.error).toContain("invalid_grant");
+		expect(data.google_ads.note).toContain("invalid_grant");
+		const report = buildAdsReport(data);
+		expect(report).toContain("invalid_grant");
+	});
+
+	it("ads: missing configuration renders an honest not-connected state", async () => {
+		const missingReader = async () => ({
+			ok: false,
+			connected: false,
+			configured: false,
+			access_level: "EXPLORER" as const,
+			customers: [] as string[],
+			execution_allowed: false as const,
+			missing_configuration: ["GOOGLE_ADS_CLIENT_ID"],
+		});
+		const data = await getAdsOverview({} as GoogleAdsEnv, missingReader);
+		expect(data.google_ads.connected).toBe(false);
+		expect(data.google_ads.note).toContain("GOOGLE_ADS_CLIENT_ID");
+		const report = buildAdsReport(data);
+		expect(report).toContain("GOOGLE_ADS_CLIENT_ID");
 	});
 
 	it("sellers: real pipeline, Integrity 9 call dated, Zubie Five answers honest", () => {
@@ -226,10 +286,20 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 });
 
 describe("reports (ADR-0027/0028): external-safe HTML documents", () => {
-	const cases: Array<[string, () => string]> = [
+	// ADR-0029: the ads report is built from the real Google Ads state via
+	// an injected reader, so report tests never call Google.
+	const connectedAdsReader = async () => ({
+		ok: true,
+		connected: true,
+		configured: true,
+		access_level: "EXPLORER" as const,
+		customers: ["customers/6758500147"],
+		execution_allowed: false as const,
+	});
+	const cases: Array<[string, () => string | Promise<string>]> = [
 		["sites", () => buildSitesReport(getSitesOverview())],
 		["social", () => buildSocialReport(getSocialOverview())],
-		["ads", () => buildAdsReport(getAdsOverview())],
+		["ads", async () => buildAdsReport(await getAdsOverview({} as GoogleAdsEnv, connectedAdsReader))],
 		["sellers", () => buildSellersReport(getSellersOverview())],
 		["partners", () => buildPartnersReport(getPartnersOverview())],
 		["groups", () => buildGroupsReport(getGroupsOverview())],
@@ -268,8 +338,8 @@ describe("reports (ADR-0027/0028): external-safe HTML documents", () => {
 	});
 
 	for (const [id, build] of cases) {
-		it(`${id} report: dated, styled, print-friendly, external-safe`, () => {
-			const html = build();
+		it(`${id} report: dated, styled, print-friendly, external-safe`, async () => {
+			const html = await build();
 			expect(html).toContain("<!doctype html>");
 			expect(html).toContain("Report date:");
 			expect(html).toContain("@media print");

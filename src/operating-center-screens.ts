@@ -11,6 +11,9 @@
 import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
 import { getFundView } from "./fund";
 import { buildDesiredState } from "./google-ads-state";
+// ADR-0029: the Ads screen reads the real Google Ads connection state from
+// the existing live integration (src/google-ads.ts), never a hardcoded flag.
+import { getGoogleAdsStatus, type GoogleAdsEnv } from "./google-ads";
 
 export type ReportScreenId =
 	| "sites"
@@ -84,6 +87,7 @@ function ocScreenShell(opts: {
 		.item{border-top:1px solid var(--line);padding:14px 0}.item:first-of-type{border-top:0}.item strong{display:block}
 		.badge{display:inline-block;background:var(--accent);border-radius:6px;padding:2px 8px;font-size:13px;color:var(--brand);font-weight:650;margin-left:8px}
 		.badge-warn{display:inline-block;background:#fbeedf;border-radius:6px;padding:2px 8px;font-size:13px;color:var(--warn);font-weight:650;margin-left:8px}
+		.badge-ok{display:inline-block;background:#e5efe9;border-radius:6px;padding:2px 8px;font-size:13px;color:#183d2d;font-weight:650;margin-left:8px}
 		.detail{margin:6px 0;font-size:15px}.detail b{color:var(--muted);font-weight:650}
 		table.data{width:100%;border-collapse:collapse;margin-top:8px}table.data th,table.data td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);font-size:15px}table.data th{color:var(--muted);font-weight:650}
 	</style>
@@ -206,31 +210,70 @@ export function renderSitesHtml(): string {
 // 3. Google Ads + Google Analytics
 // ---------------------------------------------------------------------------
 
+// ADR-0029: the Ads screen reads the real Google Ads connection state from
+// the existing live integration (getGoogleAdsStatus, src/google-ads.ts,
+// verified 2026-09-19). The previous ADR-0027 version hardcoded
+// "Not connected" here; that stale state was factually wrong and is removed.
 export interface AdsOverview {
 	ok: true;
 	generated_at: string;
-	google_ads: { connected: false; note: string };
+	google_ads: {
+		connected: boolean;
+		configured: boolean;
+		access_level: string;
+		customers: string[];
+		execution_allowed: boolean;
+		error?: string;
+		note: string;
+	};
 	google_analytics: { connected: false; note: string };
 	// ADR-0016: the machine's desired-state spec. These campaigns are
-	// PLANNED, not live: the owner login is unknown and nothing has been
-	// created in any account. Never presented as live data.
+	// PLANNED, not live: nothing has been created in any account.
+	// Never presented as live data.
 	planned_campaigns: Array<{
 		name: string;
 		daily_budget: number;
 		status_in_account: string;
 		ad_groups: Array<{ name: string; keywords: string[] }>;
 	}>;
-	will_show_once_connected: string[];
+	// What the screen currently shows (real connection state plus the
+	// planned spec). Google Analytics is deliberately untouched here.
+	capabilities: string[];
 }
 
-export function getAdsOverview(): AdsOverview {
+type AdsStatusReader = typeof getGoogleAdsStatus;
+
+export async function getAdsOverview(
+	env: GoogleAdsEnv,
+	readStatus: AdsStatusReader = getGoogleAdsStatus,
+): Promise<AdsOverview> {
 	const spec = buildDesiredState();
+	const status = await readStatus(env);
+	const customers = status.customers ?? [];
+	let note: string;
+	if (status.connected) {
+		note = `Connected. Read-only ${status.access_level} access to ` +
+			`${customers.length} account(s): ${customers.join(", ")}. ` +
+			`Campaign creation and mutation are disabled.`;
+	} else if (status.error) {
+		note = `Connection error: ${status.error}`;
+	} else if (!status.configured) {
+		const missing = (status.missing_configuration ?? []).join(", ");
+		note = `Not connected: ${missing || "configuration"} missing.`;
+	} else {
+		note = "Configured but not connected: no OAuth credential stored yet.";
+	}
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
 		google_ads: {
-			connected: false,
-			note: "Not connected. The owner login for the Google Ads account is not established, so the machine has not created or touched any campaign.",
+			connected: status.connected,
+			configured: status.configured,
+			access_level: status.access_level,
+			customers,
+			execution_allowed: status.execution_allowed,
+			...(status.error ? { error: status.error } : {}),
+			note,
 		},
 		google_analytics: {
 			connected: false,
@@ -245,12 +288,11 @@ export function getAdsOverview(): AdsOverview {
 				keywords: g.keywords.map((k) => k.text + " [" + k.match_type + "]"),
 			})),
 		})),
-		will_show_once_connected: [
-			"Campaign names, statuses, and daily budgets",
-			"Spend, impressions, clicks, and conversions per campaign",
-			"Keywords with match types and performance",
-			"Ad copy currently serving",
-			"Google Analytics: sessions, traffic sources, top pages, and geography",
+		capabilities: [
+			"Real Google Ads connection state (connected or the actual error)",
+			"Access level and accessible customer account(s)",
+			"Campaign creation/mutation status (currently disabled)",
+			"Planned campaign spec — not created in any account",
 		],
 	};
 }
@@ -260,9 +302,16 @@ const ADS_SCRIPT = `
 		const box=document.querySelector('#ads-list');
 		try{
 			const data=await api('/api/operating-center/ads/overview');
-			let html='<div class="item"><strong>Google Ads<span class="badge-warn">Not connected</span></strong><div class="detail">'+esc(data.google_ads.note)+'</div></div>';
+			const ads=data.google_ads;
+			const badge=ads.connected?'<span class="badge-ok">Connected</span>':'<span class="badge-warn">Not connected</span>';
+			let html='<div class="item"><strong>Google Ads '+badge+'</strong><div class="detail">'+esc(ads.note)+'</div>';
+			html+='<div class="meta">Access level: '+esc(ads.access_level)+'</div>';
+			if((ads.customers||[]).length){html+='<div class="meta">Accounts: '+ads.customers.map(esc).join(', ')+'</div>';}
+			html+='<div class="meta">Campaign creation/mutation: '+(ads.execution_allowed?'enabled':'disabled')+'</div>';
+			if(ads.error){html+='<div class="detail">Error: '+esc(ads.error)+'</div>';}
+			html+='</div>';
 			html+='<div class="item"><strong>Google Analytics<span class="badge-warn">Not set up</span></strong><div class="detail">'+esc(data.google_analytics.note)+'</div></div>';
-			html+='<h3>Planned campaigns (machine spec, not live)</h3><p class="meta">Prepared under Ad Grants policy. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any ad account yet.</p>';
+			html+='<h3>Planned campaigns (machine spec, not created)</h3><p class="meta">Prepared under Ad Grants policy. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any ad account yet.</p>';
 			for(const c of (data.planned_campaigns||[])){
 				html+='<div class="item"><strong>'+esc(c.name)+'<span class="badge-warn">'+esc(c.status_in_account)+'</span></strong><div class="meta">$'+esc(c.daily_budget)+'/day planned</div>';
 				for(const g of (c.ad_groups||[])){
@@ -270,7 +319,7 @@ const ADS_SCRIPT = `
 				}
 				html+='</div>';
 			}
-			html+='<h3>What this screen will show once connected</h3><div class="detail">'+(data.will_show_once_connected||[]).map(w=>'&bull; '+esc(w)).join('<br>')+'</div>';
+			html+='<h3>What this screen shows today</h3><div class="detail">'+(data.capabilities||[]).map(w=>'&bull; '+esc(w)).join('<br>')+'</div>';
 			box.innerHTML=html;
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
@@ -280,7 +329,7 @@ export function renderAdsHtml(): string {
 	return ocScreenShell({
 		page: "ads",
 		title: "Google Ads + Analytics",
-		subtitle: "Paid and organic traffic in one place. Neither source is connected yet; the machine already holds the planned campaign spec.",
+		subtitle: "Paid and organic traffic in one place. Google Ads shows its real connection state below; Google Analytics is not attached yet. The machine already holds the planned campaign spec.",
 		panelsHtml: `<section class="panel">
 			<h2>Advertising and analytics</h2>
 			<div id="ads-list">Loading…</div>
@@ -1121,8 +1170,18 @@ export function buildSocialReport(data: SocialOverview): string {
 }
 
 export function buildAdsReport(data: AdsOverview): string {
+	const ads = data.google_ads;
 	let body = `<h2>Connection status</h2>`;
-	body += `<p><strong>Google Ads</strong> <span class="tag-warn">Not connected</span></p><p>${escHtml(data.google_ads.note)}</p>`;
+	if (ads.connected) {
+		body += `<p><strong>Google Ads</strong> <span class="tag">Connected</span></p><p>${escHtml(ads.note)}</p>`;
+	} else {
+		body += `<p><strong>Google Ads</strong> <span class="tag-warn">Not connected</span></p><p>${escHtml(ads.note)}</p>`;
+	}
+	body += `<p>Access level: ${escHtml(ads.access_level)}${ads.customers.length ? `; accounts: ${escHtml(ads.customers.join(", "))}` : ""}</p>`;
+	body += `<p>Campaign creation/mutation: ${ads.execution_allowed ? "enabled" : "disabled"}</p>`;
+	if (ads.error) {
+		body += `<p>Error: ${escHtml(ads.error)}</p>`;
+	}
 	body += `<p><strong>Google Analytics</strong> <span class="tag-warn">Not set up</span></p><p>${escHtml(data.google_analytics.note)}</p>`;
 	body += `<h2>Planned campaigns (machine spec — not live in any account)</h2>`;
 	body += `<p class="note">Prepared under Google Ad Grants policy. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any advertising account yet.</p>`;
@@ -1133,7 +1192,7 @@ export function buildAdsReport(data: AdsOverview): string {
 			body += `<p><strong>${escHtml(g.name)}:</strong> ${escHtml(g.keywords.join(", "))}</p>`;
 		}
 	}
-	body += `<h2>What this report will show once connected</h2><ul>${data.will_show_once_connected.map((w) => `<li>${escHtml(w)}</li>`).join("")}</ul>`;
+	body += `<h2>What this report shows today</h2><ul>${data.capabilities.map((w) => `<li>${escHtml(w)}</li>`).join("")}</ul>`;
 	return reportDoc("NWANA advertising and analytics", reportDate(data.generated_at), body);
 }
 

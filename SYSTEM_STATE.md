@@ -687,7 +687,7 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 
 - New screens per owner order: Sites, Social, Ads, Sellers, Partners, Fundraising, NW Groups (`src/operating-center-screens.ts`). Menu is now 15 buttons, wrapping flex row, `aria-current="page"` on the active page. Sponsorship page untouched per owner order.
 - Every new screen has a "Download report" button: `GET /api/operating-center/report/<screen>` (owner-key protected) returns a self-contained print-friendly HTML document (`nwana-<screen>-report-YYYY-MM-DD.html`) with current real data, report date, no keys, no internal notes, no email addresses. The sellers report answers what Zubie Five asked 2026-09-22 (group size: not yet tracked; Series reach: weekly races described, registration counts not tracked; brands: no signed relationships, outreach listed factually).
-- No-fabrication rule: unconnected sources render honest states (Sites analytics not connected; Social only verified stats — LinkedIn 8 followers observed 2026-09-22; Ads not connected / Analytics not set up with the 2 planned campaigns labeled machine spec, not live; Groups counts not yet tracked; Partners shows the registry's single AARP draft entry).
+- No-fabrication rule: unconnected sources render honest states (Sites analytics not connected; Social only verified stats — LinkedIn 8 followers observed 2026-09-22; Ads reads the real connection state from the live integration, Analytics not set up, with the 2 planned campaigns labeled machine spec, not live; Groups counts not yet tracked; Partners shows the registry's single AARP draft entry).
 - New JSON overview APIs `/api/operating-center/<screen>/overview` (7), all 401 without the owner key. No migration, no auth change.
 - Local verification: Vitest 246/246 (29 new tests in `test/operating-center-screens.spec.ts`), `tsc --noEmit` clean, `new Function` script-parse regression tests for all 7 new pages and the main page.
 - Production deployment: 2026-09-23, Worker `nwana-engine` version `9fb24bdc-52fb-4af3-9caf-0b47b8de3077` (commit `5ebfa9d1`, pushed as `3e5c18f7`). Live verification: all 7 new pages (`/sites`, `/social`, `/ads`, `/sellers`, `/partners`, `/fundraising`, `/groups`) return 200 with the 15-button menu; main page 200, dashboard-only with 15 summary cards; all 7 overview APIs and all 7 report endpoints return 401 without the owner key; other API 401s unchanged. Pre-deploy live version was `aed66454` (ADR-0026), post-deploy is `9fb24bdc` - no overwrite detected.
@@ -698,6 +698,13 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Do not seed remote D1 Registry data yet.
 - Do not infer that source_id 209464 is a race.
 - Do not treat REGISTRATION as active for 209464: it is platform-available but hidden, unconfigured for NWANA use, and not a public conversion path.
+
+## ADR-0029 — ADS SCREEN READS THE LIVE GOOGLE ADS INTEGRATION (2026-09-23)
+
+- The ADR-0027 Ads screen hardcoded `google_ads.connected = false` ("Not connected. The owner login ... is not established"), which contradicted the verified integration state (GOOGLE ADS API — VERIFIED 2026-09-19: connected=true, access_level=EXPLORER, customers/6758500147). That stale state is fixed: `/operating-center/ads` and its downloadable report now read the existing live integration via `getGoogleAdsStatus()` (`src/google-ads.ts`).
+- `getAdsOverview(env, readStatus)` is async; the injectable reader lets tests stub the status without calling Google. Screen shows: Connected/connection error, access level, accessible customer(s), execution/mutation status, and the real error on failure. Planned campaigns stay a separate "Planned / not created" section. Google Analytics untouched.
+- Regression tests in `test/operating-center-screens.spec.ts` fail if the screen or report ever hardcodes "Not connected" again while the status reader reports connected=true.
+- No campaigns created or changed, execution/mutation stays disabled, OAuth credentials untouched, no new integration, no cron/polling, no other screens modified. ADR: `docs/adr/ADR-0029-ads-screen-live-integration.md`.
 - Do not treat 209464 as a RESULTS container.
 - Do not infer business meaning from an internal object_id.
 - Do not infer an external object's capabilities from another similar-looking object.
