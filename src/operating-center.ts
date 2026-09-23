@@ -530,7 +530,7 @@ export function renderOperatingCenterHtml(): string {
 		.oc-menu-btn{display:inline-block;background:#2f6247;color:#fff;font-weight:700;padding:10px 20px;border-radius:9px;text-decoration:none}
 		.oc-menu-btn:hover{background:#3a7455}.oc-menu-active{background:#fff;color:var(--brand)}
 		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.stat,.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px}.stat strong{display:block;font-size:30px}.stat span{color:var(--muted)}
-		.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:20px}h2{margin:0 0 14px;font-size:22px}label{display:block;margin:12px 0 5px;font-weight:650}input,select,textarea,button{width:100%;font:inherit}input,select,textarea{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white}textarea{min-height:105px;resize:vertical}button{margin-top:14px;border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer}.message{min-height:24px;color:var(--muted);margin-top:9px}.queue{margin-top:20px}.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item strong{display:block}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}.followup-due{color:#b35400;font-weight:700}.followup-overdue{color:#b00020;font-weight:700}.grid h3{margin:0 0 10px;font-size:19px}.stat.attention{border-color:#b35400}.stat.attention strong{color:#b35400}
+		.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:20px}h2{margin:0 0 14px;font-size:22px}label{display:block;margin:12px 0 5px;font-weight:650}input,select,textarea,button{width:100%;font:inherit}input,select,textarea{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white}textarea{min-height:105px;resize:vertical}button{margin-top:14px;border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer}.message{min-height:24px;color:var(--muted);margin-top:9px}.queue{margin-top:20px}.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item strong{display:block}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}.followup-due{color:#b35400;font-weight:700}.followup-overdue{color:#b00020;font-weight:700}
 	</style>
 </head>
 <body>
@@ -548,29 +548,99 @@ export function renderOperatingCenterHtml(): string {
 			</form>
 		</section>
 		<div id="app" hidden>
-		<section class="panel" id="owner-summary-panel" style="margin-top:20px"><h2>Right now</h2>
-			<p class="meta">Live owner summary. Every number below comes from the same data as the linked detail page.</p>
-			<div class="stats" id="owner-summary"><div class="stat"><strong>…</strong><span>Loading verified state</span></div></div>
+		<section class="stats" id="stats"><div class="stat"><strong>…</strong><span>Loading verified state</span></div></section>
+		<section class="panel" id="lifecycle-panel" style="margin-top:20px"><h2>Series 2026 race lifecycle</h2>
+			<p class="meta">One row per distance lives on the results page now.</p>
+			<div id="lifecycle-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/results">Open results →</a></p>
 		</section>
-		<section class="grid" id="cockpit-grid" style="margin-top:20px">
-			<div class="panel" id="lifecycle-panel"><h3>Results</h3><p class="meta">Series 2026 race lifecycle: one row per distance lives on the results page.</p><div id="lifecycle-summary">Loading…</div><p class="meta"><a href="/operating-center/results">Open results →</a></p></div>
-			<div class="panel"><h3>Funds</h3><div id="fund-summary">Loading…</div><p class="meta"><a href="/operating-center/funds">Open funds →</a></p></div>
-			<div class="panel"><h3>Sponsorship</h3><div id="sponsorship-summary">Loading…</div><p class="meta"><a href="/operating-center/sponsorship">Open sponsorship →</a></p></div>
-			<div class="panel"><h3>Google Ads</h3><div id="ads-summary">Loading…</div><p class="meta"><a href="/operating-center/ads">Open ads →</a></p></div>
-			<div class="panel"><h3>Social</h3><div id="social-summary">Loading…</div><p class="meta"><a href="/operating-center/social">Open social →</a></p></div>
-			<div class="panel"><h3>Media</h3><div id="media-summary">Loading…</div><p class="meta"><a href="/operating-center/media">Open media →</a></p></div>
-			<div class="panel"><h3>Partners</h3><div id="partners-summary">Loading…</div><p class="meta"><a href="/operating-center/partners">Open partners →</a></p></div>
-			<div class="panel"><h3>Sellers</h3><div id="sellers-summary">Loading…</div><p class="meta"><a href="/operating-center/sellers">Open sellers →</a></p></div>
-			<div class="panel"><h3>Fundraising</h3><div id="fundraising-summary">Loading…</div><p class="meta"><a href="/operating-center/fundraising">Open fundraising →</a></p></div>
-			<div class="panel"><h3>NW Groups</h3><div id="groups-summary">Loading…</div><p class="meta"><a href="/operating-center/groups">Open groups →</a></p></div>
-			<div class="panel"><h3>Sites</h3><div id="sites-summary">Loading…</div><p class="meta"><a href="/operating-center/sites">Open sites →</a></p></div>
-			<div class="panel"><h3>Board</h3><div id="board-summary">Loading…</div><p class="meta"><a href="/operating-center/board">Open board workspace →</a></p></div>
-			<div class="panel"><h3>Meetings</h3><div id="meetings-summary">Loading…</div><p class="meta"><a href="/operating-center/meetings">Open meetings →</a></p></div>
-			<div class="panel"><h3>Activity</h3><div id="activity-summary">Loading…</div><p class="meta"><a href="/operating-center/activity">Open activity →</a></p></div>
-			<div class="panel"><h3>Operations</h3><div id="operations-summary">Loading…</div><p class="meta"><a href="/operating-center/operations">Open operations →</a></p></div>
-			<div class="panel"><h3>Uploads</h3><div id="uploads-summary">Loading…</div><p class="meta"><a href="/operating-center/uploads">Open uploads →</a></p></div>
+		<section class="panel" id="fund-card" style="margin-top:20px"><h2>Funds</h2>
+			<p class="meta">Fund objects and prospect pipelines live on their own page now, like race results.</p>
+			<div id="fund-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/funds">Open funds →</a></p>
 		</section>
+		<section class="panel" id="media-card" style="margin-top:20px"><h2>Media plan</h2>
+			<p class="meta">You set the topics; the machine runs the plan and article lifecycle and drafts the articles.</p>
+			<div id="media-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/media">Open media workspace →</a></p>
+		</section>
+		<section class="panel" id="activity-card" style="margin-top:20px"><h2>Activity</h2>
+			<p class="meta">What is happening, what is new, and what requires the owner's eyes. The full feed lives on its own page.</p>
+			<div id="activity-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/activity">Open activity →</a></p>
+		</section>
+		<section class="panel" id="member-actions-panel" style="margin-top:20px"><h2>What board members can do</h2>
+			<p class="meta">The operating center is the board's cockpit. Every member can:</p>
+			<ul>
+				<li><strong>Submit to the board:</strong> open the <a href="/operating-center/board">Board workspace</a> to add questions, initiatives, or wishes. Submissions are collected into the weekly Sunday protocol.</li>
+				<li><strong>Upload files:</strong> open the <a href="/operating-center/uploads">Uploads</a> page to share contact lists, task lists, meeting material, or media drafts. The machine classifies and routes each file automatically.</li>
+				<li><strong>Review activity:</strong> open the <a href="/operating-center/activity">Activity</a> page for new submissions, decisions, and uploads. Items under "Requires reading" need attention; mark them read when done.</li>
+				<li><strong>Track the media plan:</strong> open the <a href="/operating-center/media">Media plan</a> page to see article drafts, approvals, site publication, and press distribution.</li>
+				<li><strong>Track funds:</strong> open the <a href="/operating-center/funds">Funds</a> page for the full fundraising pipeline.</li>
+			</ul>
+			<p class="meta">Consequential actions (sends, publications, spending, agreements) always require explicit owner confirmation. The machine prepares; the owner decides.</p>
+		</section>
+		<section class="panel" id="uploads-summary-panel" style="margin-top:20px"><h2>Board uploads</h2>
+			<div id="uploads-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/uploads">Open uploads →</a></p>
+		</section>
+		<section class="panel" id="sponsorship-card" style="margin-top:20px"><h2>Sponsorship assets</h2>
+			<p class="meta">Machine-generated seller packages, one per object. Stages: draft → packaged → offered → negotiating → committed → fulfilled → renewal. The full list and stage advancement live on their own page.</p>
+			<div id="sponsorship-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/sponsorship">Open sponsorship →</a></p>
+		</section>
+		<section class="panel" id="sites-card" style="margin-top:20px"><h2>Sites</h2>
+			<p class="meta">Every NWANA web property with a short description and traffic stats once analytics is connected. Each screen has a downloadable report.</p>
+			<div id="sites-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/sites">Open sites →</a></p>
+		</section>
+		<section class="panel" id="social-card" style="margin-top:20px"><h2>Social</h2>
+			<p class="meta">Accounts, pages, and groups with verified statistics. Each screen has a downloadable report.</p>
+			<div id="social-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/social">Open social →</a></p>
+		</section>
+		<section class="panel" id="ads-card" style="margin-top:20px"><h2>Google Ads + Analytics</h2>
+			<p class="meta">Campaigns, spend, keywords, and site analytics once the accounts are connected. Each screen has a downloadable report.</p>
+			<div id="ads-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/ads">Open ads →</a></p>
+		</section>
+		<section class="panel" id="sellers-card" style="margin-top:20px"><h2>Sellers</h2>
+			<p class="meta">The exclusive-seller pipeline: stages, next steps, and the answers an incoming seller asked for. Each screen has a downloadable report.</p>
+			<div id="sellers-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/sellers">Open sellers →</a></p>
+		</section>
+		<section class="panel" id="partners-card" style="margin-top:20px"><h2>Partners</h2>
+			<p class="meta">The partner pipeline from the outreach registry. Each screen has a downloadable report.</p>
+			<div id="partners-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/partners">Open partners →</a></p>
+		</section>
+		<section class="panel" id="fundraising-card" style="margin-top:20px"><h2>Fundraising</h2>
+			<p class="meta">The Fund object: the $50K Founding Circle bridge sprint, pipeline, and follow-up calendar. Each screen has a downloadable report.</p>
+			<div id="fundraising-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/fundraising">Open fundraising →</a></p>
+		</section>
+		<section class="panel" id="groups-card" style="margin-top:20px"><h2>NW Groups</h2>
+			<p class="meta">The group license ladder and the public funnel, with network statistics once tracked. Each screen has a downloadable report.</p>
+			<div id="groups-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/groups">Open groups →</a></p>
+		</section>
+		<section class="panel" id="meetings-card" style="margin-top:20px"><h2>Meetings</h2>
+			<p class="meta">External meetings on the calendar and the board meeting log, each with a downloadable report.</p>
+			<div id="meetings-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/meetings">Open meetings →</a></p>
+		</section>
+		<section class="panel" id="operations-card" style="margin-top:20px"><h2>Operations</h2>
+			<p class="meta">The operational queue: every current source, its required result, action, channel, status, and exact next step.</p>
+			<div id="operations-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/operations">Open operations →</a></p>
+		</section>
+		<section class="panel" id="board-summary-panel" style="margin-top:20px"><h2>Board workspace</h2>
+			<div id="board-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/board">Open board workspace →</a></p>
+		</section>
+		<section class="grid queue"><div class="panel"><h2>Board queue</h2><div id="board-items">Loading…</div><p class="meta">Submissions join the nearest upcoming meeting protocol automatically. Open the <a href="/operating-center/board">Board workspace</a> to triage.</p></div></section>
 		</div>
+	</main>
 	<script>
 		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 		const KEY_STORAGE='nwana_operating_center_key';
@@ -582,235 +652,32 @@ export function renderOperatingCenterHtml(): string {
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
 		function showApp(){gate.hidden=true;app.hidden=false}
 		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
-		const money=n=>'$'+Number(n||0).toLocaleString('en-US');
-		// Cockpit data: one fetch per section, from the same API endpoints the
-		// detail pages use. Each fetch is isolated: one failing section only
-		// marks its own cards unavailable, never the rest of the cockpit.
-		const SECTIONS=[
-			['lifecycle','/api/operating-center/race-lifecycle'],
-			['fund','/api/operating-center/fund'],
-			['sponsorship','/api/operating-center/sponsorship-assets'],
-			['ads','/api/operating-center/ads/overview'],
-			['social','/api/operating-center/social/overview'],
-			['media','/api/operating-center/media/overview'],
-			['partners','/api/operating-center/partners/overview'],
-			['sellers','/api/operating-center/sellers/overview'],
-			['fundraising','/api/operating-center/fundraising/overview'],
-			['groups','/api/operating-center/groups/overview'],
-			['sites','/api/operating-center/sites/overview'],
-			['meetings','/api/operating-center/meetings/overview'],
-			['boardMeetings','/api/board/meetings'],
-			['boardSubmissions','/api/board/submissions'],
-			['boardWork','/api/board/work-items'],
-			['boardCadence','/api/board/cadence'],
-			['activity','/api/operating-center/activity'],
-			['operations','/api/operating-center/operations/overview'],
-			['uploads','/api/operating-center/uploads']
-		];
-		const D={};
-		function section(key){const d=D[key];return d&&!d._error?d:null}
-		function errBox(key){return '<div class="unavailable">Section failed: '+esc((D[key]&&D[key]._error)||'unknown error')+'</div>'}
+		function formJson(form){return Object.fromEntries([...new FormData(form)].map(([k,v])=>[k,String(v)]))}
+		let pendingSubmissionsCache=[];
 		async function load(){
-			// ADR-0023: event-driven weekly protocol reconciliation. The overview
-			// call is the owner's own activity; on the first visit of the week it
-			// ensures the coming Sunday meeting exists and its protocol is formed.
-			// It never gates rendering: failure is swallowed.
-			api('/api/operating-center/overview').catch(()=>{});
-			await Promise.all(SECTIONS.map(async s=>{
-				try{D[s[0]]=await api(s[1])}catch(e){D[s[0]]={_error:String((e&&e.message)||e)}}
-			}));
-			renderOwnerSummary();
-			renderResults();renderFund();renderSponsorship();renderAds();renderSocial();
-			renderMedia();renderPartners();renderSellers();renderFundraising();renderGroups();
-			renderSites();renderBoard();renderMeetings();renderActivity();renderOperations();
-			renderUploads();
+			const [o,b]=await Promise.all([api('/api/operating-center/overview'),api('/api/board/submissions')]);
+			pendingSubmissionsCache=b.submissions||[];
+			const labels={pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results'};
+			document.querySelector('#stats').innerHTML=Object.entries(o.counts).map(([k,v])=>'<div class="stat"><strong>'+esc(v)+'</strong><span>'+esc(labels[k]||k)+'</span></div>').join('');
+			document.querySelector('#board-items').innerHTML=b.submissions.length?'<div class="meta">'+b.submissions.length+' pending submissions awaiting triage. The next meeting protocol forms automatically on Sunday.</div>':'<div class="unavailable">No pending Board items.</div>';
+			loadLifecycleSummary();
+			loadFundSummary();
+			loadMediaSummary();
+			loadActivitySummary();
+			loadBoardSummary();
+			loadUploadsSummary();
+			loadSponsorshipSummary();
+			loadSitesSummary();
+			loadSocialSummary();
+			loadAdsSummary();
+			loadSellersSummary();
+			loadPartnersSummary();
+			loadFundraisingSummary();
+			loadGroupsSummary();
+			loadMeetingsSummary();
+			loadOperationsSummary();
 		}
-		function statBlock(value,label,attention){
-			return '<div class="stat'+(attention?' attention':'')+'"><strong>'+value+'</strong><span>'+label+'</span></div>';
-		}
-		function renderOwnerSummary(){
-			const el=document.querySelector('#owner-summary');
-			const blocks=[];
-			const fund=section('fund');
-			if(fund){
-				const funds=fund.funds||[];
-				const raised=funds.reduce((s,f)=>s+Number(f.fund.raised_amount||0),0);
-				const goal=funds.reduce((s,f)=>s+Number(f.fund.goal_amount||0),0);
-				const due=funds.reduce((s,f)=>s+Number(f.follow_ups_due_now||0),0);
-				blocks.push(statBlock(esc(money(raised))+' <span style="font-size:15px;color:#66736d">of '+esc(money(goal))+'</span>','Money raised',false));
-				blocks.push(statBlock(String(due),'Follow-ups due now',due>0));
-			}else{blocks.push(statBlock('Unavailable','Money',false))}
-			const fr=section('fundraising');
-			if(fr&&fr.fund){blocks.push(statBlock(String(fr.fund.prospect_count||0),'Fundraising prospects',false))}
-			else{blocks.push(statBlock('Unavailable','Fundraising',false))}
-			const sp=section('sponsorship');
-			if(sp){
-				const assets=sp.assets||[];
-				const adv=assets.filter(a=>['offered','negotiating','committed'].indexOf(a.stage)>=0).length;
-				blocks.push(statBlock(String(assets.length),'Sponsorship assets',false));
-				blocks.push(statBlock(String(adv),'In offer or negotiation',adv>0));
-			}else{blocks.push(statBlock('Unavailable','Sponsorship',false))}
-			const lc=section('lifecycle');
-			if(lc){
-				const dists=lc.distances||[];
-				const prep=dists.filter(d=>d.stage==='next_race_prep').length;
-				blocks.push(statBlock(String(dists.length),'Race distances tracked',false));
-				blocks.push(statBlock(String(prep),'Race preps needing review',prep>0));
-			}else{blocks.push(statBlock('Unavailable','Competition',false))}
-			const pa=section('partners');
-			if(pa){blocks.push(statBlock(String((pa.partners||[]).length),'Partners',false))}
-			else{blocks.push(statBlock('Unavailable','Partners',false))}
-			const me=section('media');
-			if(me){
-				const plans=me.plans||[];
-				const pub=plans.reduce((s,p)=>s+Number(p.published_count||0),0);
-				blocks.push(statBlock(String(plans.length),'Media plans',false));
-				blocks.push(statBlock(String(pub),'Articles published',false));
-			}else{blocks.push(statBlock('Unavailable','Media',false))}
-			const op=section('operations');
-			if(op){
-				const rows=(op.queue&&op.queue.rows)||[];
-				const c={};rows.forEach(r=>{c[r.status]=(c[r.status]||0)+1});
-				blocks.push(statBlock(String(c.READY_TO_ACT||0),'Operations ready to act',false));
-				blocks.push(statBlock(String(c.NEEDS_OWNER_INPUT||0),'Need owner input',(c.NEEDS_OWNER_INPUT||0)>0));
-				blocks.push(statBlock(String(c.BLOCKED_EXTERNAL||0),'Blocked external',(c.BLOCKED_EXTERNAL||0)>0));
-			}else{blocks.push(statBlock('Unavailable','Operations',false))}
-			const ac=section('activity');
-			if(ac){
-				const req=(ac.items||[]).filter(i=>i.requires_reading).length;
-				blocks.push(statBlock(String(req),'Items requiring reading',req>0));
-			}else{blocks.push(statBlock('Unavailable','Activity',false))}
-			el.innerHTML=blocks.join('');
-		}
-		function renderResults(){
-			const box=document.querySelector('#lifecycle-summary');
-			const d=section('lifecycle');
-			if(!d){box.innerHTML=errBox('lifecycle');return}
-			if(!(d.distances||[]).length){box.innerHTML='<div class="unavailable">No lifecycle state yet. Open <a href="/operating-center/results">Race results</a>; opening the page runs the first sync automatically.</div>';return}
-			const order=['registration_open','awaiting_results','verifying','levels_computed','published','next_race_prep'];
-			const counts={};d.distances.forEach(x=>{counts[x.stage]=(counts[x.stage]||0)+1});
-			const prep=d.distances.filter(x=>x.stage==='next_race_prep').length;
-			box.innerHTML='<div class="meta">'+order.filter(s=>counts[s]).map(s=>counts[s]+' × '+esc(s)).join(' · ')+'</div>'+
-				(prep?'<div class="meta followup-due">'+prep+' prep'+(prep>1?'s':'')+' need'+(prep>1?'':'s')+' review</div>':'<div class="meta">No prep awaiting review.</div>');
-		}
-		function renderFund(){
-			const box=document.querySelector('#fund-summary');
-			const d=section('fund');
-			if(!d){box.innerHTML=errBox('fund');return}
-			if(!(d.funds||[]).length){box.innerHTML='<div class="unavailable">No funds yet.</div>';return}
-			const raised=d.funds.reduce((s,f)=>s+Number(f.fund.raised_amount||0),0);
-			const goal=d.funds.reduce((s,f)=>s+Number(f.fund.goal_amount||0),0);
-			const due=d.funds.reduce((s,f)=>s+Number(f.follow_ups_due_now||0),0);
-			box.innerHTML='<div class="meta">'+d.funds.length+' fund'+(d.funds.length>1?'s':'')+' · raised '+money(raised)+' of '+money(goal)+' goal</div>'+
-				'<div class="meta'+(due?' followup-due':'')+'">'+due+' follow-up'+(due===1?'':'s')+' due now</div>';
-		}
-		function renderSponsorship(){
-			const box=document.querySelector('#sponsorship-summary');
-			const d=section('sponsorship');
-			if(!d){box.innerHTML=errBox('sponsorship');return}
-			const assets=d.assets||[];
-			if(!assets.length){box.innerHTML='<div class="unavailable">No sponsorship assets recorded yet.</div>';return}
-			const stages={};assets.forEach(a=>{stages[a.stage]=(stages[a.stage]||0)+1});
-			box.innerHTML='<div class="meta">'+assets.length+' asset'+(assets.length===1?'':'s')+'</div>'+
-				'<div class="meta">'+Object.keys(stages).map(s=>stages[s]+' × '+esc(s)).join(' · ')+'</div>';
-		}
-		function renderAds(){
-			const box=document.querySelector('#ads-summary');
-			const d=section('ads');
-			if(!d){box.innerHTML=errBox('ads');return}
-			const g=d.google_ads||{};
-			const live=d.live_account||{};
-			let html='<div class="meta">Google Ads: '+(g.connected?'<b>connected</b> ('+esc(g.access_level||'access')+')':'<span class="unavailable">not connected</span>')+'</div>';
-			if(g.note)html+='<div class="meta">'+esc(g.note)+'</div>';
-			if(live.available){
-				const cams=live.campaigns||[];
-				html+='<div class="meta">Live account '+esc(live.customer_id||'')+': '+cams.length+' campaign'+(cams.length===1?'':'s')+' ('+esc(live.date_range||'')+')</div>';
-			}else if(live.error){html+='<div class="unavailable">Live account read failed: '+esc(live.error)+'</div>'}
-			else{html+='<div class="meta">Live account snapshot: <span class="unavailable">not available</span></div>'}
-			const planned=d.planned_campaigns||[];
-			html+='<div class="meta">'+planned.length+' planned campaigns (machine spec, not live)</div>';
-			const ga=d.google_analytics||{};
-			html+='<div class="meta">Analytics: '+(ga.connected?'connected':'<span class="unavailable">not set up</span>')+'</div>';
-			box.innerHTML=html;
-		}
-		function renderSocial(){
-			const box=document.querySelector('#social-summary');
-			const d=section('social');
-			if(!d){box.innerHTML=errBox('social');return}
-			const accounts=d.accounts||[];
-			const connected=accounts.filter(a=>a.status==='Connected').length;
-			let html='<div class="meta">'+accounts.length+' accounts known · '+connected+' connected</div>';
-			for(const a of accounts){
-				html+='<div class="meta">'+esc(a.platform)+' — '+esc(a.handle)+' · '+esc(a.status);
-				if(a.stats&&a.stats.length)html+=' ('+a.stats.map(s=>esc(s.label)+': '+esc(s.value)).join(', ')+')';
-				html+='</div>';
-			}
-			box.innerHTML=html;
-		}
-		function renderMedia(){
-			const box=document.querySelector('#media-summary');
-			const d=section('media');
-			if(!d){box.innerHTML=errBox('media');return}
-			const plans=d.plans||[];
-			if(!plans.length){box.innerHTML='<div class="unavailable">No media plans yet. Create one in the media workspace.</div>';return}
-			const art=plans.reduce((s,p)=>s+Number(p.article_count||0),0);
-			const ready=plans.reduce((s,p)=>s+Number(p.ready_count||0),0);
-			const pub=plans.reduce((s,p)=>s+Number(p.published_count||0),0);
-			box.innerHTML='<div class="meta">'+plans.length+' plan'+(plans.length===1?'':'s')+' · '+art+' articles ('+ready+' ready, '+pub+' published)</div>'+
-				'<div class="meta">Latest: '+esc(plans[0].title)+' · '+esc(plans[0].status)+'</div>';
-		}
-		function renderPartners(){
-			const box=document.querySelector('#partners-summary');
-			const d=section('partners');
-			if(!d){box.innerHTML=errBox('partners');return}
-			const partners=d.partners||[];
-			let html='<div class="meta">'+partners.length+' partner record'+(partners.length===1?'':'s')+'</div>';
-			if(partners.length)html+='<div class="meta">'+esc(partners[0].name)+' — '+esc(partners[0].stage)+'</div>';
-			else html+='<div class="unavailable">No partners yet.</div>';
-			box.innerHTML=html;
-		}
-		function renderSellers(){
-			const box=document.querySelector('#sellers-summary');
-			const d=section('sellers');
-			if(!d){box.innerHTML=errBox('sellers');return}
-			const sellers=d.sellers||[];
-			const dated=sellers.filter(s=>s.next_date).sort((a,b)=>String(a.next_date).localeCompare(String(b.next_date)));
-			let html='<div class="meta">'+sellers.length+' seller records</div>';
-			if(dated.length)html+='<div class="meta">Next: '+esc(dated[0].company)+' — '+esc(dated[0].next_date)+'</div>';
-			else html+='<div class="unavailable">No dated next steps.</div>';
-			box.innerHTML=html;
-		}
-		function renderFundraising(){
-			const box=document.querySelector('#fundraising-summary');
-			const d=section('fundraising');
-			if(!d){box.innerHTML=errBox('fundraising');return}
-			const f=d.fund;
-			if(!f){box.innerHTML='<div class="unavailable">No fund objects yet.</div>';return}
-			box.innerHTML='<div class="meta">'+money(f.goal_amount)+' goal · '+money(f.raised_amount)+' raised</div>'+
-				'<div class="meta">'+esc(f.prospect_count)+' prospects'+(f.follow_ups_due_now?' · <span class="followup-due">'+f.follow_ups_due_now+' follow-up'+(f.follow_ups_due_now===1?'':'s')+' due</span>':'')+'</div>';
-		}
-		function renderGroups(){
-			const box=document.querySelector('#groups-summary');
-			const d=section('groups');
-			if(!d){box.innerHTML=errBox('groups');return}
-			const ladder=d.ladder||[];
-			let html='<div class="meta">'+ladder.length+'-step license ladder</div>';
-			const st=d.stats||{};
-			html+='<div class="meta">Network stats: '+(st.connected?esc(st.note||''):'<span class="unavailable">'+esc(st.note||'not yet tracked')+'</span>')+'</div>';
-			box.innerHTML=html;
-		}
-		function renderSites(){
-			const box=document.querySelector('#sites-summary');
-			const d=section('sites');
-			if(!d){box.innerHTML=errBox('sites');return}
-			const sites=d.sites||[];
-			const an=d.analytics||{};
-			let html='<div class="meta">'+sites.length+' web propert'+(sites.length===1?'y':'ies')+'</div>';
-			html+='<div class="meta">Analytics: '+(an.connected?'connected':'<span class="unavailable">not connected</span>')+'</div>';
-			if(an.note)html+='<div class="meta">'+esc(an.note)+'</div>';
-			box.innerHTML=html;
-		}
-		function pickNextMeetingLocal(meetings){
+		async function pickNextMeetingLocal(meetings){
 			const today=new Date().toISOString().slice(0,10);
 			const open=(meetings||[]).filter(m=>m.status==='DRAFT'||m.status==='OPEN');
 			const dated=open.filter(m=>m.scheduled_for&&String(m.scheduled_for).slice(0,10)>=today)
@@ -820,77 +687,194 @@ export function renderOperatingCenterHtml(): string {
 			if(undated.length)return undated[0];
 			return null;
 		}
-		function renderBoard(){
+		async function loadBoardSummary(){
 			const box=document.querySelector('#board-summary');
-			const m=section('boardMeetings'),w=section('boardWork'),c=section('boardCadence'),s=section('boardSubmissions');
-			if(!m&&!w&&!s){box.innerHTML='<div class="unavailable">Board data unavailable.</div>';return}
-			const meetings=(m&&m.meetings)||[];
-			const next=pickNextMeetingLocal(meetings);
-			const items=(w&&w.work_items)||[];
-			const active=items.filter(x=>x.status!=='DONE').length;
-			const overdue=items.filter(x=>x.due_date&&new Date(x.due_date)<new Date()&&x.status!=='DONE').length;
-			const pend=((s&&s.submissions)||[]).filter(x=>x.status==='PENDING').length;
-			let html='';
-			if(next){
-				const dstr=next.scheduled_for?String(next.scheduled_for).slice(0,10):'date TBD';
-				let when='';
-				if(c&&c.cadence){const tz=String(c.cadence.timezone||'').replace('America/','');when=' · '+esc(c.cadence.weekday)+'s '+esc(c.cadence.time)+(tz?' '+esc(tz):'')}
-				const agenda=Number(next.agenda_count||0);
-				html+='<div class="meta"><b>Next Board meeting:</b> '+esc(dstr)+when+' · '+esc(next.status)+'</div>';
-				html+='<div class="meta">Protocol: '+agenda+' item'+(agenda===1?'':'s')+(pend?' · '+pend+' waiting in queue':'')+'</div>';
-			}else{html+='<div class="unavailable">No upcoming meeting.</div>'}
-			html+='<div class="meta'+(overdue?' followup-overdue':'')+'">'+active+' active work item'+(active===1?'':'s')+(overdue?' · '+overdue+' overdue':'')+'</div>';
-			box.innerHTML=html;
+			try{
+				const [m,w,c]=await Promise.all([api('/api/board/meetings'),api('/api/board/work-items'),api('/api/board/cadence').catch(()=>null)]);
+				const meetings=m.meetings||[];
+				const next=pickNextMeetingLocal(meetings);
+				const items=w.work_items||[];
+				const active=items.filter(x=>x.status!=='DONE').length;
+				const overdue=items.filter(x=>x.due_date && new Date(x.due_date)<new Date() && x.status!=='DONE').length;
+				const pend=(pendingSubmissionsCache||[]).filter(s=>s.status==='PENDING').length;
+				let html='';
+				if(next){
+					const dstr=next.scheduled_for?String(next.scheduled_for).slice(0,10):'date TBD';
+					let when='';
+					if(c&&c.cadence){const tz=String(c.cadence.timezone||'').replace('America/','');when=' · '+esc(c.cadence.weekday)+'s '+esc(c.cadence.time)+(tz?' '+esc(tz)+' time':'')}
+					const agenda=Number(next.agenda_count||0);
+					html+='<div style="font-size:18px;font-weight:700;margin-bottom:6px">Next Board meeting: '+esc(dstr)+when+'</div>';
+					html+='<div class="meta">Protocol: '+agenda+' item'+(agenda===1?'':'s')+(pend?' · '+pend+' waiting in the queue':'')+' · '+esc(next.status==='DRAFT'?'Draft':next.status==='OPEN'?'Open':'Closed')+'</div>';
+				}else{
+					html+='<div class="unavailable">No upcoming meeting.</div>';
+				}
+				html+='<div class="meta" style="margin-top:6px">'+active+' active work item'+(active===1?'':'s')+(overdue?' · <span style="color:#a00">'+overdue+' overdue</span>':'')+'</div>';
+				box.innerHTML=html;
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
-		function renderMeetings(){
-			const box=document.querySelector('#meetings-summary');
-			const d=section('meetings');
-			if(!d){box.innerHTML=errBox('meetings');return}
-			const ext=d.external_meetings||[];
-			const actionable=ext.filter(m=>m.status==='confirmed'||m.status==='awaiting scheduling');
-			const boardCount=(d.board_upcoming||[]).length+(d.board_past||[]).length;
-			let html='<div class="meta">'+ext.length+' external meeting'+(ext.length===1?'':'s')+' tracked ('+actionable.length+' upcoming)</div>';
-			if(actionable.length)html+='<div class="meta">Next: '+esc(actionable[0].title)+' · '+esc(actionable[0].display_when)+'</div>';
-			html+='<div class="meta">Board meetings in the log: '+boardCount+'</div>';
-			box.innerHTML=html;
-		}
-		function renderActivity(){
-			const box=document.querySelector('#activity-summary');
-			const d=section('activity');
-			if(!d){box.innerHTML=errBox('activity');return}
-			const items=d.items||[];
-			const req=items.filter(i=>i.requires_reading);
-			const fresh=items.filter(i=>!i.requires_reading).slice(0,3);
-			box.innerHTML='<div class="meta'+(req.length?' followup-due':'')+'">'+req.length+' item'+(req.length===1?'':'s')+' require'+(req.length===1?'s':'')+' reading</div>'+
-				(fresh.length?fresh.map(i=>'<div class="meta">· '+esc(i.label)+'</div>').join(''):'<div class="unavailable">No recent activity.</div>');
-		}
-		function renderOperations(){
-			const box=document.querySelector('#operations-summary');
-			const d=section('operations');
-			if(!d){box.innerHTML=errBox('operations');return}
-			const rows=(d.queue&&d.queue.rows)||[];
-			const c={};rows.forEach(r=>{c[r.status]=(c[r.status]||0)+1});
-			let html='<div class="meta">'+rows.length+' operational rows</div>';
-			const order=['READY_TO_ACT','NEEDS_OWNER_INPUT','BLOCKED_EXTERNAL'];
-			for(const st of order){
-				if(c[st])html+='<div class="meta'+(st==='BLOCKED_EXTERNAL'?' followup-overdue':st==='NEEDS_OWNER_INPUT'?' followup-due':'')+'">'+st+': '+c[st]+'</div>';
-			}
-			const ready=rows.filter(r=>r.status==='READY_TO_ACT').slice(0,3);
-			for(const r of ready)html+='<div class="meta">· '+esc(r.source_title||'')+': '+esc(r.action||'(no action)')+'</div>';
-			box.innerHTML=html;
-		}
-		function renderUploads(){
+		async function loadUploadsSummary(){
 			const box=document.querySelector('#uploads-summary');
-			const d=section('uploads');
-			if(!d){box.innerHTML=errBox('uploads');return}
-			const uploads=d.uploads||[];
-			if(!uploads.length){box.innerHTML='<div class="unavailable">No uploads yet.</div>';return}
-			const latest=uploads[0];
-			box.innerHTML='<div class="meta">'+uploads.length+' upload'+(uploads.length===1?'':'s')+' routed · latest: '+esc(latest.filename)+' ('+esc(latest.route_label)+')</div>';
+			try{
+				const data=await api('/api/operating-center/uploads');
+				const uploads=data.uploads||[];
+				if(!uploads.length){box.innerHTML='<div class="unavailable">No uploads yet.</div>';return}
+				const latest=uploads[0];
+				box.innerHTML='<div class="meta">'+uploads.length+' upload'+(uploads.length===1?'':'s')+' routed · latest: '+esc(latest.filename)+' ('+esc(latest.route_label)+')</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load()});
-		if(getKey()){showApp();load()}else{showGate('')}
-	</script>
+		async function loadFundSummary(){
+			const box=document.querySelector('#fund-summary');
+			const money=n=>'$'+Number(n||0).toLocaleString('en-US');
+			try{
+				const data=await api('/api/operating-center/fund');
+				if(!data.funds.length){box.innerHTML='<div class="unavailable">No funds yet.</div>';return}
+				const raised=data.funds.reduce((s,f)=>s+Number(f.fund.raised_amount||0),0);
+				const goal=data.funds.reduce((s,f)=>s+Number(f.fund.goal_amount||0),0);
+				const due=data.funds.reduce((s,f)=>s+Number(f.follow_ups_due_now||0),0);
+				box.innerHTML='<div class="meta">'+data.funds.length+' fund'+(data.funds.length>1?'s':'')+' · raised '+money(raised)+' of '+money(goal)+' goal</div>'+
+					'<div class="meta'+(due?' followup-due':'')+'">'+due+' follow-up'+(due===1?'':'s')+' due now</div>'+
+					'<div class="meta">'+data.funds.map(f=>esc(f.fund.name)).join(' · ')+'</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadMediaSummary(){
+			const box=document.querySelector('#media-summary');
+			try{
+				const data=await api('/api/operating-center/media/overview');
+				if(!data.plans.length){box.innerHTML='<div class="unavailable">No media plans yet. Create one in the media workspace.</div>';return}
+				box.innerHTML=data.plans.map(p=>'<div class="item"><strong>'+esc(p.title)+'</strong><div class="meta">'+esc(p.status)+' · '+p.article_count+' article'+(p.article_count===1?'':'s')+' ('+p.ready_count+' ready, '+p.published_count+' published)</div></div>').join('');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadActivitySummary(){
+			const box=document.querySelector('#activity-summary');
+			try{
+				const data=await api('/api/operating-center/activity');
+				const items=data.items||[];
+				const req=items.filter(i=>i.requires_reading);
+				const fresh=items.filter(i=>!i.requires_reading).slice(0,3);
+				box.innerHTML='<div class="meta'+(req.length?' followup-due':'')+'">'+req.length+' item'+(req.length===1?'':'s')+' require'+(req.length===1?'s':'')+' reading</div>'+
+					(fresh.length?fresh.map(i=>'<div class="meta">· '+esc(i.label)+'</div>').join(''):'<div class="unavailable">No recent activity.</div>');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadSponsorshipSummary(){
+			const box=document.querySelector('#sponsorship-summary');
+			const label={draft:'Draft',packaged:'Packaged',offered:'Offered',negotiating:'Negotiating',committed:'Committed',fulfilled:'Fulfilled',renewal:'Renewal'};
+			try{
+				const data=await api('/api/operating-center/sponsorship-assets');
+				const assets=data.assets||[];
+				if(!assets.length){box.innerHTML='<div class="unavailable">No sponsorship assets yet. Generate one on the sponsorship page.</div>';return}
+				const byStage={};
+				assets.forEach(a=>{byStage[a.stage]=(byStage[a.stage]||0)+1});
+				box.innerHTML='<div class="meta">'+Object.entries(byStage).map(([s,c])=>esc(label[s]||s)+': <strong>'+c+'</strong>').join(' · ')+'</div>'+
+					'<div class="meta">'+assets.length+' total asset'+(assets.length===1?'':'s')+'</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadSitesSummary(){
+			const box=document.querySelector('#sites-summary');
+			try{
+				const data=await api('/api/operating-center/sites/overview');
+				const sites=data.sites||[];
+				box.innerHTML='<div class="meta">'+sites.length+' web propert'+(sites.length===1?'y':'ies')+'</div>'+
+					'<div class="meta">Analytics: <span class="unavailable">not connected</span></div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadSocialSummary(){
+			const box=document.querySelector('#social-summary');
+			try{
+				const data=await api('/api/operating-center/social/overview');
+				const accounts=data.accounts||[];
+				const connected=accounts.filter(a=>a.status==='Connected').length;
+				box.innerHTML='<div class="meta">'+accounts.length+' accounts known · '+connected+' connected</div>'+
+					'<div class="meta">LinkedIn: 8 followers (observed 2026-09-22)</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadAdsSummary(){
+			const box=document.querySelector('#ads-summary');
+			try{
+				const data=await api('/api/operating-center/ads/overview');
+				const planned=(data.planned_campaigns||[]).length;
+				box.innerHTML='<div class="meta">Google Ads: <span class="unavailable">not connected</span> · Analytics: <span class="unavailable">not set up</span></div>'+
+					'<div class="meta">'+planned+' planned campaigns (machine spec, not live)</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadSellersSummary(){
+			const box=document.querySelector('#sellers-summary');
+			try{
+				const data=await api('/api/operating-center/sellers/overview');
+				const sellers=data.sellers||[];
+				const dated=sellers.filter(s=>s.next_date).sort((a,b)=>String(a.next_date).localeCompare(String(b.next_date)));
+				box.innerHTML='<div class="meta">'+sellers.length+' seller records</div>'+
+					(dated.length?'<div class="meta">Next: '+esc(dated[0].company)+' — '+esc(dated[0].next_date)+'</div>':'<div class="unavailable">No dated next steps.</div>');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadPartnersSummary(){
+			const box=document.querySelector('#partners-summary');
+			try{
+				const data=await api('/api/operating-center/partners/overview');
+				const partners=data.partners||[];
+				box.innerHTML='<div class="meta">'+partners.length+' partner record'+(partners.length===1?'':'s')+'</div>'+
+					(partners.length?'<div class="meta">'+esc(partners[0].name)+' — '+esc(partners[0].stage)+'</div>':'<div class="unavailable">No partners yet.</div>');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadFundraisingSummary(){
+			const box=document.querySelector('#fundraising-summary');
+			try{
+				const data=await api('/api/operating-center/fundraising/overview');
+				const f=data.fund;
+				if(!f){box.innerHTML='<div class="unavailable">No fund objects yet.</div>';return}
+				box.innerHTML='<div class="meta">$'+esc(f.goal_amount)+' goal · $'+esc(f.raised_amount)+' raised</div>'+
+					'<div class="meta">'+esc(f.prospect_count)+' prospects'+(f.follow_ups_due_now?' · <span class="followup-due">'+f.follow_ups_due_now+' follow-up'+(f.follow_ups_due_now===1?'':'s')+' due</span>':'')+'</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadGroupsSummary(){
+			const box=document.querySelector('#groups-summary');
+			try{
+				const data=await api('/api/operating-center/groups/overview');
+				const ladder=data.ladder||[];
+				box.innerHTML='<div class="meta">'+ladder.length+'-step license ladder</div>'+
+					'<div class="meta">Group counts: <span class="unavailable">not yet tracked</span></div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadOperationsSummary(){
+			const box=document.querySelector('#operations-summary');
+			try{
+				const data=await api('/api/operating-center/operations/overview');
+				const rows=(data.queue&&data.queue.rows)||[];
+				const counts={};rows.forEach(r=>{counts[r.status]=(counts[r.status]||0)+1});
+				let html='<div class="meta">'+rows.length+' operational rows</div>';
+				for(const st of ['READY_TO_ACT','NEEDS_OWNER_INPUT','BLOCKED_EXTERNAL']){
+					if(counts[st])html+='<div class="meta">'+st+': '+counts[st]+'</div>';
+				}
+				box.innerHTML=html;
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadMeetingsSummary(){
+			const box=document.querySelector('#meetings-summary');
+			try{
+				const data=await api('/api/operating-center/meetings/overview');
+				const ext=data.external_meetings||[];
+				const actionable=ext.filter(m=>m.status==='confirmed'||m.status==='awaiting scheduling');
+				const boardCount=(data.board_upcoming||[]).length+(data.board_past||[]).length;
+				let html='<div class="meta">'+ext.length+' external meeting'+(ext.length===1?'':'s')+' tracked ('+actionable.length+' upcoming)</div>';
+				if(actionable.length)html+='<div class="meta">Next: '+esc(actionable[0].title)+' · '+esc(actionable[0].display_when)+'</div>';
+				html+='<div class="meta">Board meetings in the log: '+boardCount+'</div>';
+				box.innerHTML=html;
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadLifecycleSummary(){
+			const box=document.querySelector('#lifecycle-summary');
+			try{
+				const data=await api('/api/operating-center/race-lifecycle');
+				if(!data.distances.length){box.innerHTML='<div class="unavailable">No lifecycle state yet. Open <a href="/operating-center/results">Race results</a>; opening the page runs the first sync automatically.</div>';return}
+				const order=['registration_open','awaiting_results','verifying','levels_computed','published','next_race_prep'];
+				const counts={};data.distances.forEach(d=>{counts[d.stage]=(counts[d.stage]||0)+1});
+				const prep=data.distances.filter(d=>d.stage==='next_race_prep').length;
+				box.innerHTML='<div class="meta">'+order.filter(s=>counts[s]).map(s=>counts[s]+' × '+esc(s)).join(' · ')+'</div>'+
+					(prep?'<div class="meta followup-due">'+prep+' prep'+(prep>1?'s':'')+' need'+(prep>1?'':'s')+' review</div>':'<div class="meta">No prep awaiting review.</div>');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
+		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load().catch(renderLoadError)});
+		if(getKey()){showApp();load().catch(renderLoadError)}else{showGate('')}
 	</script>
 </body></html>`;
 }
