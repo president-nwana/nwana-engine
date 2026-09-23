@@ -340,12 +340,12 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		expect(report).toContain("Review against existing live Series campaign before any creation");
 	});
 
-	it("ads: Founding Circle proposal stays PROPOSED when the name is not live", async () => {
+	it("ads: Founding Circle proposal is NO DISTRIBUTION RULE when the name is not live", async () => {
 		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
 		const fc = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Founding Circle \u00b7 Donate");
 		expect(fc).toBeDefined();
-		expect(fc!.status).toBe("PROPOSED");
-		expect(fc!.next_action).toBe("Needs owner review before creation");
+		expect(fc!.status).toBe("NO DISTRIBUTION RULE");
+		expect(fc!.next_action).toBe("Define an explicit Google Ads distribution rule before creation");
 		const report = buildAdsReport(data);
 		expect(report).toContain("NWANA \u00b7 Founding Circle \u00b7 Donate");
 	});
@@ -406,6 +406,68 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		const report = buildAdsReport(data);
 		expect(report).toContain("Source object: not yet linked");
 		expect(report).not.toContain("fund-50k-bridge-sprint");
+	});
+
+	it("ads: Series resolves to ACT-SERIES-HUB-GOOGLE-ADS", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const series = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
+		expect(series!.distribution.action_id).toBe("ACT-SERIES-HUB-GOOGLE-ADS");
+	});
+
+	it("ads: Series resolves to RULE-OPEN-SERIES-HUB", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const series = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
+		expect(series!.distribution.rule_id).toBe("RULE-OPEN-SERIES-HUB");
+	});
+
+	it("ads: Series channel = GOOGLE_ADS_GRANT and creation_eligible = true", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const series = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
+		expect(series!.distribution.channel).toBe("GOOGLE_ADS_GRANT");
+		expect(series!.distribution.creation_eligible).toBe(true);
+		// Actual creation still blocked by duplicate review.
+		expect(series!.status).toBe("POSSIBLE DUPLICATE / REVIEW");
+	});
+
+	it("ads: Founding Circle has no distribution rule/action and is not eligible", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const fc = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Founding Circle \u00b7 Donate");
+		expect(fc!.distribution).toEqual({
+			action_id: null,
+			rule_id: null,
+			channel: null,
+			creation_eligible: false,
+		});
+		expect(fc!.status).toBe("NO DISTRIBUTION RULE");
+		expect(fc!.next_action).toBe("Define an explicit Google Ads distribution rule before creation");
+	});
+
+	it("ads: missing distribution action is never fabricated", async () => {
+		const { buildDesiredState } = await import("../src/google-ads-state");
+		const spec = buildDesiredState();
+		const orphan = {
+			...spec.campaigns[1],
+			distribution: { action_id: null, rule_id: null, channel: null, creation_eligible: false },
+		};
+		const proposals = buildMachineProposals({ ...spec, campaigns: [orphan] }, []);
+		expect(proposals).toHaveLength(1);
+		expect(proposals[0].distribution.action_id).toBeNull();
+		expect(proposals[0].distribution.rule_id).toBeNull();
+		expect(proposals[0].distribution.channel).toBeNull();
+		expect(proposals[0].distribution.creation_eligible).toBe(false);
+		expect(proposals[0].status).toBe("NO DISTRIBUTION RULE");
+	});
+
+	it("ads: report shows distribution backing for both proposals", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const report = buildAdsReport(data);
+		expect(report).toContain("Distribution rule: RULE-OPEN-SERIES-HUB");
+		expect(report).toContain("Distribution action: ACT-SERIES-HUB-GOOGLE-ADS");
+		expect(report).toContain("Channel: GOOGLE_ADS_GRANT");
+		expect(report).toContain("Creation eligibility: eligible");
+		expect(report).toContain("Distribution rule: none");
+		expect(report).toContain("Creation eligibility: not eligible");
+		expect(report).toContain("NO DISTRIBUTION RULE");
 	});
 
 	it("ads: missing source object stays null instead of being fabricated", async () => {
