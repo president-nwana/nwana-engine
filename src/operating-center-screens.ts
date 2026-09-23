@@ -25,6 +25,9 @@ import { getGoogleAdsStatus, getGoogleAdsAccountSnapshot, GOOGLE_ADS_LIVE_CUSTOM
 // logical layer, separate from the live account and the machine proposals.
 import { getOrchestrationDecisions } from "./orchestration-google-ads";
 import type { OrchestrationDecision } from "./orchestration";
+// Operational queue: owner-facing presentation mapping over the existing
+// orchestration decisions and proposal states. No new business facts.
+import { buildOperationalQueue, type OperationalQueue } from "./operational-queue";
 
 export type ReportScreenId =
 	| "sites"
@@ -34,7 +37,8 @@ export type ReportScreenId =
 	| "partners"
 	| "fundraising"
 	| "groups"
-	| "meetings";
+	| "meetings"
+	| "operations";
 
 export const REPORT_SCREENS: Array<{
 	id: ReportScreenId;
@@ -51,6 +55,7 @@ export const REPORT_SCREENS: Array<{
 	{ id: "fundraising", page: "fundraising", label: "Fundraising", path: "/operating-center/fundraising", reportPath: "/api/operating-center/report/fundraising" },
 	{ id: "groups", page: "groups", label: "Groups", path: "/operating-center/groups", reportPath: "/api/operating-center/report/groups" },
 	{ id: "meetings", page: "meetings", label: "Meetings", path: "/operating-center/meetings", reportPath: "/api/operating-center/report/meetings" },
+	{ id: "operations", page: "operations", label: "Operations", path: "/operating-center/operations", reportPath: "/api/operating-center/report/operations" },
 ];
 
 function escHtml(v: unknown): string {
@@ -1559,4 +1564,153 @@ export function buildMeetingsReport(data: MeetingsOverview): string {
 		}
 	}
 	return reportDoc("NWANA meetings", reportDate(data.generated_at), body);
+}
+
+// ---------------------------------------------------------------------------
+// 9. Operations: the owner-facing operational queue.
+//
+// Every current NWANA source, grouped by source, each with its operational
+// row: required result -> action -> channel -> status -> exact next step.
+// Statuses are READY_TO_ACT, NEEDS_OWNER_INPUT, BLOCKED_EXTERNAL only.
+// Distribution actions recorded in config but carried by no current source
+// are listed separately as dormant rules. English only, like every screen.
+// ---------------------------------------------------------------------------
+
+export interface OperationsOverview {
+	ok: true;
+	generated_at: string;
+	google_ads_execution_allowed: boolean;
+	queue: OperationalQueue;
+}
+
+/**
+ * Builds the operational queue from the current orchestration decisions and
+ * proposal states, exactly as the ads screen does (same intents, same live
+ * snapshot, same downstream states). Read-only: no D1 writes, no mutations.
+ */
+export async function getOperationsOverview(
+	env: GoogleAdsEnv,
+	readStatus: AdsStatusReader = getGoogleAdsStatus,
+	readAccount: AdsAccountReader = getGoogleAdsAccountSnapshot,
+): Promise<OperationsOverview> {
+	const status = await readStatus(env);
+	let liveCampaigns: GoogleAdsLiveCampaign[] = [];
+	if (status.connected) {
+		const snapshot = await readAccount(env, GOOGLE_ADS_LIVE_CUSTOMER_ID);
+		liveCampaigns = snapshot.campaigns;
+	}
+	const proposals = buildMachineProposals(
+		await currentProposalIntents(env.nwana_engine_db),
+		liveCampaigns,
+	);
+	const proposalsById = new Map(proposals.map((p) => [p.proposal_id, p]));
+	const downstream = new Map(proposals.map((p) => [p.proposal_id, p.state]));
+	const decisions = await getOrchestrationDecisions(env.nwana_engine_db, downstream);
+	const queue = buildOperationalQueue({
+		decisions,
+		proposalsById,
+		googleAdsExecutionAllowed: status.execution_allowed,
+	});
+	return {
+		ok: true,
+		generated_at: queue.generated_at,
+		google_ads_execution_allowed: status.execution_allowed,
+		queue,
+	};
+}
+
+const OPERATIONS_SCRIPT = `
+	async function boot(){
+		const box=document.querySelector('#operations-queue');
+		const note=document.querySelector('#operations-note');
+		try{
+			const data=await api('/api/operating-center/operations/overview');
+			const rows=(data.queue&&data.queue.rows)||[];
+			const groups={};const order=[];
+			for(const r of rows){
+				if(!groups[r.source_title]){groups[r.source_title]=[];order.push(r.source_title)}
+				groups[r.source_title].push(r);
+			}
+			let html='';
+			for(const title of order){
+				html+='<h3>'+esc(title)+'</h3>';
+				for(const r of groups[title]){
+					const badge=r.status==='READY_TO_ACT'?'badge-ok':(r.status==='NEEDS_OWNER_INPUT'?'badge-warn':'badge');
+					html+='<div class="item"><strong>'+esc(r.action||'(no action)')+'<span class="'+badge+'">'+esc(r.status)+'</span></strong>';
+					html+='<div class="detail"><b>Required result:</b> '+esc(r.required_result||'not assigned')+'</div>';
+					html+='<div class="detail"><b>Channel:</b> '+esc(r.channel||'not assigned')+' <b>Outcome:</b> '+esc(r.business_outcome)+'</div>';
+					if(r.owner_input){html+='<div class="detail"><b>Owner input needed:</b> '+esc(r.owner_input)+'</div>'}
+					if(r.external_blocker){html+='<div class="detail"><b>External blocker:</b> '+esc(r.external_blocker)+'</div>'}
+					html+='<div class="detail"><b>Next step:</b> '+esc(r.exact_next_step)+'</div>';
+					if(r.downstream_state){html+='<div class="meta">Proposal state: '+esc(r.downstream_state)+'</div>'}
+					html+='</div>';
+				}
+			}
+			const unrouted=(data.queue&&data.queue.unrouted_rules)||[];
+			if(unrouted.length){
+				html+='<h3>Actions in config carried by no current source</h3>';
+				for(const u of unrouted){
+					html+='<div class="item"><strong>'+esc(u.rule_id)+'<span class="badge-warn">NEEDS_OWNER_INPUT</span></strong>';
+					html+='<div class="detail">'+esc(u.action_ids.length)+' actions: '+esc(u.action_ids.join(', '))+'</div>';
+					html+='<div class="detail"><b>Owner input needed:</b> '+esc(u.owner_input)+'</div></div>';
+				}
+			}
+			box.innerHTML=html;
+			note.textContent='Generated '+esc(data.generated_at)+'. Google Ads execution '+(data.google_ads_execution_allowed?'allowed':'not allowed (read-only integration)')+'.';
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+`;
+
+export function renderOperationsHtml(): string {
+	return ocScreenShell({
+		page: "operations",
+		title: "Operations",
+		subtitle: "The operational queue: every current source, its required result, action, channel, status, and exact next step.",
+		panelsHtml: `<section class="panel">
+			<h2>Operational queue</h2>
+			<div id="operations-queue">Loading…</div>
+			<p class="meta" id="operations-note"></p>
+		</section>`,
+		script: OPERATIONS_SCRIPT,
+		reportId: "operations",
+	});
+}
+
+export function buildOperationsReport(data: OperationsOverview): string {
+	const rows = data.queue.rows;
+	const groups = new Map<string, typeof rows>();
+	for (const r of rows) {
+		const list = groups.get(r.source_title) ?? [];
+		list.push(r);
+		groups.set(r.source_title, list);
+	}
+	let body = `<h2>Operational queue</h2>`;
+	for (const [title, list] of groups) {
+		body += `<h3>${escHtml(title)}</h3>`;
+		body += `<table><thead><tr><th>Action</th><th>Status</th><th>Required result</th><th>Channel / Outcome</th></tr></thead><tbody>`;
+		for (const r of list) {
+			const badge = r.status === "READY_TO_ACT" ? "tag" : "tag-warn";
+			body += `<tr><td><strong>${escHtml(r.action ?? "(no action)")}</strong>` +
+				(r.owner_input ? `<br><span class="note">Owner input: ${escHtml(r.owner_input)}</span>` : "") +
+				(r.external_blocker ? `<br><span class="note">Blocker: ${escHtml(r.external_blocker)}</span>` : "") +
+				`<br><span class="note">Next: ${escHtml(r.exact_next_step)}</span></td>` +
+				`<td><span class="${badge}">${escHtml(r.status)}</span></td>` +
+				`<td>${escHtml(r.required_result ?? "not assigned")}</td>` +
+				`<td>${escHtml(r.channel ?? "not assigned")}<br><span class="note">${escHtml(r.business_outcome)}</span></td></tr>`;
+		}
+		body += `</tbody></table>`;
+	}
+	if (data.queue.unrouted_rules.length) {
+		body += `<h2>Actions in config carried by no current source</h2>`;
+		body += `<table><thead><tr><th>Rule</th><th>Actions</th><th>Owner input needed</th></tr></thead><tbody>`;
+		for (const u of data.queue.unrouted_rules) {
+			body += `<tr><td><strong>${escHtml(u.rule_id)}</strong></td>` +
+				`<td>${escHtml(u.action_ids.join(", "))}</td>` +
+				`<td>${escHtml(u.owner_input)}</td></tr>`;
+		}
+		body += `</tbody></table>`;
+	}
+	body += `<p class="note">Generated ${escHtml(data.generated_at)}. Google Ads execution ` +
+		(data.google_ads_execution_allowed ? "allowed" : "not allowed (read-only integration)") + `.</p>`;
+	return reportDoc("NWANA operations queue", reportDate(data.generated_at), body);
 }
