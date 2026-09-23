@@ -345,3 +345,136 @@ export async function getGoogleAdsStatus(env: GoogleAdsEnv): Promise<{
 }
 
 export const GOOGLE_ADS_REDIRECT_URI = REDIRECT_URI;
+
+// ---------------------------------------------------------------------------
+// Read-only live account snapshot (ADR-0030).
+//
+// Bounded read-only GAQL query: one request per call, no mutations, no
+// polling, nothing is written to D1. The overview screen may call this on
+// each page open; there is no background synchronization.
+// ---------------------------------------------------------------------------
+
+export const GOOGLE_ADS_LIVE_CUSTOMER_ID = "6758500147";
+export const GOOGLE_ADS_METRICS_RANGE = "LAST_30_DAYS";
+
+export interface GoogleAdsLiveCampaign {
+	id: string;
+	name: string;
+	status: string;
+	daily_budget_usd: number;
+	impressions: number;
+	clicks: number;
+	conversions: number;
+	cost_usd: number;
+}
+
+export interface GoogleAdsAccountSnapshot {
+	ok: boolean;
+	customer_id: string;
+	date_range: string;
+	campaigns: GoogleAdsLiveCampaign[];
+	error?: string;
+}
+
+async function searchLiveCampaigns(
+	accessToken: string,
+	customerId: string,
+): Promise<GoogleAdsLiveCampaign[]> {
+	const query = [
+		"SELECT campaign.id, campaign.name, campaign.status,",
+		"campaign_budget.amount_micros,",
+		"metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros",
+		"FROM campaign",
+		"WHERE campaign.status != 'REMOVED'",
+		`DURING ${GOOGLE_ADS_METRICS_RANGE}`,
+	].join(" ");
+	const response = await fetch(
+		`https://googleads.googleapis.com/${API_VERSION}/customers/${customerId}/googleAds:search`,
+		{
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ query }),
+		},
+	);
+	const payload = await response.json() as {
+		results?: Array<{
+			campaign?: { id?: string; name?: string; status?: string };
+			campaignBudget?: { amountMicros?: string };
+			metrics?: { impressions?: string; clicks?: string; conversions?: string; costMicros?: string };
+		}>;
+		error?: { message?: string };
+	};
+	if (!response.ok) {
+		throw new Error(payload.error?.message ?? `Google Ads request failed (${response.status})`);
+	}
+	return (payload.results ?? []).map((row) => ({
+		id: row.campaign?.id ?? "",
+		name: row.campaign?.name ?? "",
+		status: row.campaign?.status ?? "UNKNOWN",
+		daily_budget_usd: Number(row.campaignBudget?.amountMicros ?? 0) / 1_000_000,
+		impressions: Number(row.metrics?.impressions ?? 0),
+		clicks: Number(row.metrics?.clicks ?? 0),
+		conversions: Number(row.metrics?.conversions ?? 0),
+		cost_usd: Number(row.metrics?.costMicros ?? 0) / 1_000_000,
+	}));
+}
+
+export async function getGoogleAdsAccountSnapshot(
+	env: GoogleAdsEnv,
+	customerId: string = GOOGLE_ADS_LIVE_CUSTOMER_ID,
+): Promise<GoogleAdsAccountSnapshot> {
+	const missing = missingConfiguration(env);
+	if (missing.length > 0) {
+		return {
+			ok: false,
+			customer_id: customerId,
+			date_range: GOOGLE_ADS_METRICS_RANGE,
+			campaigns: [],
+			error: `Not connected: ${missing.join(", ")} missing.`,
+		};
+	}
+	try {
+		const credential = await env.nwana_engine_db.prepare(`
+			SELECT encrypted_refresh_token, iv
+			FROM integration_credentials
+			WHERE provider = ?
+			LIMIT 1
+		`).bind(PROVIDER).first<{
+			encrypted_refresh_token: string;
+			iv: string;
+		}>();
+		if (!credential) {
+			return {
+				ok: false,
+				customer_id: customerId,
+				date_range: GOOGLE_ADS_METRICS_RANGE,
+				campaigns: [],
+				error: "Not connected: no OAuth credential stored yet.",
+			};
+		}
+		const refreshToken = await decryptRefreshToken(
+			credential.encrypted_refresh_token,
+			credential.iv,
+			env.GOOGLE_ADS_TOKEN_KEY!,
+		);
+		const accessToken = await refreshAccessToken(refreshToken, env);
+		const campaigns = await searchLiveCampaigns(accessToken, customerId);
+		return {
+			ok: true,
+			customer_id: customerId,
+			date_range: GOOGLE_ADS_METRICS_RANGE,
+			campaigns,
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			customer_id: customerId,
+			date_range: GOOGLE_ADS_METRICS_RANGE,
+			campaigns: [],
+			error: error instanceof Error ? error.message : "Google Ads account read failed",
+		};
+	}
+}
