@@ -1,5 +1,15 @@
 # NWANA Engine Changelog
 
+## 2026-09-23 — Self-running weekly Board loop (ADR-0025)
+
+- The Board cycle now runs itself: migration 0031 adds `board_settings` holding the meeting cadence (weekly, Sunday, 14:00, America/New_York, "Weekly Board meeting"); `getBoardCadence()` reads it with the same values as code defaults when the table is missing.
+- `ensureUpcomingMeeting()` is the standing-meeting guarantee: exactly one upcoming DRAFT/OPEN meeting always exists, created for the next meeting day when none does, idempotent per date. It runs on `GET /api/board/meetings` (never breaks the list) and at meeting close. Event-driven, no cron (per the owner rule from ADR-0024).
+- `closeBoardMeeting` now ensures the next meeting and rolls every unresolved/deferred AGENDA item straight into the next meeting's protocol (response carries `next_meeting_id` and `rolled_over`); author and submission date stay on each item.
+- Main page board panel shows "Next Board meeting: <date> · Sundays 14:00 New York time", protocol item count, queue count, and work-item counts, with a link to the Board workspace. The board workspace next-meeting banner shows date, time, and protocol count. New `GET /api/board/cadence` endpoint.
+- The manual "Schedule a meeting" form stays for extra meetings only; the routine weekly meeting is never created by hand.
+- Migration 0031 applied to remote D1 via raw `d1 execute --remote --file` and recorded in the `d1_migrations` journal as `0031-add-board-settings` (matching the existing no-`.sql`-extension name style). Verified: all five settings rows present remotely. Note: the remote journal is missing entries for 0022 and 0026-0030 (applied raw earlier without journal rows); 0031 follows the same raw-apply + manual-journal procedure.
+- Verified: Vitest 205/205 (11 new tests in `test/board-weekly-loop.spec.ts`), TypeScript clean, inline script syntax checks pass for the main and board pages.
+
 ## 2026-09-23 — Operating Center completion fixes: honest media composition, board/uploads pages, upload auth
 
 - The machine now composes the media plan from verified sources (ADR-0021 updated): `POST /api/operating-center/media/plans/compose` and the "Compose plan from verified sources" button build a DRAFT plan whose article slots derive from upcoming races in the lifecycle, recent winner announcements in `site_news`, board uploads routed as MEDIA_DRAFT, and the verified NWANA pillars as explainer structure. Every slot's angle cites its source; the machine never invents topics. The media page header no longer tells the owner "You set the topics".

@@ -59,6 +59,99 @@ async function audit(db: D1Database, objectId: string, action: string, module: s
 }
 
 // ---------------------------------------------------------------------------
+// Board meeting cadence (stored setting, not hardcoded)
+// ---------------------------------------------------------------------------
+
+// The weekly Board loop reads its cadence from the board_settings table
+// (migration 0031) so the schedule can change without a code deploy.
+// Defaults are the only board time the owner ever named: weekly,
+// Sunday 2:00 PM New York time.
+export interface BoardCadence {
+	cadence: string;
+	weekday: string;
+	time: string;
+	timezone: string;
+	title: string;
+}
+
+const DEFAULT_CADENCE: BoardCadence = {
+	cadence: "weekly",
+	weekday: "Sunday",
+	time: "14:00",
+	timezone: "America/New_York",
+	title: "Weekly Board meeting",
+};
+
+export async function getBoardCadence(db: D1Database): Promise<BoardCadence> {
+	try {
+		const rows = await db
+			.prepare(`SELECT key, value FROM board_settings WHERE key LIKE 'meeting_%'`)
+			.all<{ key: string; value: string }>();
+		const map: Record<string, string> = {};
+		for (const r of rows.results) map[r.key] = r.value;
+		return {
+			cadence: map.meeting_cadence?.trim() || DEFAULT_CADENCE.cadence,
+			weekday: map.meeting_weekday?.trim() || DEFAULT_CADENCE.weekday,
+			time: map.meeting_time?.trim() || DEFAULT_CADENCE.time,
+			timezone: map.meeting_timezone?.trim() || DEFAULT_CADENCE.timezone,
+			title: map.meeting_title?.trim() || DEFAULT_CADENCE.title,
+		};
+	} catch {
+		// Settings table missing (old database): fall back to defaults
+		// rather than breaking the page.
+		return { ...DEFAULT_CADENCE };
+	}
+}
+
+const WEEKDAY_NAMES = [
+	"Sunday",
+	"Monday",
+	"Tuesday",
+	"Wednesday",
+	"Thursday",
+	"Friday",
+	"Saturday",
+] as const;
+
+// The date (YYYY-MM-DD) of the next <weekday> in the given IANA timezone.
+// If today is that weekday, returns today.
+export function nextWeekdayDateInZone(
+	now: Date,
+	weekday: string,
+	timezone: string,
+): string {
+	const dayFmt = new Intl.DateTimeFormat("en-CA", {
+		timeZone: timezone,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	});
+	const wdFmt = new Intl.DateTimeFormat("en-US", {
+		timeZone: timezone,
+		weekday: "long",
+	});
+	const target = WEEKDAY_NAMES.findIndex(
+		(w) => w.toLowerCase() === weekday.toLowerCase(),
+	);
+	if (target < 0) throw new Error(`Unknown weekday "${weekday}"`);
+	for (let i = 0; i < 8; i++) {
+		const d = new Date(now.getTime() + i * 86400000);
+		if (wdFmt.format(d) === WEEKDAY_NAMES[target]) return dayFmt.format(d);
+	}
+	throw new Error("Could not find the next meeting day");
+}
+
+// Today's date (YYYY-MM-DD) in the given IANA timezone.
+export function todayInZone(now: Date, timezone: string): string {
+	return new Intl.DateTimeFormat("en-CA", {
+		timeZone: timezone,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	}).format(now);
+}
+
+// ---------------------------------------------------------------------------
 // Sunday protocol formation
 // ---------------------------------------------------------------------------
 
@@ -66,25 +159,100 @@ async function audit(db: D1Database, objectId: string, action: string, module: s
 // If today is Sunday, returns today: the formation job runs before the 2 PM
 // meeting and assembles today's protocol.
 export function nextSundayInNewYork(now: Date): string {
-	const dayFmt = new Intl.DateTimeFormat("en-CA", {
-		timeZone: "America/New_York",
-		year: "numeric",
-		month: "2-digit",
-		day: "2-digit",
-	});
-	const wdFmt = new Intl.DateTimeFormat("en-US", {
-		timeZone: "America/New_York",
-		weekday: "short",
-	});
-	for (let i = 0; i < 8; i++) {
-		const d = new Date(now.getTime() + i * 86400000);
-		if (wdFmt.format(d) === "Sun") return dayFmt.format(d);
+	return nextWeekdayDateInZone(now, "Sunday", "America/New_York");
+}
+
+export interface UpcomingMeeting {
+	meeting_id: string;
+	title: string;
+	scheduled_for: string | null;
+	status: string;
+	created: boolean;
+}
+
+// The standing-meeting guarantee: there is always exactly one upcoming
+// Board meeting. Returns the nearest upcoming DRAFT/OPEN meeting when one
+// exists; otherwise creates the cadence meeting for the next meeting day
+// (idempotent per date: never two machine-created meetings for one day).
+// Event-driven, never a timer: called from owner-authorized activity
+// (operating-center overview, the board meetings list) and from meeting
+// close, so the next meeting's date always stands with no manual
+// "Create meeting" step.
+export async function ensureUpcomingMeeting(
+	db: D1Database,
+	now: Date = new Date(),
+): Promise<UpcomingMeeting> {
+	const cadence = await getBoardCadence(db);
+	const today = todayInZone(now, cadence.timezone);
+
+	const upcoming = await db
+		.prepare(
+			`SELECT meeting_id, title, scheduled_for, status FROM board_meetings
+			 WHERE status IN ('DRAFT', 'OPEN')
+			 ORDER BY
+				CASE WHEN scheduled_for IS NULL OR substr(scheduled_for, 1, 10) >= ? THEN 0 ELSE 1 END,
+				scheduled_for ASC,
+				created_at DESC
+			 LIMIT 1`,
+		)
+		.bind(today)
+		.first<{
+			meeting_id: string;
+			title: string;
+			scheduled_for: string | null;
+			status: string;
+		}>();
+	if (
+		upcoming &&
+		(upcoming.scheduled_for == null ||
+			String(upcoming.scheduled_for).slice(0, 10) >= today)
+	) {
+		return { ...upcoming, created: false };
 	}
-	throw new Error("Could not find the coming Sunday");
+
+	const targetDate = nextWeekdayDateInZone(now, cadence.weekday, cadence.timezone);
+	const sameDay = await db
+		.prepare(
+			`SELECT meeting_id, title, scheduled_for, status FROM board_meetings
+			 WHERE substr(scheduled_for, 1, 10) = ? AND status IN ('DRAFT', 'OPEN')
+			 ORDER BY created_at LIMIT 1`,
+		)
+		.bind(targetDate)
+		.first<{
+			meeting_id: string;
+			title: string;
+			scheduled_for: string | null;
+			status: string;
+		}>();
+	if (sameDay) return { ...sameDay, created: false };
+
+	const meetingId = `MEET-${crypto.randomUUID()}`;
+	await db
+		.prepare(
+			`INSERT INTO board_meetings (meeting_id, title, scheduled_for, status)
+			 VALUES (?, ?, ?, 'DRAFT')`,
+		)
+		.bind(meetingId, cadence.title, targetDate)
+		.run();
+	await audit(db, meetingId, "MEETING_AUTO_CREATED", "BOARD", {
+		cadence: cadence.cadence,
+		weekday: cadence.weekday,
+		timezone: cadence.timezone,
+		target_date: targetDate,
+	});
+
+	return {
+		meeting_id: meetingId,
+		title: cadence.title,
+		scheduled_for: targetDate,
+		status: "DRAFT",
+		created: true,
+	};
 }
 
 export async function formWeeklyProtocol(db: D1Database, now: Date = new Date()): Promise<Response> {
-	const sunday = nextSundayInNewYork(now);
+	const cadence = await getBoardCadence(db);
+	const targetDate = nextWeekdayDateInZone(now, cadence.weekday, cadence.timezone);
 	const nowIso = now.toISOString();
 
 	let meeting = await db
@@ -93,7 +261,7 @@ export async function formWeeklyProtocol(db: D1Database, now: Date = new Date())
 			 WHERE substr(scheduled_for, 1, 10) = ? AND status IN ('DRAFT', 'OPEN')
 			 ORDER BY created_at LIMIT 1`,
 		)
-		.bind(sunday)
+		.bind(targetDate)
 		.first<{ meeting_id: string; title: string; status: string }>();
 
 	let meetingId: string;
@@ -107,7 +275,7 @@ export async function formWeeklyProtocol(db: D1Database, now: Date = new Date())
 				`INSERT INTO board_meetings (meeting_id, title, scheduled_for, status)
 				 VALUES (?, ?, ?, 'DRAFT')`,
 			)
-			.bind(meetingId, "Weekly Board meeting", sunday)
+			.bind(meetingId, cadence.title, targetDate)
 			.run();
 		created = true;
 	}
@@ -126,12 +294,12 @@ export async function formWeeklyProtocol(db: D1Database, now: Date = new Date())
 		.bind(nowIso, nowIso, meetingId)
 		.run();
 
-	await audit(db, meetingId, "PROTOCOL_FORMED", "BOARD", { sunday, meeting_created: created, swept: sweptCount });
+	await audit(db, meetingId, "PROTOCOL_FORMED", "BOARD", { target_date: targetDate, meeting_created: created, swept: sweptCount });
 
 	return jsonResponse({
 		ok: true,
 		meeting_id: meetingId,
-		sunday,
+		sunday: targetDate,
 		meeting_created: created,
 		swept: sweptCount,
 		protocol_formed: true,
@@ -155,14 +323,15 @@ export async function reconcileProtocolIfDue(
 	now: Date = new Date(),
 ): Promise<Record<string, unknown> | null> {
 	try {
-		const sunday = nextSundayInNewYork(now);
+		const cadence = await getBoardCadence(db);
+		const targetDate = nextWeekdayDateInZone(now, cadence.weekday, cadence.timezone);
 		const existing = await db
 			.prepare(
 				`SELECT meeting_id, protocol_formed_at FROM board_meetings
 				 WHERE substr(scheduled_for, 1, 10) = ?
 				 ORDER BY created_at LIMIT 1`,
 			)
-			.bind(sunday)
+			.bind(targetDate)
 			.first<{ meeting_id: string; protocol_formed_at: string | null }>();
 		if (existing && existing.protocol_formed_at) return null;
 		const res = await formWeeklyProtocol(db, now);

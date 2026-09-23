@@ -619,17 +619,39 @@ export function renderOperatingCenterHtml(): string {
 			loadUploadsSummary();
 			loadSponsorshipAssets();
 		}
+		async function pickNextMeetingLocal(meetings){
+			const today=new Date().toISOString().slice(0,10);
+			const open=(meetings||[]).filter(m=>m.status==='DRAFT'||m.status==='OPEN');
+			const dated=open.filter(m=>m.scheduled_for&&String(m.scheduled_for).slice(0,10)>=today)
+				.sort((a,b)=>String(a.scheduled_for).localeCompare(String(b.scheduled_for)));
+			if(dated.length)return dated[0];
+			const undated=open.filter(m=>!m.scheduled_for);
+			if(undated.length)return undated[0];
+			return null;
+		}
 		async function loadBoardSummary(){
 			const box=document.querySelector('#board-summary');
 			try{
-				const [m,w]=await Promise.all([api('/api/board/meetings'),api('/api/board/work-items')]);
+				const [m,w,c]=await Promise.all([api('/api/board/meetings'),api('/api/board/work-items'),api('/api/board/cadence').catch(()=>null)]);
 				const meetings=m.meetings||[];
-				const open=meetings.filter(x=>x.status==='DRAFT'||x.status==='OPEN').length;
+				const next=pickNextMeetingLocal(meetings);
 				const items=w.work_items||[];
 				const active=items.filter(x=>x.status!=='DONE').length;
 				const overdue=items.filter(x=>x.due_date && new Date(x.due_date)<new Date() && x.status!=='DONE').length;
 				const pend=(pendingSubmissionsCache||[]).filter(s=>s.status==='PENDING').length;
-				box.innerHTML='<div class="meta">'+open+' open meeting'+(open===1?'':'s')+' · '+pend+' pending submission'+(pend===1?'':'s')+' · '+active+' active work item'+(active===1?'':'s')+(overdue?' · <span style="color:#a00">'+overdue+' overdue</span>':'')+'</div>';
+				let html='';
+				if(next){
+					const dstr=next.scheduled_for?String(next.scheduled_for).slice(0,10):'date TBD';
+					let when='';
+					if(c&&c.cadence){const tz=String(c.cadence.timezone||'').replace('America/','');when=' · '+esc(c.cadence.weekday)+'s '+esc(c.cadence.time)+(tz?' '+esc(tz)+' time':'')}
+					const agenda=Number(next.agenda_count||0);
+					html+='<div style="font-size:18px;font-weight:700;margin-bottom:6px">Next Board meeting: '+esc(dstr)+when+'</div>';
+					html+='<div class="meta">Protocol: '+agenda+' item'+(agenda===1?'':'s')+(pend?' · '+pend+' waiting in the queue':'')+' · '+esc(next.status==='DRAFT'?'Draft':next.status==='OPEN'?'Open':'Closed')+'</div>';
+				}else{
+					html+='<div class="unavailable">No upcoming meeting.</div>';
+				}
+				html+='<div class="meta" style="margin-top:6px">'+active+' active work item'+(active===1?'':'s')+(overdue?' · <span style="color:#a00">'+overdue+' overdue</span>':'')+'</div>';
+				box.innerHTML=html;
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadUploadsSummary(){

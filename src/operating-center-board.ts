@@ -95,7 +95,9 @@ export function renderBoardHtml(): string {
 			pendingSubmissionsCache=b.submissions||[];
 			const pend=pendingSubmissionsCache.filter(s=>s.status==='PENDING');
 			document.querySelector('#board-items').innerHTML=pend.length?pend.map(s=>'<div class="item"><strong>'+esc(s.title)+'</strong><div class="meta">'+esc(s.submission_type)+' · '+esc(s.submitted_by)+' · '+esc(s.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
-			await loadMeetings();
+			let cadence=null;
+			try{cadence=(await api('/api/board/cadence')).cadence||null}catch(e){}
+			await loadMeetings(cadence);
 			await loadWorkItems();
 		}
 		function pickNextMeeting(meetings){
@@ -108,18 +110,20 @@ export function renderBoardHtml(): string {
 			if(undated.length)return undated[0];
 			return null;
 		}
-		async function renderNextMeeting(meetings){
+		async function renderNextMeeting(meetings,cadence){
 			const box=document.querySelector('#next-meeting');
 			const next=pickNextMeeting(meetings);
-			if(!next){box.innerHTML='<div class="unavailable">No upcoming meeting scheduled yet. Use the form below to schedule one.</div>';return}
+			if(!next){box.innerHTML='<div class="unavailable">No upcoming meeting yet. The machine schedules the next one automatically; use the form below for an extra meeting.</div>';return}
 			try{
 				const d=await api('/api/board/meetings/'+encodeURIComponent(next.meeting_id));
 				const m=d.meeting;
 				const agenda=d.agenda||[];
 				const pending=(pendingSubmissionsCache||[]).filter(s=>s.status==='PENDING').length;
 				const label={DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed'};
+				let when='';
+				if(cadence){const tz=String(cadence.timezone||'').replace('America/','');when=' · '+esc(cadence.weekday)+'s '+esc(cadence.time)+(tz?' '+esc(tz)+' time':'')}
 				let html='<div class="item"><strong>Next meeting: '+esc(m.title)+'</strong>'+
-					'<div class="meta">'+(m.scheduled_for?esc(String(m.scheduled_for).slice(0,10))+' · ':'')+esc(label[m.status]||m.status)+' · protocol: '+agenda.length+' items'+(pending?' · '+pending+' waiting in the queue':'')+'</div>'+
+					'<div class="meta">'+(m.scheduled_for?esc(String(m.scheduled_for).slice(0,10))+' · ':'')+esc(label[m.status]||m.status)+when+' · protocol: '+agenda.length+' items'+(pending?' · '+pending+' waiting in the queue':'')+'</div>'+
 					'<div class="meta" style="margin-top:8px">Protocol (fills during the week):</div>';
 				html+=agenda.length?agenda.map(a=>'<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.submission_type)+' · '+esc(a.submitted_by)+' · '+esc(a.status)+'</div></div>').join(''):'<div class="unavailable">No items yet. New submissions join this protocol automatically.</div>';
 				html+='<div style="margin-top:8px"><button data-meeting="'+esc(m.meeting_id)+'" style="width:auto">Open meeting workspace</button></div></div>';
@@ -127,17 +131,17 @@ export function renderBoardHtml(): string {
 				box.querySelectorAll('[data-meeting]').forEach(btn=>btn.addEventListener('click',()=>selectMeeting(btn.dataset.meeting)));
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
-		async function loadMeetings(){
+		async function loadMeetings(cadence){
 			const box=document.querySelector('#meetings');
 			try{
 				const data=await api('/api/board/meetings');
-				if(!data.meetings.length){box.innerHTML='<div class="unavailable">No meetings yet. Create one below.</div>';document.querySelector('#next-meeting').innerHTML='<div class="unavailable">No upcoming meeting scheduled yet. Use the form below to schedule one.</div>';return}
+				if(!data.meetings.length){box.innerHTML='<div class="unavailable">No meetings yet. Create one below.</div>';document.querySelector('#next-meeting').innerHTML='<div class="unavailable">No upcoming meeting yet. The machine schedules the next one automatically; use the form below for an extra meeting.</div>';return}
 				const label={DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed'};
 				box.innerHTML=data.meetings.map(m=>'<div class="item"><strong>'+esc(m.title)+'</strong>'+
 					'<div class="meta">'+(m.scheduled_for?esc(String(m.scheduled_for).slice(0,10))+' · ':'')+esc(label[m.status]||m.status)+' · agenda '+m.agenda_count+' · decisions '+m.decision_count+'</div>'+
 					'<div><button data-meeting="'+esc(m.meeting_id)+'" style="width:auto">Open workspace</button></div></div>').join('');
 				box.querySelectorAll('[data-meeting]').forEach(btn=>btn.addEventListener('click',()=>selectMeeting(btn.dataset.meeting)));
-				await renderNextMeeting(data.meetings);
+				await renderNextMeeting(data.meetings,cadence);
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function selectMeeting(id){

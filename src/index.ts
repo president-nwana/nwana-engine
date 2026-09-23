@@ -89,6 +89,8 @@ import {
 	handleUpload,
 	listUploads,
 	getStagedCsv,
+	ensureUpcomingMeeting,
+	getBoardCadence,
 } from "./board-protocol";
 
 interface Env {
@@ -5926,10 +5928,27 @@ export default {
 
 		if (url.pathname === "/api/board/meetings" && request.method === "GET") {
 			try {
+				// Standing-meeting guarantee: the next meeting's date always
+				// stands, with no manual "Create meeting" step. Never throws.
+				try {
+					await ensureUpcomingMeeting(env.nwana_engine_db);
+				} catch (ensureError) {
+					console.error("ensureUpcomingMeeting failed:", ensureError instanceof Error ? ensureError.message : ensureError);
+				}
 				return await listBoardMeetings(env.nwana_engine_db);
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Board meetings list failed" }, 500);
+			}
+		}
+
+		if (url.pathname === "/api/board/cadence" && request.method === "GET") {
+			try {
+				const cadence = await getBoardCadence(env.nwana_engine_db);
+				return json({ ok: true, cadence });
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Board cadence read failed" }, 500);
 			}
 		}
 

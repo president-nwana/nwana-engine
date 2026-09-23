@@ -27,7 +27,7 @@
 // time (prepare a draft for owner review). Sends and consequential actions
 // stay human-confirmed.
 
-import { isMachineAction, processProtocol } from "./board-protocol";
+import { ensureUpcomingMeeting, isMachineAction, processProtocol } from "./board-protocol";
 
 export const MEETING_STAGES = ["DRAFT", "OPEN", "CLOSED"] as const;
 export type MeetingStage = (typeof MEETING_STAGES)[number];
@@ -614,8 +614,18 @@ export async function closeBoardMeeting(
 		.prepare(`UPDATE board_meetings SET status = 'CLOSED', closed_at = ?, minutes = ?, updated_at = ? WHERE meeting_id = ?`)
 		.bind(now, minutes, now, meetingId)
 		.run();
-	// Unresolved agenda items carry into the next meeting: back to PENDING,
-	// keeping their meeting_id as history.
+	// Unresolved agenda items roll straight into the next meeting's
+	// protocol: first back to PENDING (keeping their meeting_id as
+	// history), then onto the next upcoming meeting's agenda, which the
+	// machine ensures exists right here so the date always stands with no
+	// manual "Create meeting" step.
+	const unresolved = await db
+		.prepare(
+			`SELECT submission_id FROM board_submissions WHERE meeting_id = ? AND status = 'AGENDA'`,
+		)
+		.bind(meetingId)
+		.all<{ submission_id: string }>();
+	const unresolvedIds = unresolved.results.map((r) => r.submission_id);
 	const carried = await db
 		.prepare(
 			`UPDATE board_submissions SET status = 'PENDING', updated_at = ?
@@ -627,12 +637,38 @@ export async function closeBoardMeeting(
 	// is authorized and capable of doing. Sends and consequential actions
 	// stay human-confirmed.
 	const processing = await processProtocol(db, meetingId);
-	await auditEvent(db, meetingId, "MEETING_CLOSED", { carried_over: Number(carried.meta?.changes ?? 0) });
+	let nextMeetingId: string | null = null;
+	let rolledOver = 0;
+	try {
+		const next = await ensureUpcomingMeeting(db);
+		nextMeetingId = next.meeting_id;
+		if (unresolvedIds.length && next.meeting_id !== meetingId) {
+			for (const sid of unresolvedIds) {
+				await db
+					.prepare(
+						`UPDATE board_submissions SET meeting_id = ?, status = 'AGENDA', updated_at = ?
+						 WHERE submission_id = ? AND status = 'PENDING'`,
+					)
+					.bind(next.meeting_id, now, sid)
+					.run();
+				rolledOver++;
+			}
+		}
+	} catch (err) {
+		console.error("closeBoardMeeting rollover failed:", err instanceof Error ? err.message : err);
+	}
+	await auditEvent(db, meetingId, "MEETING_CLOSED", {
+		carried_over: Number(carried.meta?.changes ?? 0),
+		rolled_to_meeting: nextMeetingId,
+		rolled_over: rolledOver,
+	});
 	return jsonResponse({
 		ok: true,
 		meeting_id: meetingId,
 		status: "CLOSED",
 		carried_over: Number(carried.meta?.changes ?? 0),
+		next_meeting_id: nextMeetingId,
+		rolled_over: rolledOver,
 		protocol_processing: processing,
 	});
 }

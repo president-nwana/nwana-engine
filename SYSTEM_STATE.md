@@ -664,6 +664,15 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Migration safety (honest): 0027, 0029, 0030 are `IF NOT EXISTS` / `CREATE TABLE` only and re-runnable. 0028 is NOT fully idempotent: it contains three `ALTER TABLE ... ADD COLUMN` statements (SQLite has no `IF NOT EXISTS` for `ADD COLUMN`), so re-running 0028 fails with "duplicate column name". The migration journal records 0028 as applied; never re-run it wholesale. On a fresh database the ALTERs are safe (columns do not exist yet). If a column must be added later, write a new migration, do not edit 0028.
 - Live verification: `/operating-center`, `/operating-center/funds`, `/operating-center/media` return 200; `/api/operating-center/activity`, `/api/operating-center/media/overview`, `/api/operating-center/uploads` return 401 without owner key; live inline script parses via `new Function`.
 
+## BOARD WEEKLY LOOP — IMPLEMENTED 2026-09-23 (ADR-0025)
+
+- The weekly cycle runs itself, no manual "Create meeting" for the routine meeting: migration 0031 adds `board_settings` (weekly, Sunday, 14:00, America/New_York, "Weekly Board meeting"); `getBoardCadence()` reads it, falling back to the same defaults when the table is missing.
+- `ensureUpcomingMeeting(db)` guarantees exactly one upcoming DRAFT/OPEN meeting: reuses the nearest, otherwise creates the cadence meeting for the next meeting day, idempotent per date. Runs on `GET /api/board/meetings` (try/catch, never breaks the list) and at meeting close. Event-driven, no cron (owner rule 2026-09-19, ADR-0024). New `GET /api/board/cadence` endpoint.
+- `closeBoardMeeting` ensures the next meeting and rolls unresolved/deferred AGENDA items straight into its protocol (AGENDA -> PENDING -> AGENDA on the new meeting); response carries `next_meeting_id` and `rolled_over`.
+- Main page board panel: "Next Board meeting: <date> · Sundays 14:00 New York time", protocol item count, queue count, work-item counts, link to the Board workspace. Board workspace banner shows date, time, protocol count; protocol items show submitter and submission date. The manual "Schedule a meeting" form stays for extra meetings only.
+- Migration 0031 applied to remote D1 via raw `d1 execute --remote --file` and recorded in the `d1_migrations` journal as `0031-add-board-settings` (journal uses no-`.sql`-extension names). All five settings rows verified present remotely. Journal note: remote `d1_migrations` is missing rows for 0022 and 0026-0030 (applied raw earlier without journal rows); do not "repair" it by re-running old migrations.
+- Local verification: Vitest 205/205 (11 new tests in `test/board-weekly-loop.spec.ts`: next-day math incl. DST edge, cadence defaults/override, idempotent ensure, submission auto-attach, weekly sweep, close rollover, inline-script checks), `npx tsc --noEmit` clean.
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.

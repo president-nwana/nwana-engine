@@ -68,6 +68,24 @@ function makeBoardDb() {
 						const w = find(workItems, "board_decision_id", args[0]);
 						return w ? { work_item_id: w.work_item_id } : null;
 					}
+					// ADR-0025: standing-meeting guarantee queries from ensureUpcomingMeeting.
+					if (sql.startsWith("SELECT meeting_id, title, scheduled_for, status FROM board_meetings")) {
+						const today = typeof args[0] === "string" ? args[0] : "";
+						const sameDayOnly = sql.includes("substr(scheduled_for, 1, 10) = ?");
+						const open = meetings.filter((m) => m.status === "DRAFT" || m.status === "OPEN");
+						let chosen;
+						if (sameDayOnly) {
+							chosen = open.find((m) => (m.scheduled_for ?? "").slice(0, 10) === today);
+						} else {
+							const dated = open
+								.filter((m) => !m.scheduled_for || m.scheduled_for.slice(0, 10) >= today)
+								.sort((a, b) => (a.scheduled_for ?? "").localeCompare(b.scheduled_for ?? ""));
+							chosen = dated[0];
+						}
+						return chosen
+							? { meeting_id: chosen.meeting_id, title: chosen.title, scheduled_for: chosen.scheduled_for, status: chosen.status }
+							: null;
+					}
 					throw new Error(`unexpected first(): ${sql}`);
 				},
 				async all() {
@@ -107,6 +125,16 @@ function makeBoardDb() {
 							results: decisions.filter(
 								(d) => d.meeting_id === args[0] && d.outcome === "CONFIRMED"
 							),
+						};
+					}
+					if (sql.startsWith("SELECT key, value FROM board_settings")) {
+						return { results: [] };
+					}
+					if (sql.startsWith("SELECT submission_id FROM board_submissions WHERE meeting_id = ? AND status = 'AGENDA'")) {
+						return {
+							results: submissions
+								.filter((s) => s.meeting_id === args[0] && s.status === "AGENDA")
+								.map((s) => ({ submission_id: s.submission_id })),
 						};
 					}
 					throw new Error(`unexpected all(): ${sql}`);
@@ -319,10 +347,16 @@ describe("full board meeting loop", () => {
 
 		// Triage the second submission, then close: it carries back to PENDING.
 		await triageAgenda(post("/x/agenda", { submission_ids: ["BOARD-SUB-2"] }), db, created.meeting_id);
-		const closed = await (await closeBoardMeeting(post("/x/close", { minutes: "Prize budget approved." }), db, created.meeting_id)).json() as { status: string; carried_over: number };
+		const closed = await (await closeBoardMeeting(post("/x/close", { minutes: "Prize budget approved." }), db, created.meeting_id)).json() as { status: string; carried_over: number; rolled_over: number; next_meeting_id: string | null };
 		expect(closed.status).toBe("CLOSED");
 		expect(closed.carried_over).toBe(1);
-		expect(submissions[1].status).toBe("PENDING");
+		// ADR-0025: the unresolved item rolls straight into the next meeting's protocol.
+		expect(closed.rolled_over).toBe(1);
+		expect(closed.next_meeting_id).toBeTruthy();
+		expect(closed.next_meeting_id).not.toBe(created.meeting_id);
+		expect(submissions[1].status).toBe("AGENDA");
+		expect(submissions[1].meeting_id).toBe(closed.next_meeting_id);
+		expect(meetings.some((m) => m.meeting_id === closed.next_meeting_id && m.status === "DRAFT")).toBe(true);
 		expect(meetings[0].minutes).toBe("Prize budget approved.");
 
 		// Closed meetings reject new decisions and triage.
