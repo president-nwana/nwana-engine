@@ -12,6 +12,7 @@ import {
 	renderFundraisingHtml,
 	renderGroupsHtml,
 	renderMeetingsHtml,
+	buildMachineProposals,
 	getSitesOverview,
 	getSocialOverview,
 	getAdsOverview,
@@ -362,6 +363,51 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		expect(report).not.toContain("PLANNED / NOT CREATED");
 		expect(renderAdsHtml()).toContain("MACHINE PROPOSALS");
 		expect(renderAdsHtml()).not.toContain("PLANNED / NOT CREATED");
+	});
+
+	it("ads: Series proposal resolves to the real Series object", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const series = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Series 2026 \u00b7 Virtual Races");
+		expect(series).toBeDefined();
+		// Real object from the existing object model (registry/objects.yaml):
+		// the 2026 NWANA Open Nordic Walking Series public hub.
+		expect(series!.source_object).toEqual({
+			object_id: "NWANA-RACE-000001",
+			object_type: "SERIES_PUBLIC_HUB",
+			title: "2026 NWANA Open Nordic Walking Series",
+		});
+		const report = buildAdsReport(data);
+		expect(report).toContain("NWANA-RACE-000001");
+		expect(report).toContain("2026 NWANA Open Nordic Walking Series");
+	});
+
+	it("ads: Founding Circle proposal resolves to the real fundraising object", async () => {
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const fc = data.machine_proposals.find((p) => p.name === "NWANA \u00b7 Founding Circle \u00b7 Donate");
+		expect(fc).toBeDefined();
+		// Real object from the existing object model: the live fundraising
+		// object in production D1 (funds table, ADR-0015).
+		expect(fc!.source_object).toEqual({
+			object_id: "fund-50k-bridge-sprint",
+			object_type: "fund",
+			title: "$50K Manhattan HQ Bridge Sprint",
+		});
+		const report = buildAdsReport(data);
+		expect(report).toContain("fund-50k-bridge-sprint");
+		expect(report).toContain("$50K Manhattan HQ Bridge Sprint");
+	});
+
+	it("ads: missing source object stays null instead of being fabricated", async () => {
+		const { buildDesiredState } = await import("../src/google-ads-state");
+		const spec = buildDesiredState();
+		const orphan = { ...spec.campaigns[0], source_object: null };
+		const proposals = buildMachineProposals({ ...spec, campaigns: [orphan] }, []);
+		expect(proposals).toHaveLength(1);
+		expect(proposals[0].source_object).toBeNull();
+		const data = await getAdsOverview({} as GoogleAdsEnv, connectedStatusReader, emptyAccountReader);
+		const honest = { ...data, machine_proposals: proposals };
+		const report = buildAdsReport(honest);
+		expect(report).toContain("Source object: not yet linked");
 	});
 
 	it("ads: proposal policy result comes from the existing validator", async () => {
