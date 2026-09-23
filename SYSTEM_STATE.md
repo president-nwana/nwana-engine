@@ -660,7 +660,8 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Activity feed (`GET /api/operating-center/activity`): what is happening (audit events), what is new, what requires reading. Durable owner-wide read acknowledgment in D1 (migration 0030, `read_acknowledgments`); no per-member read state claimed.
 - Main page compacted: sponsorship assets, work items, board queue show summaries. New "What board members can do" panel.
 - Local verification: Vitest 179/179, `npx tsc --noEmit` clean, inline script syntax regression test passes.
-- Production deployment: pending (migrations 0027, 0028, 0029, 0030 not yet applied to remote D1; code not yet deployed).
+- Production deployment: 2026-09-22, Worker `nwana-engine` version `41186cc6-ad4b-45e4-b170-0551a01b4755` (commit `7923633e`). Migrations 0027, 0028, 0029, 0030 applied to remote D1 via `d1 execute --remote` (all `IF NOT EXISTS`, idempotent). Tables verified present: `media_plans`, `media_articles`, `board_uploads`, `media_distributions`, `read_acknowledgments`.
+- Live verification: `/operating-center`, `/operating-center/funds`, `/operating-center/media` return 200; `/api/operating-center/activity`, `/api/operating-center/media/overview`, `/api/operating-center/uploads` return 401 without owner key; live inline script parses via `new Function`.
 
 ## DO NOT
 
