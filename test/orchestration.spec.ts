@@ -13,6 +13,7 @@ import {
 	adaptRegistrySources,
 	adaptRuleDerivedSources,
 	adaptSponsorshipAssetSources,
+	collectD1Sources,
 	collectSources,
 	collectStaticSources,
 	OWNER_DIRECTIVES,
@@ -165,8 +166,8 @@ describe("source adapters", () => {
 				id: "asset-1",
 				title: "Test Asset",
 				stage: "draft",
-				parent_object_type: "SERIES",
-				parent_object_id: "NWANA-RACE-000001",
+				object_type: "SERIES",
+				object_id: "NWANA-RACE-000001",
 			},
 		]);
 		expect(asset.source_kind).toBe("SPONSORSHIP_ASSET");
@@ -178,6 +179,40 @@ describe("source adapters", () => {
 	it("collectSources with null db yields static sources only, no fabrication", async () => {
 		const sources = await collectSources(null);
 		expect(sources).toHaveLength(6);
+	});
+
+	it("collectD1Sources queries the real production D1 column names", async () => {
+		// Regression: production D1 sponsorship_assets has object_type /
+		// object_id (migration 0026), not parent_object_type /
+		// parent_object_id. A mock db that rejects unknown columns proves
+		// the query cannot 500 on the production schema.
+		const realColumns: Record<string, Set<string>> = {
+			funds: new Set(["id", "name", "goal_amount", "currency", "status", "description"]),
+			sponsorship_assets: new Set(["id", "title", "stage", "object_type", "object_id"]),
+		};
+		const mockDb = {
+			prepare(sql: string) {
+				return {
+					all: async () => {
+						const m = sql.match(/FROM\s+(\w+)/i);
+						const table = m?.[1] ?? "";
+						const cols = sql
+							.slice("SELECT ".length, sql.indexOf(" FROM"))
+							.split(",")
+							.map((c) => c.trim());
+						for (const c of cols) {
+							if (!realColumns[table]?.has(c)) {
+								throw new Error(`no such column: ${c}`);
+							}
+						}
+						return { results: [] };
+					},
+				};
+			},
+		};
+		await expect(
+			collectD1Sources(mockDb as unknown as D1Database),
+		).resolves.toEqual([]);
 	});
 });
 
