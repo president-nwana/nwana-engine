@@ -2,6 +2,8 @@
 // drafts the articles, and publishes them to site_news after owner
 // approval. RunSignup is not involved anywhere in this workflow.
 
+import { operatingCenterMenu } from "./operating-center";
+
 export function renderMediaHtml(): string {
 	return `<!doctype html>
 <html lang="en">
@@ -28,7 +30,8 @@ export function renderMediaHtml(): string {
 	</style>
 </head>
 <body>
-	<header><h1>Media plan</h1><p>Nordic Walking articles beyond event news. You set the topics; the machine runs the plan and article lifecycle and drafts the articles; nothing publishes without owner approval. Publication goes to the site news feed.</p></header>
+	<header><h1>Media plan</h1><p>Nordic Walking articles beyond event news. The machine composes the plan from verified sources and drafts the articles; nothing publishes without owner approval. Publication goes to the site news feed; external press distribution is recorded separately.</p></header>
+	${operatingCenterMenu("media")}
 	<main>
 		<div class="nav"><a href="/operating-center">← Back to Operating Center</a></div>
 		<section class="panel" id="gate" hidden>
@@ -46,6 +49,8 @@ export function renderMediaHtml(): string {
 				<h2>Plans</h2>
 				<div id="plans">Loading…</div>
 				<div class="message" id="plans-message" aria-live="polite"></div>
+				<div class="row" style="margin-top:8px"><button id="compose-plan" class="secondary" type="button">Compose plan from verified sources</button></div>
+				<div class="meta">The machine builds a draft plan from verified sources only: upcoming races, published winner announcements, board material routed to media, and the verified NWANA pillars. Every article slot cites its source; the machine never invents topics.</div>
 				<form id="plan-form">
 					<h3>New plan</h3>
 					<label for="plan-title">Title</label><input id="plan-title" name="title" required maxlength="200">
@@ -124,6 +129,17 @@ export function renderMediaHtml(): string {
 					if(a.status==='READY')row+='<button data-approve-article="'+esc(a.article_id)+'" class="secondary" type="button">Approve article</button>';
 					if(a.status==='APPROVED')row+='<button data-publish="'+esc(a.article_id)+'" class="secondary" type="button">Publish to site news</button>';
 					row+='</div><div class="message" aria-live="polite"></div>';
+					if(a.status==='PUBLISHED'){
+						row+='<div data-distributions="'+esc(a.article_id)+'"><div class="meta">Loading distributions…</div></div>';
+						row+='<div data-distribute-form="'+esc(a.article_id)+'" hidden><h3 style="font-size:16px;margin:12px 0 4px">Record external distribution</h3>'+
+							'<div class="meta">The send itself happens outside this system by the owner. Recording it here keeps the press trail in one place.</div>'+
+							'<label>Channel</label><select data-channel><option>PRESS_RELEASE</option><option>EMAIL_PITCH</option><option>WIRE</option><option>MEDIA_KIT</option><option>OTHER</option></select>'+
+							'<label>Outlet (optional)</label><input data-outlet maxlength="200" placeholder="Outlet or journalist name">'+
+							'<label>Notes (optional)</label><textarea data-notes style="min-height:60px" placeholder="What was sent, to whom, follow-up"></textarea>'+
+							'<div class="row"><button data-record-dist="'+esc(a.article_id)+'" class="secondary" type="button">Record distribution</button>'+
+							'<button data-toggle-distform="'+esc(a.article_id)+'" class="secondary" type="button">Cancel</button></div></div>';
+						row+='<div class="row"><button data-show-distform="'+esc(a.article_id)+'" class="secondary" type="button">Record external distribution</button></div>';
+					}
 					row+='<div data-editor="'+esc(a.article_id)+'" hidden><label>Article body (HTML)</label><textarea data-body style="min-height:220px"></textarea><div class="row"><button data-save-body="'+esc(a.article_id)+'" class="secondary" type="button">Save draft</button></div></div>';
 					return row+'</div>';
 				}).join(''):'<div class="unavailable">No articles yet.</div>';
@@ -144,9 +160,44 @@ export function renderMediaHtml(): string {
 					const item=b.closest('.item');const msg=item.querySelector('.message');msg.textContent='Publishing…';
 					try{const r=await api('/api/operating-center/media/articles/'+encodeURIComponent(b.dataset.publish)+'/publish',{method:'POST'});msg.textContent='Published to site news.';await loadPlans();await openPlan(selectedPlan)}catch(err){msg.textContent=err.message}
 				}));
+				async function loadDistributions(articleId){
+					const box2=box.querySelector('[data-distributions="'+articleId+'"]');
+					if(!box2)return;
+					try{
+						const d=await api('/api/operating-center/media/articles/'+encodeURIComponent(articleId)+'/distributions');
+						const ds=d.distributions||[];
+						box2.innerHTML='<div class="meta" style="margin-top:8px">External distribution:</div>'+
+							(ds.length?ds.map(x=>'<div class="item"><strong>'+esc(x.channel)+'</strong>'+(x.outlet_name?'<div class="meta">'+esc(x.outlet_name)+'</div>':'')+'<div class="meta">Recorded '+esc(String(x.sent_at).slice(0,10))+(x.notes?' · '+esc(x.notes):'')+'</div></div>').join(''):'<div class="unavailable">Not distributed externally yet.</div>');
+					}catch(err){box2.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+				}
+				box.querySelectorAll('[data-distributions]').forEach(el=>loadDistributions(el.dataset.distributions));
+				box.querySelectorAll('[data-show-distform]').forEach(b=>b.addEventListener('click',()=>{
+					const f=box.querySelector('[data-distribute-form="'+b.dataset.showDistform+'"]');
+					if(f)f.hidden=false;
+				}));
+				box.querySelectorAll('[data-toggle-distform]').forEach(b=>b.addEventListener('click',()=>{
+					const f=box.querySelector('[data-distribute-form="'+b.dataset.toggleDistform+'"]');
+					if(f)f.hidden=true;
+				}));
+				box.querySelectorAll('[data-record-dist]').forEach(b=>b.addEventListener('click',async()=>{
+					const item=b.closest('.item');const msg=item.querySelector('.message');msg.textContent='Recording…';
+					const f=box.querySelector('[data-distribute-form="'+b.dataset.recordDist+'"]');
+					try{
+						await api('/api/operating-center/media/articles/'+encodeURIComponent(b.dataset.recordDist)+'/distribute',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({channel:f.querySelector('[data-channel]').value,outlet_name:f.querySelector('[data-outlet]').value,notes:f.querySelector('[data-notes]').value})});
+						msg.textContent='Distribution recorded.';f.hidden=true;await loadDistributions(b.dataset.recordDist);
+					}catch(err){msg.textContent=err.message}
+				}));
 				panel.scrollIntoView();
 			}catch(err){document.querySelector('#plan-detail-message').textContent=err.message}
 		}
+		document.querySelector('#compose-plan').addEventListener('click',async()=>{
+			const m=document.querySelector('#plans-message');m.textContent='Composing plan from verified sources…';
+			try{
+				const r=await api('/api/operating-center/media/plans/compose',{method:'POST'});
+				m.textContent='Composed: '+r.article_count+' article slots, all with cited sources.';
+				await loadPlans();await openPlan(r.plan_id);
+			}catch(err){m.textContent=err.message}
+		});
 		document.querySelector('#plan-form').addEventListener('submit',async e=>{
 			e.preventDefault();const m=e.target.querySelector('.message');m.textContent='Creating…';
 			try{

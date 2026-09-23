@@ -9,6 +9,8 @@ import {
 	validateBoardSubmissionInput,
 	validateInitiativeInput,
 } from "../src/operating-center";
+import { renderBoardHtml } from "../src/operating-center-board";
+import { renderUploadsHtml } from "../src/operating-center-uploads";
 
 describe("operating center initiative intake", () => {
 	it("normalizes a source-material initiative without inventing an outcome", () => {
@@ -89,31 +91,64 @@ describe("next Board meeting lookup", () => {
 });
 
 describe("unified Board intake page", () => {
-	const html = renderOperatingCenterHtml();
+	// The full board workspace lives on /operating-center/board; the main
+	// overview shows only a compact summary with a link.
+	const boardHtml = renderBoardHtml();
+	const mainHtml = renderOperatingCenterHtml();
 
-	it("renders one Board intake form and no separate initiative form", () => {
-		expect(html).toContain('id="board-form"');
-		expect(html).not.toContain('id="initiative-form"');
-		expect(html).not.toContain('id="initiatives"');
+	it("renders one Board intake form and no separate initiative form on the board page", () => {
+		expect(boardHtml).toContain('id="board-form"');
+		expect(boardHtml).not.toContain('id="initiative-form"');
+		expect(boardHtml).not.toContain('id="initiatives"');
 	});
 
 	it("offers INITIATIVE as one of the item types", () => {
-		expect(html).toContain("<option>INITIATIVE</option>");
+		expect(boardHtml).toContain("<option>INITIATIVE</option>");
 	});
 
-	it("shows the next-meeting card above the meetings list", () => {
-		const nextPos = html.indexOf('id="next-meeting"');
-		const listPos = html.indexOf('id="meetings"');
+	it("shows the next-meeting card above the meetings list on the board page", () => {
+		const nextPos = boardHtml.indexOf('id="next-meeting"');
+		const listPos = boardHtml.indexOf('id="meetings"');
 		expect(nextPos).toBeGreaterThan(-1);
 		expect(listPos).toBeGreaterThan(-1);
 		expect(nextPos).toBeLessThan(listPos);
 	});
 
-	it("places the create-meeting form below the meetings list", () => {
-		const listPos = html.indexOf('id="meetings"');
-		const formPos = html.indexOf('id="meeting-create-form"');
+	it("places the create-meeting form below the meetings list on the board page", () => {
+		const listPos = boardHtml.indexOf('id="meetings"');
+		const formPos = boardHtml.indexOf('id="meeting-create-form"');
 		expect(formPos).toBeGreaterThan(-1);
 		expect(formPos).toBeGreaterThan(listPos);
+	});
+
+	it("keeps only a compact board summary on the main page, with a link to the workspace", () => {
+		expect(mainHtml).toContain('id="board-summary"');
+		expect(mainHtml).toContain('href="/operating-center/board"');
+		expect(mainHtml).not.toContain('id="board-form"');
+		expect(mainHtml).not.toContain('id="meeting-create-form"');
+	});
+
+	it("keeps only a compact uploads summary on the main page, with a link to the uploads page", () => {
+		expect(mainHtml).toContain('id="uploads-summary"');
+		expect(mainHtml).toContain('href="/operating-center/uploads"');
+		expect(mainHtml).not.toContain('id="upload-form"');
+	});
+
+	it("embeds syntactically valid JavaScript on the board page", () => {
+		const scripts = [...boardHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+		expect(scripts.length).toBeGreaterThan(0);
+		for (const body of scripts) {
+			expect(() => new Function(body)).not.toThrow();
+		}
+	});
+
+	it("embeds syntactically valid JavaScript on the uploads page", () => {
+		const html = renderUploadsHtml();
+		const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+		expect(scripts.length).toBeGreaterThan(0);
+		for (const body of scripts) {
+			expect(() => new Function(body)).not.toThrow();
+		}
 	});
 });
 

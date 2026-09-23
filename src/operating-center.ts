@@ -473,7 +473,7 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 	});
 }
 
-export type OperatingCenterPageId = "overview" | "results" | "funds";
+export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads";
 
 /**
  * ADR-0023: shared button menu rendered directly under the header on every
@@ -484,6 +484,9 @@ export function operatingCenterMenu(active: OperatingCenterPageId): string {
 		{ id: "overview", label: "Overview", href: "/operating-center" },
 		{ id: "results", label: "Results", href: "/operating-center/results" },
 		{ id: "funds", label: "Funds", href: "/operating-center/funds" },
+		{ id: "media", label: "Media", href: "/operating-center/media" },
+		{ id: "board", label: "Board", href: "/operating-center/board" },
+		{ id: "uploads", label: "Uploads", href: "/operating-center/uploads" },
 	];
 	return (
 		'<nav class="oc-menu" aria-label="Operating center">' +
@@ -557,25 +560,17 @@ export function renderOperatingCenterHtml(): string {
 		<section class="panel" id="member-actions-panel" style="margin-top:20px"><h2>What board members can do</h2>
 			<p class="meta">The operating center is the board's cockpit. Every member can:</p>
 			<ul>
-				<li><strong>Submit to the board:</strong> use the "Submit to the Board" form below to add questions, initiatives, or wishes. Submissions are collected into the weekly Sunday protocol.</li>
-				<li><strong>Upload files:</strong> use the "Board uploads" form to share contact lists, task lists, meeting material, or media drafts. The machine classifies and routes each file automatically.</li>
+				<li><strong>Submit to the board:</strong> open the <a href="/operating-center/board">Board workspace</a> to add questions, initiatives, or wishes. Submissions are collected into the weekly Sunday protocol.</li>
+				<li><strong>Upload files:</strong> open the <a href="/operating-center/uploads">Uploads</a> page to share contact lists, task lists, meeting material, or media drafts. The machine classifies and routes each file automatically.</li>
 				<li><strong>Review activity:</strong> check "Activity: what is happening" for new submissions, decisions, and uploads. Items under "Requires reading" need attention; mark them read when done.</li>
 				<li><strong>Track the media plan:</strong> open the <a href="/operating-center/media">Media plan</a> page to see article drafts, approvals, site publication, and press distribution.</li>
 				<li><strong>Track funds:</strong> open the <a href="/operating-center/funds">Funds</a> page for the full fundraising pipeline.</li>
 			</ul>
 			<p class="meta">Consequential actions (sends, publications, spending, agreements) always require explicit owner confirmation. The machine prepares; the owner decides.</p>
 		</section>
-		<section class="panel" id="uploads-panel" style="margin-top:20px"><h2>Board uploads</h2>
-			<p class="meta">Drop a file and the machine routes it: contacts to RunSignup staging, tasks to tracked work, discussion material to the meeting agenda, news material to media drafts. Accepted: CSV, TXT, MD, TSV, JSON. Max 512 KB.</p>
-			<form id="upload-form" enctype="multipart/form-data" style="margin-bottom:12px">
-				<label for="upload-name">Your name</label>
-				<input id="upload-name" name="submitted_by" required maxlength="120" placeholder="Who is uploading">
-				<label for="upload-file">File</label>
-				<input id="upload-file" name="file" type="file" required accept=".csv,.txt,.md,.tsv,.json">
-				<button type="submit">Upload and route</button>
-				<div class="message" id="upload-message" aria-live="polite"></div>
-			</form>
-			<div id="uploads-list">Loading…</div>
+		<section class="panel" id="uploads-summary-panel" style="margin-top:20px"><h2>Board uploads</h2>
+			<div id="uploads-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/uploads">Open uploads →</a></p>
 		</section>
 		<section class="panel" id="sponsorship-panel" style="margin-top:20px"><h2>Sponsorship assets</h2>
 			<p class="meta">Machine-generated seller packages, one per object. Stages: draft → packaged → offered → negotiating → committed → fulfilled → renewal. The machine generates and tracks; seller conversations stay human.</p>
@@ -590,37 +585,11 @@ export function renderOperatingCenterHtml(): string {
 			<div><span class="message" id="sponsorship-message" aria-live="polite"></span></div>
 			<div id="sponsorship-assets">Loading…</div>
 		</section>
-		<section class="panel" id="board-meetings-panel" style="margin-top:20px"><h2>Board meetings</h2>
-			<p class="meta">The weekly meeting loop. New items join the nearest upcoming meeting protocol automatically as they arrive during the week. Stages: Draft → Open → Closed. Record each decision with a responsible person and due date; a confirmed decision immediately becomes tracked work. Unresolved agenda items return to the queue when the meeting closes.</p>
-			<div id="next-meeting" style="margin-bottom:16px">Loading…</div>
-			<div id="meetings">Loading…</div>
-			<div id="meeting-detail" style="margin-top:16px"></div>
-			<form id="meeting-create-form" style="margin-top:16px">
-				<h3 style="margin:0 0 8px;font-size:18px">Schedule a meeting</h3>
-				<label for="meeting-title">Meeting title</label><input id="meeting-title" name="title" required maxlength="200" placeholder="Weekly Board meeting">
-				<label for="meeting-date">Scheduled date</label><input id="meeting-date" name="scheduled_for" type="date">
-				<button type="submit">Create meeting</button>
-				<div class="message" id="meeting-create-message" aria-live="polite"></div>
-			</form>
+		<section class="panel" id="board-summary-panel" style="margin-top:20px"><h2>Board workspace</h2>
+			<div id="board-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/board">Open board workspace →</a></p>
 		</section>
-		<section class="panel" id="work-items-panel" style="margin-top:20px"><h2>Work items</h2>
-			<p class="meta">Tracked work from Board decisions. Stages: Ready → In progress → Done (Blocked allowed).</p>
-			<div><span class="message" id="workitem-message" aria-live="polite"></span></div>
-			<div id="work-items">Loading…</div>
-		</section>
-		<section class="panel" id="board-intake-panel" style="margin-top:20px">
-			<form id="board-form"><h2>Submit to the Board</h2>
-				<p class="meta">One intake for everything: a question, an initiative, a proposal, a thought, a problem, an opportunity, a task, a report, or a request to speak. Items without a requested meeting date join the nearest upcoming meeting protocol automatically.</p>
-				<label for="board-type">Item type</label><select id="board-type" name="submission_type"><option>QUESTION</option><option>INITIATIVE</option><option>PROPOSAL</option><option>THOUGHT</option><option>PROBLEM</option><option>OPPORTUNITY</option><option>TASK</option><option>DISCUSSION</option><option>REPORT</option><option>DECISION_REQUEST</option><option>REQUEST_TO_SPEAK</option><option>SOURCE_MATERIAL</option></select>
-				<label for="board-title">Title</label><input id="board-title" name="title" required maxlength="200">
-				<label for="board-description">Description</label><textarea id="board-description" name="description" required></textarea>
-				<label for="board-outcome">Requested outcome or desired result</label><textarea id="board-outcome" name="requested_outcome"></textarea>
-				<label for="board-author">Board member</label><input id="board-author" name="submitted_by" required>
-				<label for="board-date">Requested meeting date (optional)</label><input id="board-date" name="requested_meeting_date" type="date">
-				<button type="submit">Submit to the Board</button><div class="message" aria-live="polite"></div>
-			</form>
-		</section>
-		<section class="grid queue"><div class="panel"><h2>Board queue</h2><div id="board-items">Loading…</div><p class="meta">Submissions join the nearest upcoming meeting protocol automatically. Open the Board meetings panel to triage.</p></div></section>
+		<section class="grid queue"><div class="panel"><h2>Board queue</h2><div id="board-items">Loading…</div><p class="meta">Submissions join the nearest upcoming meeting protocol automatically. Open the <a href="/operating-center/board">Board workspace</a> to triage.</p></div></section>
 		</div>
 	</main>
 	<script>
@@ -646,10 +615,32 @@ export function renderOperatingCenterHtml(): string {
 			loadFundSummary();
 			loadMediaSummary();
 			loadActivity();
-			loadUploads();
+			loadBoardSummary();
+			loadUploadsSummary();
 			loadSponsorshipAssets();
-			loadMeetings();
-			loadWorkItems();
+		}
+		async function loadBoardSummary(){
+			const box=document.querySelector('#board-summary');
+			try{
+				const [m,w]=await Promise.all([api('/api/board/meetings'),api('/api/board/work-items')]);
+				const meetings=m.meetings||[];
+				const open=meetings.filter(x=>x.status==='DRAFT'||x.status==='OPEN').length;
+				const items=w.work_items||[];
+				const active=items.filter(x=>x.status!=='DONE').length;
+				const overdue=items.filter(x=>x.due_date && new Date(x.due_date)<new Date() && x.status!=='DONE').length;
+				const pend=(pendingSubmissionsCache||[]).filter(s=>s.status==='PENDING').length;
+				box.innerHTML='<div class="meta">'+open+' open meeting'+(open===1?'':'s')+' · '+pend+' pending submission'+(pend===1?'':'s')+' · '+active+' active work item'+(active===1?'':'s')+(overdue?' · <span style="color:#a00">'+overdue+' overdue</span>':'')+'</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadUploadsSummary(){
+			const box=document.querySelector('#uploads-summary');
+			try{
+				const data=await api('/api/operating-center/uploads');
+				const uploads=data.uploads||[];
+				if(!uploads.length){box.innerHTML='<div class="unavailable">No uploads yet.</div>';return}
+				const latest=uploads[0];
+				box.innerHTML='<div class="meta">'+uploads.length+' upload'+(uploads.length===1?'':'s')+' routed · latest: '+esc(latest.filename)+' ('+esc(latest.route_label)+')</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadFundSummary(){
 			const box=document.querySelector('#fund-summary');
@@ -691,14 +682,6 @@ export function renderOperatingCenterHtml(): string {
 				loadActivity();
 			}catch(err){alert('Failed: '+err.message)}
 		}
-		async function loadUploads(){
-			const box=document.querySelector('#uploads-list');
-			try{
-				const data=await api('/api/operating-center/uploads');
-				if(!data.uploads.length){box.innerHTML='<div class="unavailable">No uploads yet.</div>';return}
-				box.innerHTML=data.uploads.map(u=>'<div class="item"><strong>'+esc(u.filename)+'</strong><div class="meta">'+esc(u.route_label)+' · '+esc(u.classification)+' · '+esc(u.submitted_by)+' · '+esc(u.created_at)+'</div>'+(u.staged_csv_url?'<div class="meta"><a href="'+esc(u.staged_csv_url)+'">Download staged contacts CSV</a> (import by hand in RunSignup Email Marketing)</div>':'')+'</div>').join('');
-			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
-		}
 		async function loadSponsorshipAssets(){
 			const box=document.querySelector('#sponsorship-assets');
 			const label={draft:'Draft',packaged:'Packaged',offered:'Offered',negotiating:'Negotiating',committed:'Committed',fulfilled:'Fulfilled',renewal:'Renewal'};
@@ -721,21 +704,6 @@ export function renderOperatingCenterHtml(): string {
 				await loadSponsorshipAssets();
 			}catch(err){m.textContent=err.message}
 		});
-		document.querySelector('#upload-form').addEventListener('submit',async(e)=>{
-			e.preventDefault();
-			const m=document.querySelector('#upload-message');m.textContent='Uploading and routing…';
-			try{
-				const fd=new FormData(e.target);
-				const file=fd.get('file');
-				if(file&&file.size>512*1024){m.textContent='File is too large. Maximum 512 KB.';return}
-				const res=await fetch('/api/operating-center/uploads',{method:'POST',headers:{'x-operating-center-key':getKey()},body:fd});
-				const data=await res.json();
-				if(!res.ok)throw new Error(data.error||'Upload failed');
-				m.textContent='Uploaded and routed: '+data.route_label+'.';
-				e.target.reset();
-				await loadUploads();
-			}catch(err){m.textContent=err.message}
-		});
 		async function loadLifecycleSummary(){
 			const box=document.querySelector('#lifecycle-summary');
 			try{
@@ -748,120 +716,7 @@ export function renderOperatingCenterHtml(): string {
 					(prep?'<div class="meta followup-due">'+prep+' prep'+(prep>1?'s':'')+' need'+(prep>1?'':'s')+' review</div>':'<div class="meta">No prep awaiting review.</div>');
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
-		let selectedMeetingId=null;
-		function pickNextMeeting(meetings){
-			const today=new Date().toISOString().slice(0,10);
-			const open=(meetings||[]).filter(m=>m.status==='DRAFT'||m.status==='OPEN');
-			const dated=open.filter(m=>m.scheduled_for&&String(m.scheduled_for).slice(0,10)>=today)
-				.sort((a,b)=>String(a.scheduled_for).localeCompare(String(b.scheduled_for)));
-			if(dated.length)return dated[0];
-			const undated=open.filter(m=>!m.scheduled_for);
-			if(undated.length)return undated[0];
-			return null;
-		}
-		async function renderNextMeeting(meetings){
-			const box=document.querySelector('#next-meeting');
-			const next=pickNextMeeting(meetings);
-			if(!next){box.innerHTML='<div class="unavailable">No upcoming meeting scheduled yet. Use the form below to schedule one.</div>';return}
-			try{
-				const d=await api('/api/board/meetings/'+encodeURIComponent(next.meeting_id));
-				const m=d.meeting;
-				const agenda=d.agenda||[];
-				const pending=(pendingSubmissionsCache||[]).filter(s=>s.status==='PENDING').length;
-				const label={DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed'};
-				let html='<div class="item"><strong>Next meeting: '+esc(m.title)+'</strong>'+
-					'<div class="meta">'+(m.scheduled_for?esc(String(m.scheduled_for).slice(0,10))+' · ':'')+esc(label[m.status]||m.status)+' · protocol: '+agenda.length+' items'+(pending?' · '+pending+' waiting in the queue':'')+'</div>'+
-					'<div class="meta" style="margin-top:8px">Protocol (fills during the week):</div>';
-				html+=agenda.length?agenda.map(a=>'<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.submission_type)+' · '+esc(a.submitted_by)+' · '+esc(a.status)+'</div></div>').join(''):'<div class="unavailable">No items yet. New submissions join this protocol automatically.</div>';
-				html+='<div style="margin-top:8px"><button data-meeting="'+esc(m.meeting_id)+'" style="width:auto">Open meeting workspace</button></div></div>';
-				box.innerHTML=html;
-				box.querySelectorAll('[data-meeting]').forEach(btn=>btn.addEventListener('click',()=>selectMeeting(btn.dataset.meeting)));
-			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
-		}
-		async function loadMeetings(){
-			const box=document.querySelector('#meetings');
-			try{
-				const data=await api('/api/board/meetings');
-				if(!data.meetings.length){box.innerHTML='<div class="unavailable">No meetings yet. Create one below.</div>';document.querySelector('#next-meeting').innerHTML='<div class="unavailable">No upcoming meeting scheduled yet. Use the form below to schedule one.</div>';return}
-				const label={DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed'};
-				box.innerHTML=data.meetings.map(m=>'<div class="item"><strong>'+esc(m.title)+'</strong>'+
-					'<div class="meta">'+(m.scheduled_for?esc(String(m.scheduled_for).slice(0,10))+' · ':'')+esc(label[m.status]||m.status)+' · agenda '+m.agenda_count+' · decisions '+m.decision_count+'</div>'+
-					'<div><button data-meeting="'+esc(m.meeting_id)+'" style="width:auto">Open workspace</button></div></div>').join('');
-				box.querySelectorAll('[data-meeting]').forEach(btn=>btn.addEventListener('click',()=>selectMeeting(btn.dataset.meeting)));
-				await renderNextMeeting(data.meetings);
-			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
-		}
-		async function selectMeeting(id){
-			selectedMeetingId=id;
-			const box=document.querySelector('#meeting-detail');
-			box.innerHTML='Loading…';
-			try{
-				const d=await api('/api/board/meetings/'+encodeURIComponent(id));
-				const m=d.meeting;
-				const label={DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed'};
-				let html='<div class="item"><strong>'+esc(m.title)+'</strong><div class="meta">'+esc(label[m.status]||m.status)+(m.scheduled_for?' · '+esc(String(m.scheduled_for).slice(0,10)):'')+(m.attendees?' · attendees: '+esc(m.attendees):'')+'</div></div>';
-				if(m.status==='DRAFT'){
-					html+='<form id="meeting-open-form"><label>Attendees (as written by the owner)</label><input name="attendees" maxlength="500" placeholder="Names of attendees"><button type="submit" style="width:auto">Open meeting</button><div class="message" aria-live="polite"></div></form>';
-				}
-				if(m.status==='DRAFT'||m.status==='OPEN'){
-					const pend=pendingSubmissionsCache.filter(s=>s.status==='PENDING');
-					html+='<h3 style="margin:16px 0 8px;font-size:18px">Add to agenda</h3>';
-					html+=pend.length?'<form id="agenda-form">'+pend.map(s=>'<label style="font-weight:400"><input type="checkbox" name="sid" value="'+esc(s.submission_id)+'" style="width:auto"> '+esc(s.title)+' <span class="meta">('+esc(s.submission_type)+' · '+esc(s.submitted_by)+')</span></label>').join('')+'<button type="submit" style="width:auto">Add selected to agenda</button><div class="message" aria-live="polite"></div></form>':'<div class="unavailable">No pending items in the queue.</div>';
-				}
-				html+='<h3 style="margin:16px 0 8px;font-size:18px">Agenda</h3>';
-				html+=d.agenda.length?d.agenda.map(a=>'<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.submission_type)+' · '+esc(a.submitted_by)+' · '+esc(a.status)+'</div>'+(a.requested_outcome?'<div class="meta">Requested outcome: '+esc(a.requested_outcome)+'</div>':'')+'</div>').join(''):'<div class="unavailable">Agenda is empty.</div>';
-				if(m.status==='OPEN'){
-					const undecided=d.agenda.filter(a=>a.status==='AGENDA');
-					html+='<h3 style="margin:16px 0 8px;font-size:18px">Record a decision</h3><form id="decision-form">'+
-						'<label>Agenda item (optional)</label><select name="submission_id"><option value="">General decision</option>'+undecided.map(a=>'<option value="'+esc(a.submission_id)+'">'+esc(a.title)+'</option>').join('')+'</select>'+
-						'<label>Decision</label><textarea name="decision_text" required></textarea>'+
-						'<label>Outcome</label><select name="outcome"><option>CONFIRMED</option><option>DEFERRED</option><option>REJECTED</option></select>'+
-						'<label>Responsible person</label><input name="responsible_person" maxlength="200">'+
-						'<label>Due date</label><input name="due_date" type="date">'+
-						'<label>Vote record (optional)</label><input name="vote_record" maxlength="500">'+
-						'<button type="submit" style="width:auto">Record decision</button><div class="message" aria-live="polite"></div></form>';
-					html+='<h3 style="margin:16px 0 8px;font-size:18px">Close meeting</h3><form id="meeting-close-form"><label>Minutes</label><textarea name="minutes"></textarea><button type="submit" style="width:auto">Close meeting</button><div class="message" aria-live="polite"></div></form>';
-				}
-				html+='<h3 style="margin:16px 0 8px;font-size:18px">Decisions</h3>';
-				html+=d.decisions.length?d.decisions.map(x=>'<div class="item"><strong>'+esc(x.decision_text)+'</strong><div class="meta">'+esc(x.outcome)+(x.submission_title?' · '+esc(x.submission_title):'')+(x.responsible_person?' · '+esc(x.responsible_person):'')+(x.due_date?' · due '+esc(String(x.due_date).slice(0,10)):'')+'</div></div>').join(''):'<div class="unavailable">No decisions recorded yet.</div>';
-				if(m.minutes){html+='<h3 style="margin:16px 0 8px;font-size:18px">Minutes</h3><div class="meta">'+esc(m.minutes)+'</div>'}
-				box.innerHTML=html;
-				const wire=(fid,path,after)=>{
-					const f=box.querySelector('#'+fid);
-					if(f)f.addEventListener('submit',async e=>{
-						e.preventDefault();
-						const msg=e.target.querySelector('.message');msg.textContent='Saving…';
-						try{
-							const fd=formJson(e.target);
-							if(fid==='agenda-form'){fd.submission_ids=[...e.target.querySelectorAll('input[name="sid"]:checked')].map(c=>c.value)}
-							await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(fd)});
-							msg.textContent='Saved.';
-							if(after)await after();
-							await selectMeeting(selectedMeetingId);
-						}catch(err){msg.textContent=err.message}
-					});
-				};
-				const mid='/api/board/meetings/'+encodeURIComponent(selectedMeetingId);
-				wire('meeting-open-form',mid+'/open',loadMeetings);
-				wire('agenda-form',mid+'/agenda',loadMeetings);
-				wire('decision-form','/api/board/decisions',async()=>{await loadMeetings();await loadWorkItems()});
-				wire('meeting-close-form',mid+'/close',loadMeetings);
-			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
-		}
-		async function loadWorkItems(){
-			const box=document.querySelector('#work-items');
-			try{
-				const data=await api('/api/board/work-items');
-				if(!data.work_items.length){box.innerHTML='<div class="unavailable">No active work items. Confirmed Board decisions with a responsible person or due date appear here.</div>';return}
-				const byStatus={};
-				data.work_items.forEach(w=>{byStatus[w.status]=(byStatus[w.status]||0)+1});
-				const summary=Object.entries(byStatus).map(([s,c])=>esc(s)+': <strong>'+c+'</strong>').join(' · ');
-				const overdue=data.work_items.filter(w=>w.due_date && new Date(w.due_date)<new Date() && w.status!=='DONE').length;
-				box.innerHTML='<div class="meta">'+summary+'</div>'+(overdue?'<div class="meta" style="color:#a00">'+overdue+' overdue</div>':'')+'<div class="meta">'+data.work_items.length+' active items. Open a meeting workspace above to manage individual items.</div>';
-			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
-		}
 		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
-		for(const [id,path] of [['board-form','/api/board/submissions'],['meeting-create-form','/api/board/meetings']])document.querySelector('#'+id).addEventListener('submit',async e=>{e.preventDefault();const m=e.currentTarget.querySelector('.message');m.textContent='Saving…';try{await api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formJson(e.currentTarget))});e.currentTarget.reset();m.textContent='Saved.';await load()}catch(err){m.textContent=err.message}});
 		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load().catch(renderLoadError)});
 		if(getKey()){showApp();load().catch(renderLoadError)}else{showGate('')}
 	</script>

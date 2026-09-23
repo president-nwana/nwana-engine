@@ -118,6 +118,10 @@ function makeDb() {
 			};
 			return api;
 		},
+		async batch(statements: { run(): Promise<unknown> }[]) {
+			for (const s of statements) await s.run();
+			return [];
+		},
 	};
 	return db as unknown as D1Database & { _tables: Record<string, Record<string, unknown>[]> };
 }
@@ -254,6 +258,31 @@ describe("media plan lifecycle", () => {
 	});
 });
 
+describe("machine-composed media plan", () => {
+	it("composeMediaPlan creates a DRAFT plan whose slots all cite verified sources", async () => {
+		const { composeMediaPlan } = await import("../src/media-plan");
+		const db = makeDb();
+		const res = await composeMediaPlan(db);
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as { ok: boolean; plan_id: string; status: string; article_count: number };
+		expect(body.ok).toBe(true);
+		expect(body.status).toBe("DRAFT");
+		expect(body.article_count).toBeGreaterThan(0);
+
+		const tables = (db as unknown as { _tables: Record<string, Record<string, unknown>[]> })._tables;
+		const plan = tables.mediaPlans.find((p) => p.plan_id === body.plan_id);
+		expect(plan).toBeDefined();
+		expect(plan && plan.status).toBe("DRAFT");
+
+		const articles = tables.mediaArticles.filter((a) => a.plan_id === body.plan_id);
+		expect(articles.length).toBe(body.article_count);
+		// Honest composition: every slot cites its verified source.
+		for (const a of articles) {
+			expect(String(a.angle)).toContain("Source:");
+		}
+	});
+});
+
 describe("board protocol", () => {
 	it("formWeeklyProtocol moves PENDING submissions to AGENDA and stamps the meeting", async () => {
 		const { formWeeklyProtocol } = await import("../src/board-protocol");
@@ -306,6 +335,23 @@ describe("upload classification", () => {
 		expect(csv.startsWith("name,email,phone\n")).toBe(true);
 		expect(csv).toContain("John Doe,a@b.com,");
 		expect(csv).toContain("Jane Smith,c@d.com,");
+	});
+
+	it("the upload form field name matches what the server reads (regression: submitted_by vs uploaded_by)", async () => {
+		const { renderOperatingCenterHtml } = await import("../src/operating-center");
+		const { renderUploadsHtml } = await import("../src/operating-center-uploads");
+		// The server reads form.get("uploaded_by"); the form must use that name.
+		expect(renderUploadsHtml()).toContain('name="uploaded_by"');
+		expect(renderUploadsHtml()).not.toContain('name="submitted_by"');
+		// The main overview no longer embeds the upload form at all.
+		expect(renderOperatingCenterHtml()).not.toContain('id="upload-form"');
+	});
+
+	it("the uploads page authenticates with the Bearer header the server accepts (regression: x-operating-center-key 401)", async () => {
+		const { renderUploadsHtml } = await import("../src/operating-center-uploads");
+		const html = renderUploadsHtml();
+		expect(html).toContain("authorization:'Bearer '");
+		expect(html).not.toContain("x-operating-center-key");
 	});
 });
 

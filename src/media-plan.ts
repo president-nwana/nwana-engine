@@ -339,6 +339,166 @@ function escapeHtml(value: string): string {
 	return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 }
 
+// ---------------------------------------------------------------------------
+// Machine-composed plan from verified sources (honest composition).
+//
+// Albert's directive is that the machine composes the media plan. The
+// machine must never invent editorial targets, so every article slot this
+// function creates cites the verified source it was derived from:
+//
+//   1. upcoming races from the race lifecycle (real events with real dates);
+//   2. recent winner announcements from site_news (real published results);
+//   3. board uploads routed as MEDIA_DRAFT (owner-supplied material);
+//   4. the verified NWANA pillars from MACHINE_PURPOSE.md (Series 2026,
+//      Academy, Licenses, NW Groups, Instructor Growth Fund, Sponsorship,
+//      Partner Network) as explainer structure.
+//
+// Titles are machine-proposed working titles; the angle of every slot names
+// its source. The plan is created as DRAFT: the owner approves the plan,
+// edits angles, writes or revises bodies, and approves each article before
+// anything reaches site_news.
+// ---------------------------------------------------------------------------
+
+interface ComposedSlot {
+	title: string;
+	angle: string;
+}
+
+const VERIFIED_PILLAR_SLOTS: ComposedSlot[] = [
+	{
+		title: "How NWANA performance levels work",
+		angle:
+			"Explainer grounded in the engine's verified Series 2026 level logic (Elite, High Performance, Performance, Competitive, Open; level place within level and gender; 1000/999/998 points). Source: MACHINE_PURPOSE.md origin story + src/race-lifecycle.ts.",
+	},
+	{
+		title: "From a free intro course to a certified instructor",
+		angle:
+			"Explainer of the verified Academy ladder: free intro course, Beginner, Instructor/Coach/Judge L1-L3, certification, Professional License. Source: MACHINE_PURPOSE.md connected ecosystem.",
+	},
+	{
+		title: "NW Groups: how one license becomes a local platform",
+		angle:
+			"Explainer of the verified scaling mechanism: individual license, free group creation, RECOGNIZED Group at $200/year, groups as local platforms. Source: MACHINE_PURPOSE.md connected ecosystem.",
+	},
+	{
+		title: "The Instructor Growth Fund: 5,000 sponsored seats",
+		angle:
+			"Factual overview of the verified fund: a 5,000 sponsored-instructor-seat waitlist exists, the fund runs in TicketSignup through end of 2026, donor tiers live in internal documents. Source: verified engine records + MACHINE_PURPOSE.md.",
+	},
+	{
+		title: "What a NWANA sponsorship asset actually delivers",
+		angle:
+			"Explainer of the verified 11-asset inventory and the machine-generated seller packages (draft to renewal lifecycle). Source: engine sponsorship_assets + MACHINE_PURPOSE.md.",
+	},
+	{
+		title: "Series 2026: a season built for every level",
+		angle:
+			"Season overview grounded in the verified race lifecycle: six distances, weekly races, the registration to publication loop. Source: race_lifecycle engine data.",
+	},
+];
+
+export async function composeMediaPlan(db: D1Database): Promise<Response> {
+	const now = new Date();
+	const year = now.getUTCFullYear();
+	const quarter = Math.floor(now.getUTCMonth() / 3) + 1;
+	const period = `Q${quarter} ${year}`;
+	const slots: ComposedSlot[] = [];
+
+	// 1. Upcoming races from the verified lifecycle.
+	try {
+		const upcoming = await db
+			.prepare(
+				`SELECT distance, active_event_name, active_event_date, stage
+				 FROM race_lifecycle
+				 WHERE stage IN ('registration_open', 'next_race_prep')
+				   AND active_event_name IS NOT NULL AND active_event_date IS NOT NULL
+				 ORDER BY active_event_date
+				 LIMIT 6`,
+			)
+			.all<{ distance: string; active_event_name: string; active_event_date: string; stage: string }>();
+		for (const r of upcoming.results ?? []) {
+			const date = String(r.active_event_date).slice(0, 10);
+			slots.push({
+				title: `Race preview: ${r.active_event_name}`,
+				angle: `Preview grounded in the verified race lifecycle: Series 2026 ${r.distance}, scheduled ${date}, stage ${r.stage}. Source: race_lifecycle engine data.`,
+			});
+		}
+	} catch {
+		// Lifecycle table may not exist on a fresh database; pillars still compose.
+	}
+
+	// 2. Recent winner announcements from site_news.
+	try {
+		const winners = await db
+			.prepare(
+				`SELECT title, published_at FROM site_news
+				 WHERE kind = 'winner_announcement'
+				 ORDER BY published_at DESC
+				 LIMIT 4`,
+			)
+			.all<{ title: string; published_at: string }>();
+		for (const w of winners.results ?? []) {
+			slots.push({
+				title: `Winner story: ${w.title}`,
+				angle: `Follow-up story grounded in a verified published result (${String(w.published_at).slice(0, 10)}). Source: site_news winner_announcement.`,
+			});
+		}
+	} catch {
+		// site_news may not exist on a fresh database; pillars still compose.
+	}
+
+	// 3. Owner-supplied material routed as MEDIA_DRAFT.
+	try {
+		const drafts = await db
+			.prepare(
+				`SELECT filename, uploaded_by FROM board_uploads
+				 WHERE routing = 'MEDIA_DRAFT'
+				 ORDER BY created_at DESC
+				 LIMIT 4`,
+			)
+			.all<{ filename: string; uploaded_by: string | null }>();
+		for (const d of drafts.results ?? []) {
+			slots.push({
+				title: `From board material: ${d.filename}`,
+				angle: `Article grounded in owner-supplied material "${d.filename}"${d.uploaded_by ? ` (uploaded by ${d.uploaded_by})` : ""}. Source: board_uploads routed MEDIA_DRAFT.`,
+			});
+		}
+	} catch {
+		// board_uploads may not exist on a fresh database; pillars still compose.
+	}
+
+	// 4. Verified pillar explainers as the standing structure.
+	for (const p of VERIFIED_PILLAR_SLOTS) {
+		if (slots.length >= 12) break;
+		slots.push(p);
+	}
+
+	const planId = `MEDIAPLAN-${crypto.randomUUID()}`;
+	const composedAt = now.toISOString().slice(0, 10);
+	const notes =
+		`Machine-composed on ${composedAt} from verified sources only; every article slot cites its source. ` +
+		`The machine proposed the structure; the owner approves the plan, edits angles, and approves each article before publication.`;
+	await db
+		.prepare(
+			`INSERT INTO media_plans (plan_id, title, period, notes, status)
+			 VALUES (?, ?, ?, ?, 'DRAFT')`,
+		)
+		.bind(planId, "Machine-composed media plan", period, notes)
+		.run();
+
+	const statements = slots.map((s) =>
+		db
+			.prepare(
+				`INSERT INTO media_articles (article_id, plan_id, title, angle, status)
+				 VALUES (?, ?, ?, ?, 'DRAFT')`,
+			)
+			.bind(`ARTICLE-${crypto.randomUUID()}`, planId, s.title.slice(0, 200), s.angle),
+	);
+	if (statements.length) await db.batch(statements);
+	await audit(db, planId, "MEDIA_PLAN_COMPOSED", { article_count: slots.length, period });
+	return jsonResponse({ ok: true, plan_id: planId, status: "DRAFT", article_count: slots.length, period }, 201);
+}
+
 // NOTE: there is deliberately no seeded plan or article topics here.
 // Verified-requirements rule: the machine defines the plan and article
 // objects and their lifecycle, but never invents editorial targets or

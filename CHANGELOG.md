@@ -1,5 +1,14 @@
 # NWANA Engine Changelog
 
+## 2026-09-23 — Operating Center completion fixes: honest media composition, board/uploads pages, upload auth
+
+- The machine now composes the media plan from verified sources (ADR-0021 updated): `POST /api/operating-center/media/plans/compose` and the "Compose plan from verified sources" button build a DRAFT plan whose article slots derive from upcoming races in the lifecycle, recent winner announcements in `site_news`, board uploads routed as MEDIA_DRAFT, and the verified NWANA pillars as explainer structure. Every slot's angle cites its source; the machine never invents topics. The media page header no longer tells the owner "You set the topics".
+- External distribution UI on the media page: each PUBLISHED article shows its distribution history and a "Record external distribution" form (channel, outlet, notes). The API already existed; now the owner can use it from the UI.
+- New dedicated pages: `/operating-center/board` (full board workspace: intake, queue, meetings, work items) and `/operating-center/uploads` (upload form, routed uploads list). The main page shows only compact summaries with links. The shared menu now has Overview / Results / Funds / Media / Board / Uploads on every page.
+- Bug fixes: the upload form field is `uploaded_by` matching what the server reads (was `submitted_by`, stored null); the upload fetch uses `Authorization: Bearer` (was `x-operating-center-key`, got 401). Both covered by regression tests.
+- Migration safety documented honestly: 0028's `ALTER TABLE ... ADD COLUMN` statements are not re-runnable (SQLite has no `IF NOT EXISTS` for `ADD COLUMN`); the journal records it as applied, never re-run wholesale.
+- Verified: Vitest 194/194, TypeScript clean, inline script syntax checks pass for all pages (main, media, board, uploads, results, funds).
+
 ## 2026-09-22 — Lifecycle rows to the results page + button menu (ADR-0023)
 
 - The "Series 2026 race lifecycle" per-distance rows moved off the main operating-center page onto the dedicated `/operating-center/results` page (the "Race results" link already pointed there). The results page now shows the full rows verbatim: stage headings, event name/date, write access, synced_at, owner actions, and the "Confirm prep" button posting to the same `/api/operating-center/race-lifecycle/prep-confirm` API. The page still auto-syncs every distance on open; existing results/sync functionality untouched.

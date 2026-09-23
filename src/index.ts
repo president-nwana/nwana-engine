@@ -66,8 +66,11 @@ import {
 } from "./operating-center";
 import { renderFundsHtml } from "./operating-center-funds";
 import { renderMediaHtml } from "./operating-center-media";
+import { renderBoardHtml } from "./operating-center-board";
+import { renderUploadsHtml } from "./operating-center-uploads";
 import {
 	createMediaPlan,
+	composeMediaPlan,
 	listMediaPlans,
 	getMediaPlan,
 	approveMediaPlan,
@@ -5687,7 +5690,9 @@ export default {
 				(url.pathname === "/operating-center" ||
 					url.pathname === "/operating-center/results" ||
 					url.pathname === "/operating-center/funds" ||
-					url.pathname === "/operating-center/media")
+					url.pathname === "/operating-center/media" ||
+					url.pathname === "/operating-center/board" ||
+					url.pathname === "/operating-center/uploads")
 			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
@@ -5735,6 +5740,28 @@ export default {
 			});
 		}
 
+		// Board workspace: intake, meetings, work items (full workspace; the
+		// overview shows only a compact summary).
+		if (request.method === "GET" && url.pathname === "/operating-center/board") {
+			return new Response(renderBoardHtml(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		}
+
+		// Board uploads: upload form and routed uploads list (full workspace;
+		// the overview shows only a compact summary).
+		if (request.method === "GET" && url.pathname === "/operating-center/uploads") {
+			return new Response(renderUploadsHtml(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		}
+
 		// ADR-0021: media plan API.
 		if (url.pathname === "/api/operating-center/media/overview" && request.method === "GET") {
 			return getMediaOverview(env.nwana_engine_db);
@@ -5744,6 +5771,9 @@ export default {
 		}
 		if (url.pathname === "/api/operating-center/media/plans" && request.method === "POST") {
 			return createMediaPlan(request, env.nwana_engine_db);
+		}
+		if (url.pathname === "/api/operating-center/media/plans/compose" && request.method === "POST") {
+			return composeMediaPlan(env.nwana_engine_db);
 		}
 		{
 			const m = url.pathname.match(/^\/api\/operating-center\/media\/plans\/([^/]+)$/);
