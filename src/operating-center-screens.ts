@@ -10,16 +10,10 @@
 
 import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
 import { getFundView } from "./fund";
-import { validateCampaignSpec, type CampaignSpec, type DesiredState, type DistributionLink, type ProposalOrigin, type SourceObjectLink } from "./google-ads-state";
-import { buildDesiredState } from "./google-ads-current";
-import { currentProposalIntents } from "./google-ads-current";
-import { buildProposals, type ProposalRecord } from "./google-ads-proposals";
-import type { NormalizedCampaignIntent } from "./google-ads-intent";
+import { buildDesiredState } from "./google-ads-state";
 // ADR-0029: the Ads screen reads the real Google Ads connection state from
 // the existing live integration (src/google-ads.ts), never a hardcoded flag.
-// ADR-0030: the screen is a read-only operational view of the real account:
-// live campaigns come from the Google Ads API, never from the planned spec.
-import { getGoogleAdsStatus, getGoogleAdsAccountSnapshot, GOOGLE_ADS_LIVE_CUSTOMER_ID, GOOGLE_ADS_METRICS_LABEL, type GoogleAdsEnv, type GoogleAdsLiveCampaign } from "./google-ads";
+import { getGoogleAdsStatus, type GoogleAdsEnv } from "./google-ads";
 
 export type ReportScreenId =
 	| "sites"
@@ -233,17 +227,6 @@ export interface AdsOverview {
 		note: string;
 	};
 	google_analytics: { connected: false; note: string };
-	// ADR-0030: live account snapshot from the Google Ads API (read-only).
-	// available=false when the integration is not connected; then the
-	// connection block above carries the state. error holds the real
-	// account-read failure, never invented zeros.
-	live_account: {
-		available: boolean;
-		customer_id: string;
-		date_range: string;
-		campaigns: GoogleAdsLiveCampaign[];
-		error?: string;
-	};
 	// ADR-0016: the machine's desired-state spec. These campaigns are
 	// PLANNED, not live: nothing has been created in any account.
 	// Never presented as live data.
@@ -253,41 +236,16 @@ export interface AdsOverview {
 		status_in_account: string;
 		ad_groups: Array<{ name: string; keywords: string[] }>;
 	}>;
-	// Proposal layer: the desired-state spec enriched with per-proposal
-	// status, the Ad Grants policy validation result (from the existing
-	// validator), and the next action. Never mixed with live campaigns.
-	machine_proposals: MachineProposal[];
 	// What the screen currently shows (real connection state plus the
 	// planned spec). Google Analytics is deliberately untouched here.
 	capabilities: string[];
 }
 
 type AdsStatusReader = typeof getGoogleAdsStatus;
-type AdsAccountReader = typeof getGoogleAdsAccountSnapshot;
-
-/**
- * Universal machine proposal, produced by the generic Google Ads
- * proposal pipeline (google-ads-proposals.ts) from a normalized
- * intent. The screen renders this record; it never builds proposals
- * itself.
- */
-export type MachineProposal = ProposalRecord;
-
-/**
- * Runs normalized intents through the generic proposal pipeline.
- * Thin presentation-layer wrapper around buildProposals.
- */
-export function buildMachineProposals(
-	intents: ReadonlyArray<NormalizedCampaignIntent>,
-	liveCampaigns: GoogleAdsLiveCampaign[],
-): MachineProposal[] {
-	return buildProposals(intents, liveCampaigns);
-}
 
 export async function getAdsOverview(
 	env: GoogleAdsEnv,
 	readStatus: AdsStatusReader = getGoogleAdsStatus,
-	readAccount: AdsAccountReader = getGoogleAdsAccountSnapshot,
 ): Promise<AdsOverview> {
 	const spec = buildDesiredState();
 	const status = await readStatus(env);
@@ -305,26 +263,6 @@ export async function getAdsOverview(
 	} else {
 		note = "Configured but not connected: no OAuth credential stored yet.";
 	}
-	// ADR-0030: live account data is read only when the integration is
-	// connected, via one bounded read-only API request. No D1 writes.
-	let liveAccount: AdsOverview["live_account"];
-	if (status.connected) {
-		const snapshot = await readAccount(env, GOOGLE_ADS_LIVE_CUSTOMER_ID);
-		liveAccount = {
-			available: true,
-			customer_id: snapshot.customer_id,
-			date_range: snapshot.date_range,
-			campaigns: snapshot.campaigns,
-			...(snapshot.error ? { error: snapshot.error } : {}),
-		};
-	} else {
-		liveAccount = {
-			available: false,
-			customer_id: GOOGLE_ADS_LIVE_CUSTOMER_ID,
-			date_range: GOOGLE_ADS_METRICS_LABEL,
-			campaigns: [],
-		};
-	}
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
@@ -341,7 +279,6 @@ export async function getAdsOverview(
 			connected: false,
 			note: "Not set up. No Analytics property is attached to the NWANA sites yet.",
 		},
-		live_account: liveAccount,
 		planned_campaigns: spec.campaigns.map((c) => ({
 			name: c.name,
 			daily_budget: c.daily_budget,
@@ -351,13 +288,11 @@ export async function getAdsOverview(
 				keywords: g.keywords.map((k) => k.text + " [" + k.match_type + "]"),
 			})),
 		})),
-		machine_proposals: buildMachineProposals(currentProposalIntents(), liveAccount.campaigns),
 		capabilities: [
 			"Real Google Ads connection state (connected or the actual error)",
 			"Access level and accessible customer account(s)",
 			"Campaign creation/mutation status (currently disabled)",
-			"Live campaign data from the connected account (read-only)",
-			"Machine campaign proposals (owner review required)",
+			"Planned campaign spec — not created in any account",
 		],
 	};
 }
@@ -375,59 +310,14 @@ const ADS_SCRIPT = `
 			html+='<div class="meta">Campaign creation/mutation: '+(ads.execution_allowed?'enabled':'disabled')+'</div>';
 			if(ads.error){html+='<div class="detail">Error: '+esc(ads.error)+'</div>';}
 			html+='</div>';
-			const live=data.live_account;
-			if(live&&live.available){
-				html+='<h3>LIVE GOOGLE ADS ACCOUNT</h3><p class="meta">Real data from account '+esc(live.customer_id)+', '+esc(live.date_range)+'. Read-only; the machine never changes campaigns.</p>';
-				if(live.error){
-					html+='<div class="item"><strong>Account data<span class="badge-warn">Read error</span></strong><div class="detail">Could not read account data: '+esc(live.error)+'</div></div>';
-				}else if((live.campaigns||[]).length===0){
-					html+='<div class="item"><div class="detail">No campaigns found in the connected Google Ads account.</div></div>';
-				}else{
-					for(const c of live.campaigns){
-						const st=c.status==='ENABLED'?'<span class="badge-ok">'+esc(c.status)+'</span>':'<span class="badge-warn">'+esc(c.status)+'</span>';
-						html+='<div class="item"><strong>'+esc(c.name)+' '+st+'</strong>'
-							+'<div class="meta">Budget: $'+Number(c.daily_budget_usd).toFixed(2)+'/day</div>'
-							+'<div class="detail">Impressions: '+esc(c.impressions)+' &middot; Clicks: '+esc(c.clicks)+' &middot; Conversions: '+esc(c.conversions)+' &middot; Spend: $'+Number(c.cost_usd).toFixed(2)+'</div>'
-							+'</div>';
-					}
-				}
-			}
 			html+='<div class="item"><strong>Google Analytics<span class="badge-warn">Not set up</span></strong><div class="detail">'+esc(data.google_analytics.note)+'</div></div>';
-			html+='<h3>MACHINE PROPOSALS</h3><p class="meta">What the machine proposes to create. Campaign creation is disabled; the owner reviews every proposal before anything is created.</p>';
-			for(const p of (data.machine_proposals||[])){
-				const st=p.state==='PROPOSED'?'<span class="badge-ok">'+esc(p.state)+'</span>':'<span class="badge-warn">'+esc(p.state)+'</span>';
-				html+='<div class="item"><strong>'+esc(p.name||'(unnamed proposal)')+' '+st+'</strong>'
-					+'<div class="meta">Proposal ID: '+esc(p.proposal_id)+'</div>'
-					+'<div class="meta">Budget: $'+(p.daily_budget!=null?Number(p.daily_budget).toFixed(2):'?')+'/day &middot; Target: '+esc(p.target_url||'none')+'</div>';
-				html+='<div class="meta">Origin: '+(p.origin?esc(p.origin):'unknown')+' &middot; Source: '+esc(p.source_kind)+' / '+esc(p.source_identity)+'</div>';
-				if(p.source_object){
-					var label='Source object: '+esc(p.source_object.object_id);
-					if(p.source_object.object_type){label+=' ('+esc(p.source_object.object_type)+')';}
-					if(p.source_object.title){label+=' - '+esc(p.source_object.title);}
-					html+='<div class="meta">'+label+'</div>';
+			html+='<h3>Planned campaigns (machine spec, not created)</h3><p class="meta">Prepared under Ad Grants policy. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any ad account yet.</p>';
+			for(const c of (data.planned_campaigns||[])){
+				html+='<div class="item"><strong>'+esc(c.name)+'<span class="badge-warn">'+esc(c.status_in_account)+'</span></strong><div class="meta">$'+esc(c.daily_budget)+'/day planned</div>';
+				for(const g of (c.ad_groups||[])){
+					html+='<div class="detail"><b>'+esc(g.name)+':</b> '+esc((g.keywords||[]).join(', '))+'</div>';
 				}
-				else{html+='<div class="meta">Source object: not yet linked</div>';}
-				html+='<div class="meta">Purpose: '+esc(p.purpose)+'</div>';
-				html+='<div class="meta">Distribution rule: '+(p.distribution.rule_id?esc(p.distribution.rule_id):'none')+'</div>';
-				html+='<div class="meta">Distribution action: '+(p.distribution.action_id?esc(p.distribution.action_id):'none')+'</div>';
-				html+='<div class="meta">Channel: '+(p.distribution.channel?esc(p.distribution.channel):'none')+'</div>';
-				html+='<div class="meta">Creation eligibility: '+(p.creation_eligible?'eligible':'not eligible')+'</div>';
-				if(p.conflict){
-					html+='<div class="meta">Live conflict: '+esc(p.conflict.live_campaign_name)+' ('+(p.conflict.via==='VERIFIED_MAPPING'?'verified mapping':'exact name')+')</div>';
-				}
-				if((p.missing_fields||[]).length>0){
-					html+='<div class="meta">Missing fields: '+p.missing_fields.map(esc).join(', ')+'</div>';
-				}
-				for(const g of (p.ad_groups||[])){
-					const kws=(g.keywords||[]).map(function(k){return esc(k.text)+' ('+esc(k.match_type)+')';}).join(', ');
-					html+='<div class="detail"><b>'+esc(g.name)+':</b> max CPC $'+Number(g.default_cpc).toFixed(2)+', '+g.ads_count+' ads<br>Keywords: '+kws+'</div>';
-				}
-				if((p.policy_violations||[]).length===0){
-					html+='<div class="detail">Ad Grants policy: PASS</div>';
-				}else{
-					html+='<div class="detail">Ad Grants policy violations: '+p.policy_violations.map(esc).join('; ')+'</div>';
-				}
-				html+='<div class="detail">Next action: '+esc(p.next_action)+'</div></div>';
+				html+='</div>';
 			}
 			html+='<h3>What this screen shows today</h3><div class="detail">'+(data.capabilities||[]).map(w=>'&bull; '+esc(w)).join('<br>')+'</div>';
 			box.innerHTML=html;
@@ -1281,7 +1171,6 @@ export function buildSocialReport(data: SocialOverview): string {
 
 export function buildAdsReport(data: AdsOverview): string {
 	const ads = data.google_ads;
-	const live = data.live_account;
 	let body = `<h2>Connection status</h2>`;
 	if (ads.connected) {
 		body += `<p><strong>Google Ads</strong> <span class="tag">Connected</span></p><p>${escHtml(ads.note)}</p>`;
@@ -1293,68 +1182,15 @@ export function buildAdsReport(data: AdsOverview): string {
 	if (ads.error) {
 		body += `<p>Error: ${escHtml(ads.error)}</p>`;
 	}
-	if (live.available) {
-		body += `<h2>LIVE GOOGLE ADS ACCOUNT</h2>`;
-		body += `<p class="note">Real data from account ${escHtml(live.customer_id)}, ${escHtml(live.date_range)}. Read-only; the machine never changes campaigns.</p>`;
-		if (live.error) {
-			body += `<p><strong>Account data</strong> <span class="tag-warn">Read error</span></p><p>Could not read account data: ${escHtml(live.error)}</p>`;
-		} else if (live.campaigns.length === 0) {
-			body += `<p>No campaigns found in the connected Google Ads account.</p>`;
-		} else {
-			body += `<table><thead><tr><th>Campaign</th><th>Status</th><th>Budget/day</th><th>Impr.</th><th>Clicks</th><th>Conv.</th><th>Spend</th></tr></thead><tbody>`;
-			for (const c of live.campaigns) {
-				body += `<tr><td><strong>${escHtml(c.name)}</strong></td>` +
-					`<td><span class="${c.status === "ENABLED" ? "tag" : "tag-warn"}">${escHtml(c.status)}</span></td>` +
-					`<td>$${c.daily_budget_usd.toFixed(2)}</td>` +
-					`<td>${escHtml(c.impressions)}</td>` +
-					`<td>${escHtml(c.clicks)}</td>` +
-					`<td>${escHtml(c.conversions)}</td>` +
-					`<td>$${c.cost_usd.toFixed(2)}</td></tr>`;
-			}
-			body += `</tbody></table>`;
-		}
-	}
 	body += `<p><strong>Google Analytics</strong> <span class="tag-warn">Not set up</span></p><p>${escHtml(data.google_analytics.note)}</p>`;
-	body += `<h2>MACHINE PROPOSALS</h2>`;
-	body += `<p class="note">What the machine proposes to create. Campaign creation is disabled; the owner reviews every proposal before anything is created.</p>`;
-	for (const p of data.machine_proposals) {
-		body += `<h3>${escHtml(p.name ?? "(unnamed proposal)")} <span class="${p.state === "PROPOSED" ? "tag" : "tag-warn"}">${escHtml(p.state)}</span></h3>`;
-		body += `<p>Proposal ID: ${escHtml(p.proposal_id)}</p>`;
-		body += `<p>Daily budget: ${p.daily_budget != null ? "$" + p.daily_budget.toFixed(2) : "n/a"}; target URL: ${p.target_url ? escHtml(p.target_url) : "none"}</p>`;
-		body += `<p>Origin: ${p.origin ? escHtml(p.origin) : "unknown"}; source: ${escHtml(p.source_kind)} / ${escHtml(p.source_identity)}</p>`;
-		if (p.source_object) {
-			let label = `Source object: ${escHtml(p.source_object.object_id)}`;
-			if (p.source_object.object_type) {
-				label += ` (${escHtml(p.source_object.object_type)})`;
-			}
-			if (p.source_object.title) {
-				label += ` - ${escHtml(p.source_object.title)}`;
-			}
-			body += `<p>${label}</p>`;
-		} else {
-			body += `<p>Source object: not yet linked</p>`;
+	body += `<h2>Planned campaigns (machine spec — not live in any account)</h2>`;
+	body += `<p class="note">Prepared under Google Ad Grants policy. Every campaign is created paused; the owner reviews and enables. Nothing below exists in any advertising account yet.</p>`;
+	for (const c of data.planned_campaigns) {
+		body += `<h3>${escHtml(c.name)} <span class="tag-warn">${escHtml(c.status_in_account)}</span></h3>`;
+		body += `<p class="note">Planned budget: $${escHtml(c.daily_budget)}/day</p>`;
+		for (const g of c.ad_groups) {
+			body += `<p><strong>${escHtml(g.name)}:</strong> ${escHtml(g.keywords.join(", "))}</p>`;
 		}
-		body += `<p>Purpose: ${escHtml(p.purpose)}</p>`;
-		body += `<p>Distribution rule: ${p.distribution.rule_id ? escHtml(p.distribution.rule_id) : "none"}</p>`;
-		body += `<p>Distribution action: ${p.distribution.action_id ? escHtml(p.distribution.action_id) : "none"}</p>`;
-		body += `<p>Channel: ${p.distribution.channel ? escHtml(p.distribution.channel) : "none"}</p>`;
-		body += `<p>Creation eligibility: ${p.creation_eligible ? "eligible" : "not eligible"}</p>`;
-		if (p.conflict) {
-			body += `<p>Live conflict: ${escHtml(p.conflict.live_campaign_name)} (${p.conflict.via === "VERIFIED_MAPPING" ? "verified mapping" : "exact name"})</p>`;
-		}
-		if (p.missing_fields.length > 0) {
-			body += `<p>Missing fields: ${p.missing_fields.map(escHtml).join(", ")}</p>`;
-		}
-		for (const g of p.ad_groups) {
-			const kws = g.keywords.map((k) => `${escHtml(k.text)} (${escHtml(k.match_type)})`).join(", ");
-			body += `<p><strong>${escHtml(g.name)}:</strong> max CPC $${g.default_cpc.toFixed(2)}, ${g.ads_count} ads<br>Keywords: ${kws}</p>`;
-		}
-		if (p.policy_violations.length === 0) {
-			body += `<p>Ad Grants policy: PASS</p>`;
-		} else {
-			body += `<p>Ad Grants policy violations: ${p.policy_violations.map(escHtml).join("; ")}</p>`;
-		}
-		body += `<p>Next action: ${escHtml(p.next_action)}</p>`;
 	}
 	body += `<h2>What this report shows today</h2><ul>${data.capabilities.map((w) => `<li>${escHtml(w)}</li>`).join("")}</ul>`;
 	return reportDoc("NWANA advertising and analytics", reportDate(data.generated_at), body);

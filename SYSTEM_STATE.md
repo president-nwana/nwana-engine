@@ -699,29 +699,12 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Do not infer that source_id 209464 is a race.
 - Do not treat REGISTRATION as active for 209464: it is platform-available but hidden, unconfigured for NWANA use, and not a public conversion path.
 
-## ADR-0031 — UNIVERSAL GOOGLE ADS PROPOSAL ENGINE (2026-09-23)
-
-- Replaces the two hardcoded builders (`series2026Campaign()`, `foundingCircleCampaign()`) and the hardcoded Series conflict branch in the Ads screen with one universal pipeline: `SOURCE / OWNER TASK -> NORMALIZED CAMPAIGN INTENT -> CAMPAIGN SPEC -> POLICY VALIDATION -> LIVE DUPLICATE CHECK -> MACHINE PROPOSAL -> OWNER REVIEW`.
-- New modules: `src/google-ads-intent.ts` (normalized intent, deterministic `origin:source_identity:purpose` identity, source adapters for registry objects, funds, sponsorship assets, owner directives; adapters never invent content and never decide policy/eligibility/duplicates), `src/google-ads-proposals.ts` (generic CampaignSpec builder, data-driven conflict matcher with exact-name plus `VERIFIED_CONFLICT_MAPPINGS`, generic state precedence missing input -> POLICY_REVIEW -> POSSIBLE DUPLICATE / REVIEW -> PROPOSED), `src/google-ads-current.ts` (migration: Series and Founding Circle intents through the same adapters with the existing factual copy as explicit hints; `buildDesiredState` output byte-identical).
-- Stable proposal IDs: `OBJECT_DERIVED:NWANA-RACE-000001:VIRTUAL_RACES`, `OWNER_DIRECTIVE:DIR-FOUNDING-CIRCLE-2026:FOUNDING_CIRCLE`. Production states unchanged: Series `POSSIBLE DUPLICATE / REVIEW` (verified mapping to "2026 NWANA Open Nordic Walking Series"), Founding Circle `PROPOSED`.
-- New regression suite `test/google-ads-proposals.spec.ts`: adapters, incomplete Fund/Sponsorship Asset (no invented content, exact missing fields), deterministic IDs, eligibility, state precedence, exact-name and mapping conflicts, no false duplicates, zero mutations, removal of the two hardcoded builders.
-- No orchestration layer, no external paid AI/API, no cron/polling, no copy generation, zero Google Ads mutations, no changes to live GAQL/date range/OAuth/customer ID/API version/Analytics/mutation state/reconcile. ADR: `docs/adr/ADR-0031-universal-google-ads-proposal-engine.md`.
-
-## ADR-0030 — ADS SCREEN SHOWS THE REAL LIVE ACCOUNT, READ-ONLY (2026-09-23)
-
-- `src/google-ads.ts` gains `getGoogleAdsAccountSnapshot()`: one bounded read-only GAQL request per call via the existing OAuth integration (no mutations, no polling, nothing written to D1). It returns per-campaign name, status, daily budget, impressions, clicks, conversions, cost for `DURING LAST_30_DAYS`, excluding REMOVED campaigns, from `customers/6758500147`.
-- `/operating-center/ads` now has a `LIVE GOOGLE ADS ACCOUNT` block with the real campaigns. Empty account shows "No campaigns found in the connected Google Ads account." A read failure shows the real error separately from the connection state; no invented zeros. `PLANNED / NOT CREATED` stays below, never mixed with live campaigns. The downloadable report carries the same live snapshot.
-- Regression tests in `test/operating-center-screens.spec.ts`: real campaigns returned, empty account, account-read error, planned-vs-live separation.
-- Bugfix 2026-09-23 (same ADR, no architecture change): the GAQL query used an invalid bare `DURING LAST_30_DAYS` clause; fixed to `AND segments.date DURING LAST_30_DAYS`. Regression test pins the exact query shape and the unchanged field list.
-- No campaigns created or changed, execution/mutation stays disabled, OAuth credentials untouched, Google Analytics untouched, no other screens modified, no cron/polling. ADR: `docs/adr/ADR-0030-ads-live-account-view.md`.
-
 ## ADR-0029 — ADS SCREEN READS THE LIVE GOOGLE ADS INTEGRATION (2026-09-23)
 
 - The ADR-0027 Ads screen hardcoded `google_ads.connected = false` ("Not connected. The owner login ... is not established"), which contradicted the verified integration state (GOOGLE ADS API — VERIFIED 2026-09-19: connected=true, access_level=EXPLORER, customers/6758500147). That stale state is fixed: `/operating-center/ads` and its downloadable report now read the existing live integration via `getGoogleAdsStatus()` (`src/google-ads.ts`).
 - `getAdsOverview(env, readStatus)` is async; the injectable reader lets tests stub the status without calling Google. Screen shows: Connected/connection error, access level, accessible customer(s), execution/mutation status, and the real error on failure. Planned campaigns stay a separate "Planned / not created" section. Google Analytics untouched.
 - Regression tests in `test/operating-center-screens.spec.ts` fail if the screen or report ever hardcodes "Not connected" again while the status reader reports connected=true.
 - No campaigns created or changed, execution/mutation stays disabled, OAuth credentials untouched, no new integration, no cron/polling, no other screens modified. ADR: `docs/adr/ADR-0029-ads-screen-live-integration.md`.
-- Production deployment: 2026-09-23, Worker `nwana-engine` version `e8432f2f-9237-4e5b-aca3-2c4fcafb7c12` (commit `61083209`, pushed as `c8574292`). Live verification: `/operating-center/ads` 200 with the new "Google Ads shows its real connection state below" subtitle and the Connected/Error badge logic in the page script; `/api/operating-center/ads/overview` and `/api/operating-center/report/ads` 401 without the owner key; other API 401s unchanged. Pre-deploy live version was `dc9e4a94` (2026-09-22, president@nwaofna.org), post-deploy is `e8432f2f` - no overwrite detected. No Google Ads mutations were performed.
 - Do not treat 209464 as a RESULTS container.
 - Do not infer business meaning from an internal object_id.
 - Do not infer an external object's capabilities from another similar-looking object.
