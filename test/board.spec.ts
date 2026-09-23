@@ -64,6 +64,10 @@ function makeBoardDb() {
 						const i = find(initiatives, "initiative_id", args[0]);
 						return i ? { status: i.status } : null;
 					}
+					if (sql.startsWith("SELECT work_item_id FROM work_items WHERE board_decision_id = ?")) {
+						const w = find(workItems, "board_decision_id", args[0]);
+						return w ? { work_item_id: w.work_item_id } : null;
+					}
 					throw new Error(`unexpected first(): ${sql}`);
 				},
 				async all() {
@@ -97,6 +101,13 @@ function makeBoardDb() {
 					}
 					if (sql.startsWith("SELECT w.work_item_id")) {
 						return { results: workItems.filter((w) => w.status !== "DONE") };
+					}
+					if (sql.startsWith("SELECT decision_id, decision_text, outcome, responsible_person, due_date, machine_action")) {
+						return {
+							results: decisions.filter(
+								(d) => d.meeting_id === args[0] && d.outcome === "CONFIRMED"
+							),
+						};
 					}
 					throw new Error(`unexpected all(): ${sql}`);
 				},
@@ -166,6 +177,14 @@ function makeBoardDb() {
 					if (sql.startsWith("UPDATE initiatives SET status")) {
 						const i = find(initiatives, "initiative_id", args[2]);
 						if (i) i.status = args[0];
+						return { meta: { changes: 1 } };
+					}
+					if (sql.startsWith("INSERT INTO audit_events")) {
+						return { meta: { changes: 1 } };
+					}
+					if (sql.startsWith("UPDATE board_decisions SET machine_result")) {
+						const d = find(decisions, "decision_id", args[1]);
+						if (d) d.machine_result = args[0];
 						return { meta: { changes: 1 } };
 					}
 					throw new Error(`unexpected run(): ${sql}`);

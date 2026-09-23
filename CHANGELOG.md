@@ -8,6 +8,17 @@
 - No migration, no API change, no new endpoints. Auth behavior unchanged: HTML renders, APIs return 401 without the owner key.
 - Verified: Vitest 178/178 (8 new tests: menu on all pages, active state, header placement, summary card, lifecycle panel with buttons, script-parse regression tests for results and funds pages), TypeScript clean.
 
+## 2026-09-22 — Operating Center completion: media plan, board protocol, uploads, activity (ADR-0021, ADR-0024)
+
+- Media plan is a first-class machine object (ADR-0021, migration 0027): `media_plans` and `media_articles` with plan lifecycle DRAFT to DONE and article lifecycle DRAFT to PUBLISHED. No seeded plans or invented topics; the owner creates plans and topics via the UI or they arrive as routed Board uploads. The media workspace lives at `/operating-center/media` (owner-key protected); the main page shows a compact summary card.
+- Site publication is owner-confirmed per article (writes to `site_news`). External press distribution is a separate owner-confirmed action per published article (migration 0029, `media_distributions`): only PUBLISHED articles can be distributed; the machine records channel, outlet, send time, and notes; the actual send is manual. No automatic sends. RunSignup is not involved in the media flow.
+- Board protocol is event-driven (ADR-0024, no cron per owner rule): `reconcileProtocolIfDue` runs on owner-authorized operating-center activity, ensuring the coming Sunday's meeting exists and forming its protocol. Submissions auto-attach during the week. `POST /api/board/protocol/form` and `/process` allow explicit formation and post-meeting processing. Honest limitation: no owner activity in a week means no protocol forms that week.
+- Post-meeting processing: CONFIRMED decisions become tracked work; `machine_action` (PREPARE_NEWS_DRAFT, PREPARE_EMAIL_DRAFT) prepares drafts and files decision requests. Sends stay human-confirmed.
+- Board uploads with machine routing (migration 0028, `board_uploads`): multipart upload, accepts CSV/TXT/MD/TSV/JSON, max 512 KB, validation before routing, no silent truncation. Content-based classification routes to RUNSIGNUP_CONTACTS (parsed, deduplicated, staged CSV for manual import in RunSignup Email Marketing dashboard ID 513494), WORK_ITEM, MEETING_AGENDA, MEDIA_DRAFT, or NEEDS_OWNER. Contact content never appears in ordinary list views.
+- Activity feed: `GET /api/operating-center/activity` shows what is happening (audit events), what is new, and what requires reading (pending decision requests, unrouted uploads). Read acknowledgment is durable and owner-wide in D1 (`read_acknowledgments`, migration 0030); no per-member read state is claimed.
+- Main page compacted: sponsorship assets, work items, and board queue show summaries not full lists. New "What board members can do" panel lists member capabilities explicitly.
+- Verified: Vitest 179/179, TypeScript clean, inline script syntax regression test passes.
+
 ## 2026-09-22 — Hotfix: operating-center blank page (ADR-0022 regression)
 
 - The ADR-0022 deploy shipped a stray closing brace in the main page's inline `<script>` (after `loadFundSummary()`), a SyntaxError that stopped all client JS: the page showed only the header. Fixed with a one-line removal; `/operating-center/funds` untouched. Added a regression test that syntax-checks the embedded page script (`new Function`), which TypeScript and the markup tests cannot catch.

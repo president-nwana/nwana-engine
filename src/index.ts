@@ -61,8 +61,32 @@ import {
 	autoPublishNextRacePromo,
 	renderOperatingCenterHtml,
 	renderRaceResultsHtml,
+	getActivityFeed,
+	acknowledgeRead,
 } from "./operating-center";
 import { renderFundsHtml } from "./operating-center-funds";
+import { renderMediaHtml } from "./operating-center-media";
+import {
+	createMediaPlan,
+	listMediaPlans,
+	getMediaPlan,
+	approveMediaPlan,
+	addMediaArticle,
+	saveArticleBody,
+	approveArticle,
+	publishArticle,
+	distributeArticle,
+	listArticleDistributions,
+	getMediaOverview,
+} from "./media-plan";
+import {
+	formWeeklyProtocol,
+	reconcileProtocolIfDue,
+	processProtocol,
+	handleUpload,
+	listUploads,
+	getStagedCsv,
+} from "./board-protocol";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -5662,7 +5686,8 @@ export default {
 				request.method === "GET" &&
 				(url.pathname === "/operating-center" ||
 					url.pathname === "/operating-center/results" ||
-					url.pathname === "/operating-center/funds")
+					url.pathname === "/operating-center/funds" ||
+					url.pathname === "/operating-center/media")
 			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
@@ -5700,6 +5725,89 @@ export default {
 			});
 		}
 
+		// ADR-0021: the media plan workspace lives on its own page.
+		if (request.method === "GET" && url.pathname === "/operating-center/media") {
+			return new Response(renderMediaHtml(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		}
+
+		// ADR-0021: media plan API.
+		if (url.pathname === "/api/operating-center/media/overview" && request.method === "GET") {
+			return getMediaOverview(env.nwana_engine_db);
+		}
+		if (url.pathname === "/api/operating-center/media/plans" && request.method === "GET") {
+			return listMediaPlans(env.nwana_engine_db);
+		}
+		if (url.pathname === "/api/operating-center/media/plans" && request.method === "POST") {
+			return createMediaPlan(request, env.nwana_engine_db);
+		}
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/media\/plans\/([^/]+)$/);
+			if (m && request.method === "GET") return getMediaPlan(env.nwana_engine_db, m[1]);
+		}
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/media\/plans\/([^/]+)\/approve$/);
+			if (m && request.method === "POST") return approveMediaPlan(env.nwana_engine_db, m[1]);
+		}
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/media\/plans\/([^/]+)\/articles$/);
+			if (m && request.method === "POST") {
+				return addMediaArticle(request, env.nwana_engine_db, m[1]);
+			}
+		}
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/media\/articles\/([^/]+)\/body$/);
+			if (m && request.method === "POST") {
+				return saveArticleBody(request, env.nwana_engine_db, m[1]);
+			}
+		}
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/media\/articles\/([^/]+)\/approve$/);
+			if (m && request.method === "POST") return approveArticle(env.nwana_engine_db, m[1]);
+		}
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/media\/articles\/([^/]+)\/publish$/);
+			if (m && request.method === "POST") return publishArticle(env.nwana_engine_db, m[1]);
+		}
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/media\/articles\/([^/]+)\/distribute$/);
+			if (m && request.method === "POST") return distributeArticle(request, env.nwana_engine_db, m[1]);
+		}
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/media\/articles\/([^/]+)\/distributions$/);
+			if (m && request.method === "GET") return listArticleDistributions(env.nwana_engine_db, m[1]);
+		}
+
+		// ADR-0023: Board protocol, uploads, activity.
+		if (url.pathname === "/api/board/protocol/form" && request.method === "POST") {
+			return formWeeklyProtocol(env.nwana_engine_db);
+		}
+		if (url.pathname === "/api/board/protocol/process" && request.method === "POST") {
+			const body = (await request.json().catch(() => ({}))) as { meeting_id?: string };
+			const result = await processProtocol(env.nwana_engine_db, String(body.meeting_id ?? ""));
+			return json({ ok: true, ...result });
+		}
+		if (url.pathname === "/api/operating-center/uploads" && request.method === "POST") {
+			return handleUpload(request, env.nwana_engine_db);
+		}
+		if (url.pathname === "/api/operating-center/uploads" && request.method === "GET") {
+			return listUploads(env.nwana_engine_db);
+		}
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/uploads\/([^/]+)\/staged-contacts\.csv$/);
+			if (m && request.method === "GET") return getStagedCsv(env.nwana_engine_db, m[1]);
+		}
+		if (url.pathname === "/api/operating-center/activity" && request.method === "GET") {
+			return getActivityFeed(env.nwana_engine_db);
+		}
+		if (url.pathname === "/api/operating-center/activity/acknowledge" && request.method === "POST") {
+			return acknowledgeRead(request, env.nwana_engine_db);
+		}
+
 		if (request.method === "GET" && url.pathname === "/api/operating-center/race-results") {
 			try {
 				return json(await getRaceResultsView(env.nwana_engine_db));
@@ -5711,7 +5819,17 @@ export default {
 
 		if (request.method === "GET" && url.pathname === "/api/operating-center/overview") {
 			try {
-				return await getOperatingCenterOverview(env.nwana_engine_db);
+				// ADR-0023: event-driven weekly protocol reconciliation. The
+				// overview call is the owner's own activity; on the first
+				// visit of the week it ensures the coming Sunday meeting
+				// exists and its protocol is formed. No timers, no cron.
+				const reconciliation = await reconcileProtocolIfDue(env.nwana_engine_db);
+				const overviewRes = await getOperatingCenterOverview(env.nwana_engine_db);
+				if (reconciliation) {
+					const body = (await overviewRes.json()) as Record<string, unknown>;
+					return json({ ...body, protocol_reconciliation: reconciliation });
+				}
+				return overviewRes;
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Operating center overview failed" }, 500);

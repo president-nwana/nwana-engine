@@ -20,6 +20,14 @@
 // The machine never invents Board members, meetings, or decisions: every
 // record is created by an explicit owner action, and empty states stay
 // explicit. No emails, no notifications, no Gmail of any kind.
+//
+// ADR-0022: post-meeting protocol processing. When a meeting closes,
+// processProtocol (from board-protocol.ts) ensures every CONFIRMED decision
+// becomes tracked work and executes the machine_action chosen at decision
+// time (prepare a draft for owner review). Sends and consequential actions
+// stay human-confirmed.
+
+import { isMachineAction, processProtocol } from "./board-protocol";
 
 export const MEETING_STAGES = ["DRAFT", "OPEN", "CLOSED"] as const;
 export type MeetingStage = (typeof MEETING_STAGES)[number];
@@ -408,6 +416,7 @@ export async function openBoardMeeting(
 		)
 		.bind(now, metadata, now, meetingId)
 		.run();
+	await auditEvent(db, meetingId, "MEETING_OPENED", { attendees });
 	return jsonResponse({ ok: true, meeting_id: meetingId, status: "OPEN" });
 }
 
@@ -470,6 +479,22 @@ export interface BoardDecisionInput {
 	vote_record?: string;
 	responsible_person?: string;
 	due_date?: string;
+	machine_action?: string;
+}
+
+async function auditEvent(
+	db: D1Database,
+	objectId: string,
+	action: string,
+	details: unknown,
+): Promise<void> {
+	await db
+		.prepare(
+			`INSERT INTO audit_events (audit_id, object_id, action, module, status, details)
+			 VALUES (?, ?, ?, 'BOARD', 'SUCCESS', ?)`,
+		)
+		.bind(`AUDIT-${crypto.randomUUID()}`, objectId, action, JSON.stringify(details ?? {}))
+		.run();
 }
 
 export async function recordBoardDecision(
@@ -492,6 +517,10 @@ export async function recordBoardDecision(
 	}
 	const voteRecord = (input.vote_record ?? "").trim() || null;
 	const submissionId = (input.submission_id ?? "").trim() || null;
+	const machineAction = (input.machine_action ?? "NONE").trim().toUpperCase();
+	if (!isMachineAction(machineAction)) {
+		throw new Error("machine_action must be one of NONE, PREPARE_NEWS_DRAFT, PREPARE_EMAIL_DRAFT");
+	}
 
 	const meeting = await db
 		.prepare(`SELECT status FROM board_meetings WHERE meeting_id = ?`)
@@ -526,11 +555,12 @@ export async function recordBoardDecision(
 	await db
 		.prepare(
 			`INSERT INTO board_decisions
-			 (decision_id, meeting_id, submission_id, decision_text, outcome, vote_record, responsible_person, due_date, status)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMED')`,
+			 (decision_id, meeting_id, submission_id, decision_text, outcome, vote_record, responsible_person, due_date, status, machine_action)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?)`,
 		)
-		.bind(decisionId, meetingId, submissionId, decisionText, outcome, voteRecord, responsiblePerson, dueDate)
+		.bind(decisionId, meetingId, submissionId, decisionText, outcome, voteRecord, responsiblePerson, dueDate, machineAction)
 		.run();
+	await auditEvent(db, decisionId, "BOARD_DECISION_RECORDED", { meeting_id: meetingId, outcome, machine_action: machineAction });
 
 	let workItemId: string | null = null;
 	if (outcome === "CONFIRMED" && (responsiblePerson || dueDate)) {
@@ -593,11 +623,17 @@ export async function closeBoardMeeting(
 		)
 		.bind(now, meetingId)
 		.run();
+	// ADR-0022: the machine processes the protocol and starts the work it
+	// is authorized and capable of doing. Sends and consequential actions
+	// stay human-confirmed.
+	const processing = await processProtocol(db, meetingId);
+	await auditEvent(db, meetingId, "MEETING_CLOSED", { carried_over: Number(carried.meta?.changes ?? 0) });
 	return jsonResponse({
 		ok: true,
 		meeting_id: meetingId,
 		status: "CLOSED",
 		carried_over: Number(carried.meta?.changes ?? 0),
+		protocol_processing: processing,
 	});
 }
 

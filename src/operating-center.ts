@@ -290,6 +290,158 @@ async function count(db: D1Database, sql: string): Promise<number> {
 	return Number(row?.total ?? 0);
 }
 
+// ADR-0023: activity feed. What is happening (audit trail), what is new
+// (recent events), what requires reading (owner attention items). Built
+// from the audit log plus explicit queues. No per-member read state: there
+// is no verified member identity, and read acknowledgement is an explicit
+// owner-wide action, not inferred browser state.
+export interface ActivityItem {
+	id: string;
+	ts: string;
+	label: string;
+	detail: string | null;
+	kind: string;
+	requires_reading: boolean;
+	acknowledged: boolean;
+}
+
+function activityLabel(action: string, module: string, details: string | null): string {
+	const d: Record<string, string> = details ? (JSON.parse(details) as Record<string, string>) : {};
+	switch (action) {
+		case "BOARD_SUBMISSION_CREATED":
+			return `New Board submission: ${d.title ?? d.submission_id ?? "untitled"}`;
+		case "PROTOCOL_FORMED":
+			return `Weekly protocol formed for the ${d.meeting_date ?? "upcoming"} meeting`;
+		case "PROTOCOL_PROCESSED":
+			return `Protocol processed: ${d.processed ?? 0} decisions`;
+		case "BOARD_UPLOAD_ROUTED":
+			return `File uploaded and routed: ${d.filename ?? d.upload_id ?? "file"}`;
+		case "MEDIA_PLAN_CREATED":
+			return `Media plan created: ${d.title ?? d.plan_id ?? "plan"}`;
+		case "MEDIA_PLAN_APPROVED":
+			return `Media plan approved: ${d.plan_id ?? "plan"}`;
+		case "MEDIA_ARTICLE_ADDED":
+			return `Article drafted: ${d.title ?? d.article_id ?? "article"}`;
+		case "MEDIA_ARTICLE_PUBLISHED":
+			return `Article published to site news: ${d.article_id ?? "article"}`;
+		case "DECISION_REQUEST_CREATED":
+			return `Decision requested: ${d.title ?? d.request_id ?? "item"}`;
+		case "FUND_CREATED":
+			return `Fund created: ${d.name ?? d.fund_id ?? "fund"}`;
+		default:
+			return module ? `${module}: ${action}` : action;
+	}
+}
+
+export async function getActivityFeed(db: D1Database): Promise<Response> {
+	const items: ActivityItem[] = [];
+
+	// Owner-wide read acknowledgments (durable). Acknowledged items are
+	// still shown, but no longer flagged as requiring reading.
+	const acked = await db
+		.prepare(`SELECT item_id FROM read_acknowledgments`)
+		.all<{ item_id: string }>()
+		.then((r) => new Set((r.results ?? []).map((x) => x.item_id)))
+		.catch(() => new Set<string>());
+
+	// Recent audit events: what happened.
+	const events = await db
+		.prepare(
+			`SELECT action, module, details, created_at
+			 FROM audit_events
+			 ORDER BY created_at DESC
+			 LIMIT 30`,
+		)
+		.all<{ action: string; module: string | null; details: string | null; created_at: string }>();
+
+	for (const e of events.results ?? []) {
+		const id = `audit-${e.action}-${e.created_at}`;
+		items.push({
+			id,
+			ts: e.created_at,
+			label: activityLabel(e.action, e.module ?? "", e.details),
+			detail: null,
+			kind: "event",
+			requires_reading: false,
+			acknowledged: acked.has(id),
+		});
+	}
+
+	// Queues that require the owner's eyes.
+	const pendingRequests = await db
+		.prepare(
+			`SELECT request_id, title, created_at
+			 FROM decision_requests
+			 WHERE status = 'PENDING'
+			 ORDER BY created_at DESC
+			 LIMIT 10`,
+		)
+		.all<{ request_id: string; title: string | null; created_at: string }>()
+		.catch(() => ({ results: [] as { request_id: string; title: string | null; created_at: string }[] }));
+
+	for (const r of pendingRequests.results ?? []) {
+		const id = `req-${r.request_id}`;
+		items.push({
+			id,
+			ts: r.created_at,
+			label: `Decision requested: ${r.title ?? r.request_id}`,
+			detail: "The machine prepared this and is waiting for owner approval.",
+			kind: "decision_request",
+			requires_reading: !acked.has(id),
+			acknowledged: acked.has(id),
+		});
+	}
+
+	const needsOwner = await db
+		.prepare(
+			`SELECT upload_id, filename, created_at
+			 FROM board_uploads
+			 WHERE route = 'NEEDS_OWNER'
+			 ORDER BY created_at DESC
+			 LIMIT 10`,
+		)
+		.all<{ upload_id: string; filename: string; created_at: string }>()
+		.catch(() => ({ results: [] as { upload_id: string; filename: string; created_at: string }[] }));
+
+	for (const u of needsOwner.results ?? []) {
+		const id = `upload-${u.upload_id}`;
+		items.push({
+			id,
+			ts: u.created_at,
+			label: `Upload needs owner review: ${u.filename}`,
+			detail: "The machine could not classify this file. Review and route it.",
+			kind: "upload_review",
+			requires_reading: !acked.has(id),
+			acknowledged: acked.has(id),
+		});
+	}
+
+	items.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
+	return response({ ok: true, items: items.slice(0, 40) });
+}
+
+// Explicit owner-wide read acknowledgment. The owner marks an activity
+// item as read; the acknowledgment is durable. There is no per-member
+// read state because there is no verified member identity.
+export async function acknowledgeRead(request: Request, db: D1Database): Promise<Response> {
+	const body = await readBody<{ item_id?: string; note?: string }>(request);
+	const itemId = (body.item_id ?? "").trim();
+	if (!itemId) {
+		return response({ ok: false, error: "item_id is required" }, 400);
+	}
+	const note = (body.note ?? "").trim() || null;
+	const now = new Date().toISOString();
+	await db
+		.prepare(
+			`INSERT INTO read_acknowledgments (item_id, acknowledged_at, note)
+			 VALUES (?, ?, ?)
+			 ON CONFLICT(item_id) DO UPDATE SET acknowledged_at = excluded.acknowledged_at, note = excluded.note`,
+		)
+		.bind(itemId, now, note)
+		.run();
+	return response({ ok: true, item_id: itemId, acknowledged_at: now });
+}
+
 export async function getOperatingCenterOverview(db: D1Database): Promise<Response> {
 	const [initiatives, boardItems, decisions, workItems, objects, publishedResults] = await Promise.all([
 		count(db, "SELECT COUNT(*) AS total FROM initiatives WHERE status IN ('NEW', 'UNDER_REVIEW', 'PROPOSED')"),
@@ -390,6 +542,41 @@ export function renderOperatingCenterHtml(): string {
 			<div id="fund-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/funds">Open funds →</a></p>
 		</section>
+		<section class="panel" id="media-card" style="margin-top:20px"><h2>Media plan</h2>
+			<p class="meta">You set the topics; the machine runs the plan and article lifecycle and drafts the articles.</p>
+			<div id="media-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/media">Open media workspace →</a></p>
+		</section>
+		<section class="panel" id="activity-panel" style="margin-top:20px"><h2>Activity: what is happening</h2>
+			<p class="meta">Newest first. Items flagged "requires reading" need the owner's eyes.</p>
+			<h3>Requires reading</h3>
+			<div id="activity-reading">Loading…</div>
+			<h3>What is new</h3>
+			<div id="activity-new">Loading…</div>
+		</section>
+		<section class="panel" id="member-actions-panel" style="margin-top:20px"><h2>What board members can do</h2>
+			<p class="meta">The operating center is the board's cockpit. Every member can:</p>
+			<ul>
+				<li><strong>Submit to the board:</strong> use the "Submit to the Board" form below to add questions, initiatives, or wishes. Submissions are collected into the weekly Sunday protocol.</li>
+				<li><strong>Upload files:</strong> use the "Board uploads" form to share contact lists, task lists, meeting material, or media drafts. The machine classifies and routes each file automatically.</li>
+				<li><strong>Review activity:</strong> check "Activity: what is happening" for new submissions, decisions, and uploads. Items under "Requires reading" need attention; mark them read when done.</li>
+				<li><strong>Track the media plan:</strong> open the <a href="/operating-center/media">Media plan</a> page to see article drafts, approvals, site publication, and press distribution.</li>
+				<li><strong>Track funds:</strong> open the <a href="/operating-center/funds">Funds</a> page for the full fundraising pipeline.</li>
+			</ul>
+			<p class="meta">Consequential actions (sends, publications, spending, agreements) always require explicit owner confirmation. The machine prepares; the owner decides.</p>
+		</section>
+		<section class="panel" id="uploads-panel" style="margin-top:20px"><h2>Board uploads</h2>
+			<p class="meta">Drop a file and the machine routes it: contacts to RunSignup staging, tasks to tracked work, discussion material to the meeting agenda, news material to media drafts. Accepted: CSV, TXT, MD, TSV, JSON. Max 512 KB.</p>
+			<form id="upload-form" enctype="multipart/form-data" style="margin-bottom:12px">
+				<label for="upload-name">Your name</label>
+				<input id="upload-name" name="submitted_by" required maxlength="120" placeholder="Who is uploading">
+				<label for="upload-file">File</label>
+				<input id="upload-file" name="file" type="file" required accept=".csv,.txt,.md,.tsv,.json">
+				<button type="submit">Upload and route</button>
+				<div class="message" id="upload-message" aria-live="polite"></div>
+			</form>
+			<div id="uploads-list">Loading…</div>
+		</section>
 		<section class="panel" id="sponsorship-panel" style="margin-top:20px"><h2>Sponsorship assets</h2>
 			<p class="meta">Machine-generated seller packages, one per object. Stages: draft → packaged → offered → negotiating → committed → fulfilled → renewal. The machine generates and tracks; seller conversations stay human.</p>
 			<form id="sponsorship-generate-form" style="margin-bottom:12px">
@@ -433,7 +620,7 @@ export function renderOperatingCenterHtml(): string {
 				<button type="submit">Submit to the Board</button><div class="message" aria-live="polite"></div>
 			</form>
 		</section>
-		<section class="grid queue"><div class="panel"><h2>Board queue</h2><div id="board-items">Loading…</div></div></section>
+		<section class="grid queue"><div class="panel"><h2>Board queue</h2><div id="board-items">Loading…</div><p class="meta">Submissions join the nearest upcoming meeting protocol automatically. Open the Board meetings panel to triage.</p></div></section>
 		</div>
 	</main>
 	<script>
@@ -454,9 +641,12 @@ export function renderOperatingCenterHtml(): string {
 			pendingSubmissionsCache=b.submissions||[];
 			const labels={pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results'};
 			document.querySelector('#stats').innerHTML=Object.entries(o.counts).map(([k,v])=>'<div class="stat"><strong>'+esc(v)+'</strong><span>'+esc(labels[k]||k)+'</span></div>').join('');
-			document.querySelector('#board-items').innerHTML=b.submissions.length?b.submissions.map(x=>'<div class="item"><strong>'+esc(x.title)+'</strong><div class="meta">'+esc(x.submission_type)+' · '+esc(x.submitted_by)+' · '+esc(x.status)+'</div></div>').join(''):'<div class="unavailable">No pending Board items.</div>';
+			document.querySelector('#board-items').innerHTML=b.submissions.length?'<div class="meta">'+b.submissions.length+' pending submissions awaiting triage. The next meeting protocol forms automatically on Sunday.</div>':'<div class="unavailable">No pending Board items.</div>';
 			loadLifecycleSummary();
 			loadFundSummary();
+			loadMediaSummary();
+			loadActivity();
+			loadUploads();
 			loadSponsorshipAssets();
 			loadMeetings();
 			loadWorkItems();
@@ -475,28 +665,50 @@ export function renderOperatingCenterHtml(): string {
 					'<div class="meta">'+data.funds.map(f=>esc(f.fund.name)).join(' · ')+'</div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
+		async function loadMediaSummary(){
+			const box=document.querySelector('#media-summary');
+			try{
+				const data=await api('/api/operating-center/media/overview');
+				if(!data.plans.length){box.innerHTML='<div class="unavailable">No media plans yet. Create one in the media workspace.</div>';return}
+				box.innerHTML=data.plans.map(p=>'<div class="item"><strong>'+esc(p.title)+'</strong><div class="meta">'+esc(p.status)+' · '+p.article_count+' article'+(p.article_count===1?'':'s')+' ('+p.ready_count+' ready, '+p.published_count+' published)</div></div>').join('');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadActivity(){
+			const reading=document.querySelector('#activity-reading');
+			const fresh=document.querySelector('#activity-new');
+			try{
+				const data=await api('/api/operating-center/activity');
+				const req=data.items.filter(i=>i.requires_reading);
+				const rest=data.items.filter(i=>!i.requires_reading);
+				reading.innerHTML=req.length?req.map(i=>'<div class="item"><strong>'+esc(i.label)+'</strong>'+(i.detail?'<div class="meta">'+esc(i.detail)+'</div>':'')+'<div class="meta">'+esc(i.ts)+'</div><button data-ack="'+esc(i.id)+'" style="width:auto">Mark as read</button></div>').join(''):'<div class="unavailable">Nothing requires reading.</div>';
+				fresh.innerHTML=rest.length?rest.slice(0,10).map(i=>'<div class="item">'+esc(i.label)+'<div class="meta">'+esc(i.ts)+'</div></div>').join(''):'<div class="unavailable">No recent activity.</div>';
+				reading.querySelectorAll('[data-ack]').forEach(btn=>btn.addEventListener('click',()=>ackRead(btn.dataset.ack)));
+			}catch(err){reading.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>';fresh.innerHTML=''}
+		}
+		async function ackRead(itemId){
+			try{
+				await api('/api/operating-center/activity/acknowledge',{method:'POST',body:JSON.stringify({item_id:itemId})});
+				loadActivity();
+			}catch(err){alert('Failed: '+err.message)}
+		}
+		async function loadUploads(){
+			const box=document.querySelector('#uploads-list');
+			try{
+				const data=await api('/api/operating-center/uploads');
+				if(!data.uploads.length){box.innerHTML='<div class="unavailable">No uploads yet.</div>';return}
+				box.innerHTML=data.uploads.map(u=>'<div class="item"><strong>'+esc(u.filename)+'</strong><div class="meta">'+esc(u.route_label)+' · '+esc(u.classification)+' · '+esc(u.submitted_by)+' · '+esc(u.created_at)+'</div>'+(u.staged_csv_url?'<div class="meta"><a href="'+esc(u.staged_csv_url)+'">Download staged contacts CSV</a> (import by hand in RunSignup Email Marketing)</div>':'')+'</div>').join('');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
 		async function loadSponsorshipAssets(){
 			const box=document.querySelector('#sponsorship-assets');
-			const order=['draft','packaged','offered','negotiating','committed','fulfilled','renewal'];
 			const label={draft:'Draft',packaged:'Packaged',offered:'Offered',negotiating:'Negotiating',committed:'Committed',fulfilled:'Fulfilled',renewal:'Renewal'};
 			try{
 				const data=await api('/api/operating-center/sponsorship-assets');
 				if(!data.assets.length){box.innerHTML='<div class="unavailable">No sponsorship assets yet. Generate one above.</div>';return}
-				box.innerHTML=data.assets.map(a=>{
-					const next=order[order.indexOf(a.stage)+1];
-					const btn=next?'<button data-sasset-advance="'+esc(a.id)+'" data-to="'+esc(next)+'" style="width:auto">Move to '+esc(label[next])+'</button>':'<span class="meta">Terminal stage</span>';
-					return '<div class="item"><strong>'+esc(a.title)+'</strong>'+
-						'<div class="meta">'+esc(a.object_type)+' · '+esc(a.object_id)+' · stage '+esc(label[a.stage]||a.stage)+'</div>'+
-						'<div class="meta">Audience: '+esc(a.audience)+'</div>'+
-						'<div class="meta">Delivers: '+esc(a.delivers)+'</div>'+
-						'<div class="meta">Pricing: '+esc(a.reference_pricing)+'</div>'+
-						'<div class="meta">Next: '+esc(a.next_action)+'</div>'+
-						'<div>'+btn+'</div></div>';
-				}).join('');
-				box.querySelectorAll('[data-sasset-advance]').forEach(btn=>btn.addEventListener('click',async()=>{
-					const m=document.querySelector('#sponsorship-message');m.textContent='Moving…';
-					try{await api('/api/operating-center/sponsorship-assets/advance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({asset_id:btn.dataset.sassetAdvance,to_stage:btn.dataset.to})});m.textContent='Moved.';await loadSponsorshipAssets()}catch(err){m.textContent=err.message}
-				}));
+				const byStage={};
+				data.assets.forEach(a=>{byStage[a.stage]=(byStage[a.stage]||0)+1});
+				const summary=Object.entries(byStage).map(([s,c])=>esc(label[s]||s)+': <strong>'+c+'</strong>').join(' · ');
+				box.innerHTML='<div class="meta">'+summary+'</div><div class="meta">'+data.assets.length+' total assets. Use the Generate form above to create new packages; stage advancement is available on the full asset view.</div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		document.querySelector('#sponsorship-generate-form').addEventListener('submit',async(e)=>{
@@ -507,6 +719,21 @@ export function renderOperatingCenterHtml(): string {
 				const data=await api('/api/operating-center/sponsorship-assets/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({object_type:fd.object_type,object_id:fd.object_id})});
 				m.textContent=data.generated?'Package generated.':'Package already exists.';
 				await loadSponsorshipAssets();
+			}catch(err){m.textContent=err.message}
+		});
+		document.querySelector('#upload-form').addEventListener('submit',async(e)=>{
+			e.preventDefault();
+			const m=document.querySelector('#upload-message');m.textContent='Uploading and routing…';
+			try{
+				const fd=new FormData(e.target);
+				const file=fd.get('file');
+				if(file&&file.size>512*1024){m.textContent='File is too large. Maximum 512 KB.';return}
+				const res=await fetch('/api/operating-center/uploads',{method:'POST',headers:{'x-operating-center-key':getKey()},body:fd});
+				const data=await res.json();
+				if(!res.ok)throw new Error(data.error||'Upload failed');
+				m.textContent='Uploaded and routed: '+data.route_label+'.';
+				e.target.reset();
+				await loadUploads();
 			}catch(err){m.textContent=err.message}
 		});
 		async function loadLifecycleSummary(){
@@ -623,28 +850,14 @@ export function renderOperatingCenterHtml(): string {
 		}
 		async function loadWorkItems(){
 			const box=document.querySelector('#work-items');
-			const NEXT={READY:['IN_PROGRESS','BLOCKED'],IN_PROGRESS:['READY','BLOCKED','DONE'],BLOCKED:['READY','IN_PROGRESS']};
 			try{
 				const data=await api('/api/board/work-items');
 				if(!data.work_items.length){box.innerHTML='<div class="unavailable">No active work items. Confirmed Board decisions with a responsible person or due date appear here.</div>';return}
-				box.innerHTML=data.work_items.map(w=>{
-					const nexts=NEXT[w.status]||[];
-					const btns=nexts.map(n=>'<button data-wi-advance="'+esc(w.work_item_id)+'" data-to="'+n+'" style="width:auto">Move to '+n.toLowerCase().replace(/_/g,' ')+'</button>').join(' ');
-					return '<div class="item"><strong>'+esc(w.title)+'</strong>'+
-						'<div class="meta">'+esc(w.status)+(w.assigned_to?' · '+esc(w.assigned_to):'')+(w.due_date?' · due '+esc(String(w.due_date).slice(0,10)):'')+(w.meeting_title?' · '+esc(w.meeting_title):'')+'</div>'+
-						(w.blocker?'<div class="meta">Blocker: '+esc(w.blocker)+'</div>':'')+
-						'<div class="meta">Next: '+esc(w.next_action)+'</div>'+
-						(btns?'<div>'+btns+'</div>':'')+'</div>';
-				}).join('');
-				box.querySelectorAll('[data-wi-advance]').forEach(btn=>btn.addEventListener('click',async()=>{
-					const m=document.querySelector('#workitem-message');m.textContent='Moving…';
-					try{
-						let blocker=null;
-						if(btn.dataset.to==='BLOCKED'){blocker=prompt('What is blocking this work item?')||''}
-						await api('/api/board/work-items/advance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({work_item_id:btn.dataset.wiAdvance,to_status:btn.dataset.to,blocker})});
-						m.textContent='Moved.';await loadWorkItems();
-					}catch(err){m.textContent=err.message}
-				}));
+				const byStatus={};
+				data.work_items.forEach(w=>{byStatus[w.status]=(byStatus[w.status]||0)+1});
+				const summary=Object.entries(byStatus).map(([s,c])=>esc(s)+': <strong>'+c+'</strong>').join(' · ');
+				const overdue=data.work_items.filter(w=>w.due_date && new Date(w.due_date)<new Date() && w.status!=='DONE').length;
+				box.innerHTML='<div class="meta">'+summary+'</div>'+(overdue?'<div class="meta" style="color:#a00">'+overdue+' overdue</div>':'')+'<div class="meta">'+data.work_items.length+' active items. Open a meeting workspace above to manage individual items.</div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}

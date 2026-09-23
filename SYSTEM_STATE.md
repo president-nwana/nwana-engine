@@ -652,6 +652,16 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Local verification: Vitest 158/158 (9 new board tests), `npx tsc --noEmit` clean.
 - Deployed 2026-09-22: engine Worker `nwana-engine` version `da3eb365-ae4f-4ca3-8675-40eefadf1d22` (commit `6ff20a28`). Live checks: `/operating-center` 200; all new board/initiative endpoints 401 without the owner key. Note: the first deploy of this change briefly left `/api/initiatives/advance` outside the owner-key gate (the gate matched `/api/initiatives` exactly); fixed, re-pushed, redeployed, and re-verified 401.
 
+## OPERATING CENTER COMPLETION — IMPLEMENTED 2026-09-22 (ADR-0021, ADR-0024)
+
+- Media plan as a machine object (ADR-0021): `media_plans` and `media_articles` tables (migration 0027). Plan DRAFT to DONE; article DRAFT to PUBLISHED. No seeded plans or invented topics. Workspace at `/operating-center/media` (owner-key protected); main page shows compact summary. Site publication is owner-confirmed per article (writes to `site_news`). External press distribution is a separate owner-confirmed action per published article (migration 0029, `media_distributions`); the machine records channel/outlet/time/notes, the send is manual. RunSignup is not involved in the media flow.
+- Board protocol event-driven (ADR-0024, no cron/timers/polling per owner rule 2026-09-19): `reconcileProtocolIfDue` runs on owner-authorized operating-center activity. Submissions auto-attach to the nearest meeting. `POST /api/board/protocol/form` and `/process` for explicit formation and post-meeting processing. Honest limitation: no owner activity in a week means no protocol forms.
+- Board uploads with machine routing (migration 0028, `board_uploads`): accepts CSV/TXT/MD/TSV/JSON, max 512 KB, validation before routing, no silent truncation. Routes: RUNSIGNUP_CONTACTS (parsed, deduplicated, staged CSV for manual import), WORK_ITEM, MEETING_AGENDA, MEDIA_DRAFT, NEEDS_OWNER. Contact content never in ordinary list views.
+- Activity feed (`GET /api/operating-center/activity`): what is happening (audit events), what is new, what requires reading. Durable owner-wide read acknowledgment in D1 (migration 0030, `read_acknowledgments`); no per-member read state claimed.
+- Main page compacted: sponsorship assets, work items, board queue show summaries. New "What board members can do" panel.
+- Local verification: Vitest 179/179, `npx tsc --noEmit` clean, inline script syntax regression test passes.
+- Production deployment: pending (migrations 0027, 0028, 0029, 0030 not yet applied to remote D1; code not yet deployed).
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.
