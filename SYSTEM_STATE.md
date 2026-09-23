@@ -699,6 +699,14 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Do not infer that source_id 209464 is a race.
 - Do not treat REGISTRATION as active for 209464: it is platform-available but hidden, unconfigured for NWANA use, and not a public conversion path.
 
+## ADR-0031 — UNIVERSAL GOOGLE ADS PROPOSAL ENGINE (2026-09-23)
+
+- Replaces the two hardcoded builders (`series2026Campaign()`, `foundingCircleCampaign()`) and the hardcoded Series conflict branch in the Ads screen with one universal pipeline: `SOURCE / OWNER TASK -> NORMALIZED CAMPAIGN INTENT -> CAMPAIGN SPEC -> POLICY VALIDATION -> LIVE DUPLICATE CHECK -> MACHINE PROPOSAL -> OWNER REVIEW`.
+- New modules: `src/google-ads-intent.ts` (normalized intent, deterministic `origin:source_identity:purpose` identity, source adapters for registry objects, funds, sponsorship assets, owner directives; adapters never invent content and never decide policy/eligibility/duplicates), `src/google-ads-proposals.ts` (generic CampaignSpec builder, data-driven conflict matcher with exact-name plus `VERIFIED_CONFLICT_MAPPINGS`, generic state precedence missing input -> POLICY_REVIEW -> POSSIBLE DUPLICATE / REVIEW -> PROPOSED), `src/google-ads-current.ts` (migration: Series and Founding Circle intents through the same adapters with the existing factual copy as explicit hints; `buildDesiredState` output byte-identical).
+- Stable proposal IDs: `OBJECT_DERIVED:NWANA-RACE-000001:VIRTUAL_RACES`, `OWNER_DIRECTIVE:DIR-FOUNDING-CIRCLE-2026:FOUNDING_CIRCLE`. Production states unchanged: Series `POSSIBLE DUPLICATE / REVIEW` (verified mapping to "2026 NWANA Open Nordic Walking Series"), Founding Circle `PROPOSED`.
+- New regression suite `test/google-ads-proposals.spec.ts`: adapters, incomplete Fund/Sponsorship Asset (no invented content, exact missing fields), deterministic IDs, eligibility, state precedence, exact-name and mapping conflicts, no false duplicates, zero mutations, removal of the two hardcoded builders.
+- No orchestration layer, no external paid AI/API, no cron/polling, no copy generation, zero Google Ads mutations, no changes to live GAQL/date range/OAuth/customer ID/API version/Analytics/mutation state/reconcile. ADR: `docs/adr/ADR-0031-universal-google-ads-proposal-engine.md`.
+
 ## ADR-0030 — ADS SCREEN SHOWS THE REAL LIVE ACCOUNT, READ-ONLY (2026-09-23)
 
 - `src/google-ads.ts` gains `getGoogleAdsAccountSnapshot()`: one bounded read-only GAQL request per call via the existing OAuth integration (no mutations, no polling, nothing written to D1). It returns per-campaign name, status, daily budget, impressions, clicks, conversions, cost for `DURING LAST_30_DAYS`, excluding REMOVED campaigns, from `customers/6758500147`.
