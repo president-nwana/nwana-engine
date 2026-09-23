@@ -93,8 +93,8 @@ export interface SponsorshipAssetRow {
 	id: string;
 	title: string;
 	stage: string;
-	parent_object_type: string;
-	parent_object_id: string;
+	object_type: string;
+	object_id: string;
 }
 
 /** Explicit owner instructions. Not derived from any source object or rule. */
@@ -349,22 +349,22 @@ export function adaptSponsorshipAssetSources(
 	return rows.map((row) => ({
 		source_identity: row.id,
 		source_kind: "SPONSORSHIP_ASSET" as const,
-		canonical_object_id: row.parent_object_id || null,
+		canonical_object_id: row.object_id || null,
 		factual_title: row.title,
 		status: row.stage,
 		purpose: null,
 		capabilities: [],
-		relationships: row.parent_object_id
-			? [{ type: "PARENT_OBJECT", target_identity: row.parent_object_id }]
+		relationships: row.object_id
+			? [{ type: "PARENT_OBJECT", target_identity: row.object_id }]
 			: [],
 		public_destinations: [],
 		conversion_capabilities: [],
 		distribution_actions: [],
-		source_facts: [`Parent object type ${row.parent_object_type}.`],
+		source_facts: [`Parent object type ${row.object_type}.`],
 		owner_directive: null,
 		provenance: {
 			store: "D1 sponsorship_assets table",
-			reader: "SELECT id, title, stage, parent_object_type, parent_object_id FROM sponsorship_assets",
+			reader: "SELECT id, title, stage, object_type, object_id FROM sponsorship_assets",
 			adapter: "adaptSponsorshipAssetSources",
 		},
 	}));
@@ -397,7 +397,7 @@ export async function collectD1Sources(
 	const assetRows = (
 		await db
 			.prepare(
-				"SELECT id, title, stage, parent_object_type, parent_object_id FROM sponsorship_assets",
+				"SELECT id, title, stage, object_type, object_id FROM sponsorship_assets",
 			)
 			.all<SponsorshipAssetRow>()
 	).results;
