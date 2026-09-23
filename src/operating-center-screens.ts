@@ -10,7 +10,7 @@
 
 import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
 import { getFundView } from "./fund";
-import { buildDesiredState, validateCampaignSpec, type CampaignSpec, type DesiredState, type SourceObjectLink } from "./google-ads-state";
+import { buildDesiredState, validateCampaignSpec, type CampaignSpec, type DesiredState, type DistributionLink, type SourceObjectLink } from "./google-ads-state";
 // ADR-0029: the Ads screen reads the real Google Ads connection state from
 // the existing live integration (src/google-ads.ts), never a hardcoded flag.
 // ADR-0030: the screen is a read-only operational view of the real account:
@@ -276,6 +276,8 @@ export interface MachineProposal {
 	target_url: string;
 	/** Real source object from the spec, or null when not yet linked (never fabricated). */
 	source_object: SourceObjectLink | null;
+	/** Distribution-planner backing from the spec (never fabricated). */
+	distribution: DistributionLink;
 	ad_groups: MachineProposalAdGroup[];
 	/** Result of the existing Ad Grants policy validator (validateCampaignSpec). */
 	policy_violations: string[];
@@ -320,6 +322,12 @@ export function buildMachineProposals(
 			// with precisely this name already exists.
 			status = "POSSIBLE DUPLICATE / REVIEW";
 			nextAction = "Review against the existing live campaign before any creation";
+		} else if (!campaign.distribution.creation_eligible) {
+			// A proposal without a confirmed Google Ads distribution
+			// action is never creation-eligible. It stays visible as a
+			// legacy machine proposal, but the status stays honest.
+			status = "NO DISTRIBUTION RULE";
+			nextAction = "Define an explicit Google Ads distribution rule before creation";
 		} else {
 			status = "PROPOSED";
 			nextAction = "Needs owner review before creation";
@@ -331,6 +339,7 @@ export function buildMachineProposals(
 			daily_budget: campaign.daily_budget,
 			target_url: proposalTargetUrl(campaign),
 			source_object: campaign.source_object,
+			distribution: campaign.distribution,
 			ad_groups: campaign.ad_groups.map((g) => ({
 				name: g.name,
 				default_cpc: g.default_cpc,
@@ -463,6 +472,10 @@ const ADS_SCRIPT = `
 					html+='<div class="meta">'+label+'</div>';
 				}
 				else{html+='<div class="meta">Source object: not yet linked</div>';}
+				html+='<div class="meta">Distribution rule: '+(p.distribution.rule_id?esc(p.distribution.rule_id):'none')+'</div>';
+				html+='<div class="meta">Distribution action: '+(p.distribution.action_id?esc(p.distribution.action_id):'none')+'</div>';
+				html+='<div class="meta">Channel: '+(p.distribution.channel?esc(p.distribution.channel):'none')+'</div>';
+				html+='<div class="meta">Creation eligibility: '+(p.distribution.creation_eligible?'eligible':'not eligible')+'</div>';
 				for(const g of (p.ad_groups||[])){
 					const kws=(g.keywords||[]).map(function(k){return esc(k.text)+' ('+esc(k.match_type)+')';}).join(', ');
 					html+='<div class="detail"><b>'+esc(g.name)+':</b> max CPC $'+Number(g.default_cpc).toFixed(2)+', '+g.ads_count+' ads<br>Keywords: '+kws+'</div>';
@@ -1377,6 +1390,10 @@ export function buildAdsReport(data: AdsOverview): string {
 		} else {
 			body += `<p>Source object: not yet linked</p>`;
 		}
+		body += `<p>Distribution rule: ${p.distribution.rule_id ? escHtml(p.distribution.rule_id) : "none"}</p>`;
+		body += `<p>Distribution action: ${p.distribution.action_id ? escHtml(p.distribution.action_id) : "none"}</p>`;
+		body += `<p>Channel: ${p.distribution.channel ? escHtml(p.distribution.channel) : "none"}</p>`;
+		body += `<p>Creation eligibility: ${p.distribution.creation_eligible ? "eligible" : "not eligible"}</p>`;
 		for (const g of p.ad_groups) {
 			const kws = g.keywords.map((k) => `${escHtml(k.text)} (${escHtml(k.match_type)})`).join(", ");
 			body += `<p><strong>${escHtml(g.name)}:</strong> max CPC $${g.default_cpc.toFixed(2)}, ${g.ads_count} ads<br>Keywords: ${kws}</p>`;
