@@ -76,39 +76,6 @@ CANONICAL SOURCES / TASKS
   `ORCHESTRATION DECISIONS` block. Live account, orchestration decisions,
   and machine proposals are three separate logical layers, never merged.
 
-## Amendment 2026-09-23: generic fundraising rule and confirmed donation destinations
-
-- `NormalizedSource` now carries `donation_destinations` (mandatory field;
-  empty is a factual statement, not an error). Each destination carries
-  per-destination provenance: `{ store, reader, adapter }`. All source
-  adapters populate the field.
-- One owner-approved generic rule in the core (`src/orchestration.ts`):
-  `RULE-FUNDRAISING-PUBLIC-DONATION-GOOGLE-ADS`, `version "1"`. The rule is
-  source-type agnostic: it reads only confirmed `purpose`/`capabilities` and
-  `donation_destinations`, never source kind, id, or name. The condition
-  fires when `HAS_CONFIRMED_FUNDRAISING_OR_DONATION_PURPOSE_OR_CAPABILITY`
-  AND `HAS_CONFIRMED_PUBLIC_DONATION_DESTINATION` (a destination is
-  confirmed only when it has recorded provenance). Output is exact:
-  required result `Raise donations`, candidate action
-  `Acquire donors via search`, channel `GOOGLE_ADS`.
-- A fundraising/donation fact without a confirmed destination is a
-  `MISSING_DECISION_INPUT` decision with the exact missing string
-  `confirmed public donation destination missing`. The factual reason
-  explicitly forbids homepage substitution and guessed or constructed
-  URLs. No homepage is ever substituted for a donation destination.
-- The ID-specific special case for `fund-50k-bridge-sprint` was removed from
-  `adaptFundSources()`: the D1 funds table has no destination field, so all
-  fund rows adapt factually with empty `donation_destinations` (the adapter
-  records this fact in the source facts). Source-id branching in adapters is
-  forbidden.
-- The Founding Circle owner directive now carries the confirmed RunSignup
-  donation URL (with provenance) and the `DONATION` capability. The generic
-  rule therefore fires for Founding Circle alongside the owner-directive
-  decision; the Google Ads consumer dedupes by proposal identity and the
-  directive-shaped intent wins (no duplicate proposal).
-- `OrchestrationEvidence` now includes `genericRules`; a new
-  `DecisionEvidenceKind` `GENERIC_RULE` references the rule id exactly.
-
 ## Consequences
 
 - The generic consumer contract is the `NormalizedSource` ->

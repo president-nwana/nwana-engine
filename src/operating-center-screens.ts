@@ -20,6 +20,11 @@ import type { NormalizedCampaignIntent } from "./google-ads-intent";
 // ADR-0030: the screen is a read-only operational view of the real account:
 // live campaigns come from the Google Ads API, never from the planned spec.
 import { getGoogleAdsStatus, getGoogleAdsAccountSnapshot, GOOGLE_ADS_LIVE_CUSTOMER_ID, GOOGLE_ADS_METRICS_LABEL, type GoogleAdsEnv, type GoogleAdsLiveCampaign } from "./google-ads";
+// ADR-0032: the Ads screen shows the machine's orchestration decisions
+// (source -> required result -> candidate action -> channel) as their own
+// logical layer, separate from the live account and the machine proposals.
+import { getOrchestrationDecisions } from "./orchestration-google-ads";
+import type { OrchestrationDecision } from "./orchestration";
 
 export type ReportScreenId =
 	| "sites"
@@ -257,6 +262,10 @@ export interface AdsOverview {
 	// status, the Ad Grants policy validation result (from the existing
 	// validator), and the next action. Never mixed with live campaigns.
 	machine_proposals: MachineProposal[];
+	// ADR-0032: orchestration decisions (source -> required result ->
+	// candidate action -> channel decision). The machine's own logical
+	// layer, separate from the live account and the machine proposals.
+	orchestration: OrchestrationDecision[];
 	// What the screen currently shows (real connection state plus the
 	// planned spec). Google Analytics is deliberately untouched here.
 	capabilities: string[];
@@ -325,6 +334,12 @@ export async function getAdsOverview(
 			campaigns: [],
 		};
 	}
+	// ADR-0032: build proposals once, then attach the downstream proposal
+	// state to the Google Ads orchestration decisions so the owner sees
+	// decision -> intent -> proposal as separate logical layers in one view.
+	const proposals = buildMachineProposals(currentProposalIntents(), liveAccount.campaigns);
+	const downstream = new Map(proposals.map((p) => [p.proposal_id, p.state]));
+	const orchestration = await getOrchestrationDecisions(env.nwana_engine_db, downstream);
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
@@ -351,12 +366,16 @@ export async function getAdsOverview(
 				keywords: g.keywords.map((k) => k.text + " [" + k.match_type + "]"),
 			})),
 		})),
-		machine_proposals: buildMachineProposals(currentProposalIntents(), liveAccount.campaigns),
+		machine_proposals: proposals,
+		// ADR-0032: orchestration decisions are their own logical layer,
+		// separate from the live account and the machine proposals.
+		orchestration,
 		capabilities: [
 			"Real Google Ads connection state (connected or the actual error)",
 			"Access level and accessible customer account(s)",
 			"Campaign creation/mutation status (currently disabled)",
 			"Live campaign data from the connected account (read-only)",
+			"Orchestration decisions: source, required result, candidate action, channel (read-only)",
 			"Machine campaign proposals (owner review required)",
 		],
 	};
@@ -393,6 +412,26 @@ const ADS_SCRIPT = `
 				}
 			}
 			html+='<div class="item"><strong>Google Analytics<span class="badge-warn">Not set up</span></strong><div class="detail">'+esc(data.google_analytics.note)+'</div></div>';
+			html+='<h3>ORCHESTRATION DECISIONS</h3><p class="meta">What the machine decided for every known source: required result, candidate action, channel. Sources with no evidence stay undecided; incomplete evidence is reported, never guessed. Read-only.</p>';
+			for(const d of (data.orchestration||[])){
+				const dBadge=d.state==='DECIDED'?'<span class="badge-ok">'+esc(d.state)+'</span>':'<span class="badge-warn">'+esc(d.state)+'</span>';
+				html+='<div class="item"><strong>'+esc(d.source_identity)+' '+dBadge+'</strong>'
+					+'<div class="meta">Decision ID: '+esc(d.decision_id)+'</div>'
+					+'<div class="meta">Source: '+esc(d.source_kind)+(d.purpose?' &middot; Purpose: '+esc(d.purpose):'')+'</div>';
+				if(d.required_result){html+='<div class="detail">Required result: '+esc(d.required_result)+'</div>';}
+				if(d.candidate_action){html+='<div class="detail">Candidate action: '+esc(d.candidate_action)+'</div>';}
+				html+='<div class="meta">Channel: '+(d.channel?esc(d.channel):'none')+(d.priority!=null?' &middot; Priority: '+esc(String(d.priority)):'')+'</div>';
+				if((d.evidence||[]).length>0){
+					html+='<div class="meta">Evidence: '+d.evidence.map(function(e){return esc(e.kind)+' '+esc(e.reference);}).join('; ')+'</div>';
+				}
+				if((d.missing_decision_input||[]).length>0){
+					html+='<div class="meta">Missing decision input: '+d.missing_decision_input.map(esc).join('; ')+'</div>';
+				}
+				if(d.channel_intent_id){html+='<div class="meta">Channel intent: '+esc(d.channel_intent_id)+'</div>';}
+				if(d.downstream){html+='<div class="meta">Downstream ('+esc(d.downstream.consumer)+'): '+esc(d.downstream.state)+'</div>';}
+				if(d.execution_mode){html+='<div class="meta">Execution mode: '+esc(d.execution_mode)+'</div>';}
+				html+='<div class="detail">'+esc(d.factual_reason)+'</div></div>';
+			}
 			html+='<h3>MACHINE PROPOSALS</h3><p class="meta">What the machine proposes to create. Campaign creation is disabled; the owner reviews every proposal before anything is created.</p>';
 			for(const p of (data.machine_proposals||[])){
 				const st=p.state==='PROPOSED'?'<span class="badge-ok">'+esc(p.state)+'</span>':'<span class="badge-warn">'+esc(p.state)+'</span>';
@@ -1315,6 +1354,36 @@ export function buildAdsReport(data: AdsOverview): string {
 		}
 	}
 	body += `<p><strong>Google Analytics</strong> <span class="tag-warn">Not set up</span></p><p>${escHtml(data.google_analytics.note)}</p>`;
+	body += `<h2>ORCHESTRATION DECISIONS</h2>`;
+	body += `<p class="note">What the machine decided for every known source: required result, candidate action, channel. Sources with no evidence stay undecided; incomplete evidence is reported, never guessed. Read-only.</p>`;
+	for (const d of data.orchestration) {
+		body += `<h3>${escHtml(d.source_identity)} <span class="${d.state === "DECIDED" ? "tag" : "tag-warn"}">${escHtml(d.state)}</span></h3>`;
+		body += `<p>Decision ID: ${escHtml(d.decision_id)}</p>`;
+		body += `<p>Source: ${escHtml(d.source_kind)}${d.purpose ? `; purpose: ${escHtml(d.purpose)}` : ""}</p>`;
+		if (d.required_result) {
+			body += `<p>Required result: ${escHtml(d.required_result)}</p>`;
+		}
+		if (d.candidate_action) {
+			body += `<p>Candidate action: ${escHtml(d.candidate_action)}</p>`;
+		}
+		body += `<p>Channel: ${d.channel ? escHtml(d.channel) : "none"}${d.priority != null ? `; priority: ${d.priority}` : ""}</p>`;
+		if (d.evidence.length > 0) {
+			body += `<p>Evidence: ${d.evidence.map((e: { kind: string; reference: string }) => `${escHtml(e.kind)} ${escHtml(e.reference)}`).join("; ")}</p>`;
+		}
+		if (d.missing_decision_input.length > 0) {
+			body += `<p>Missing decision input: ${d.missing_decision_input.map(escHtml).join("; ")}</p>`;
+		}
+		if (d.channel_intent_id) {
+			body += `<p>Channel intent: ${escHtml(d.channel_intent_id)}</p>`;
+		}
+		if (d.downstream) {
+			body += `<p>Downstream (${escHtml(d.downstream.consumer)}): ${escHtml(d.downstream.state)}</p>`;
+		}
+		if (d.execution_mode) {
+			body += `<p>Execution mode: ${escHtml(d.execution_mode)}</p>`;
+		}
+		body += `<p>${escHtml(d.factual_reason)}</p>`;
+	}
 	body += `<h2>MACHINE PROPOSALS</h2>`;
 	body += `<p class="note">What the machine proposes to create. Campaign creation is disabled; the owner reviews every proposal before anything is created.</p>`;
 	for (const p of data.machine_proposals) {
