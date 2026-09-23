@@ -683,6 +683,15 @@ No RunSignup webhook, Cloudflare Queue consumer, or other automatic result event
 - Local verification: Vitest 217/217 (12 new tests in `test/operating-center-split.spec.ts`: menu lists all 8 pages with correct active state under the header on every page, main page carries only summary cards, both new pages carry full functionality, `new Function` script-parse regression tests for both new pages), `npx tsc --noEmit` clean.
 - Production deployment: 2026-09-23, Worker `nwana-engine` version `aed66454-3066-43f8-92a3-022f59de1f04` (commit `f3b16801`). Live verification: all 8 pages (`/operating-center`, `/results`, `/funds`, `/media`, `/board`, `/uploads`, `/sponsorship`, `/activity`) return 200 with the 8-button menu; main page carries only summary cards; new pages carry full functionality; `/api/operating-center/activity`, `/api/operating-center/sponsorship-assets`, `/api/operating-center/fund`, `/api/board/meetings` return 401 without the owner key; live inline scripts parse on all pages. Note: this deploy also restored ADR-0025 (self-running board loop) to production - the previous production version `0873a096` (commit `3c18317`) did not include it.
 
+## SEVEN NEW SCREENS WITH DOWNLOADABLE REPORTS — IMPLEMENTED 2026-09-23 (ADR-0027)
+
+- New screens per owner order: Sites, Social, Ads, Sellers, Partners, Fundraising, NW Groups (`src/operating-center-screens.ts`). Menu is now 15 buttons, wrapping flex row, `aria-current="page"` on the active page. Sponsorship page untouched per owner order.
+- Every new screen has a "Download report" button: `GET /api/operating-center/report/<screen>` (owner-key protected) returns a self-contained print-friendly HTML document (`nwana-<screen>-report-YYYY-MM-DD.html`) with current real data, report date, no keys, no internal notes, no email addresses. The sellers report answers what Zubie Five asked 2026-09-22 (group size: not yet tracked; Series reach: weekly races described, registration counts not tracked; brands: no signed relationships, outreach listed factually).
+- No-fabrication rule: unconnected sources render honest states (Sites analytics not connected; Social only verified stats — LinkedIn 8 followers observed 2026-09-22; Ads not connected / Analytics not set up with the 2 planned campaigns labeled machine spec, not live; Groups counts not yet tracked; Partners shows the registry's single AARP draft entry).
+- New JSON overview APIs `/api/operating-center/<screen>/overview` (7), all 401 without the owner key. No migration, no auth change.
+- Local verification: Vitest 246/246 (29 new tests in `test/operating-center-screens.spec.ts`), `tsc --noEmit` clean, `new Function` script-parse regression tests for all 7 new pages and the main page.
+- Production deployment: PENDING (record worker version and live verification here after deploy).
+
 ## DO NOT
 
 - Do not seed remote D1 Registry data yet.

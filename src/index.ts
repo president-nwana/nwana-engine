@@ -71,6 +71,29 @@ import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
 import { renderUploadsHtml } from "./operating-center-uploads";
 import {
+	renderSitesHtml,
+	renderSocialHtml,
+	renderAdsHtml,
+	renderSellersHtml,
+	renderPartnersHtml,
+	renderFundraisingHtml,
+	renderGroupsHtml,
+	getSitesOverview,
+	getSocialOverview,
+	getAdsOverview,
+	getSellersOverview,
+	getPartnersOverview,
+	getFundraisingOverview,
+	getGroupsOverview,
+	buildSitesReport,
+	buildSocialReport,
+	buildAdsReport,
+	buildSellersReport,
+	buildPartnersReport,
+	buildFundraisingReport,
+	buildGroupsReport,
+} from "./operating-center-screens";
+import {
 	createMediaPlan,
 	composeMediaPlan,
 	listMediaPlans,
@@ -5698,7 +5721,14 @@ export default {
 					url.pathname === "/operating-center/board" ||
 					url.pathname === "/operating-center/uploads" ||
 					url.pathname === "/operating-center/sponsorship" ||
-					url.pathname === "/operating-center/activity")
+					url.pathname === "/operating-center/activity" ||
+					url.pathname === "/operating-center/sites" ||
+					url.pathname === "/operating-center/social" ||
+					url.pathname === "/operating-center/ads" ||
+					url.pathname === "/operating-center/sellers" ||
+					url.pathname === "/operating-center/partners" ||
+					url.pathname === "/operating-center/fundraising" ||
+					url.pathname === "/operating-center/groups")
 			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
@@ -5788,6 +5818,89 @@ export default {
 					"cache-control": "no-store",
 				},
 			});
+		}
+
+		// ADR-0027: seven new screens, each with a downloadable report.
+		const htmlPage = (render: () => string) =>
+			new Response(render(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		if (request.method === "GET" && url.pathname === "/operating-center/sites") return htmlPage(renderSitesHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/social") return htmlPage(renderSocialHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/ads") return htmlPage(renderAdsHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/sellers") return htmlPage(renderSellersHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/partners") return htmlPage(renderPartnersHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/fundraising") return htmlPage(renderFundraisingHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/groups") return htmlPage(renderGroupsHtml);
+
+		// ADR-0027: overview APIs for the seven new screens.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/sites/overview") {
+			return json(getSitesOverview());
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/social/overview") {
+			return json(getSocialOverview());
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/ads/overview") {
+			return json(getAdsOverview());
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/sellers/overview") {
+			return json(getSellersOverview());
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/partners/overview") {
+			return json(getPartnersOverview());
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/fundraising/overview") {
+			return json(await getFundraisingOverview(env.nwana_engine_db));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/groups/overview") {
+			return json(getGroupsOverview());
+		}
+
+		// ADR-0027: downloadable external-ready reports. Owner-key protected
+		// like every other /api/operating-center route; the content itself is
+		// external-safe (no keys, no internal notes, no email addresses).
+		const reportFile = (html: string, screen: string, date: string) =>
+			new Response(html, {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"content-disposition": `attachment; filename="nwana-${screen}-report-${date}.html"`,
+					"cache-control": "no-store",
+				},
+			});
+		{
+			const m = url.pathname.match(/^\/api\/operating-center\/report\/(sites|social|ads|sellers|partners|fundraising|groups)$/);
+			if (m && request.method === "GET") {
+				const screen = m[1];
+				if (screen === "sites") {
+					const data = getSitesOverview();
+					return reportFile(buildSitesReport(data), screen, data.generated_at.slice(0, 10));
+				}
+				if (screen === "social") {
+					const data = getSocialOverview();
+					return reportFile(buildSocialReport(data), screen, data.generated_at.slice(0, 10));
+				}
+				if (screen === "ads") {
+					const data = getAdsOverview();
+					return reportFile(buildAdsReport(data), screen, data.generated_at.slice(0, 10));
+				}
+				if (screen === "sellers") {
+					const data = getSellersOverview();
+					return reportFile(buildSellersReport(data), screen, data.generated_at.slice(0, 10));
+				}
+				if (screen === "partners") {
+					const data = getPartnersOverview();
+					return reportFile(buildPartnersReport(data), screen, data.generated_at.slice(0, 10));
+				}
+				if (screen === "fundraising") {
+					const data = await getFundraisingOverview(env.nwana_engine_db);
+					return reportFile(buildFundraisingReport(data), screen, data.generated_at.slice(0, 10));
+				}
+				const data = getGroupsOverview();
+				return reportFile(buildGroupsReport(data), screen, data.generated_at.slice(0, 10));
+			}
 		}
 
 		// ADR-0021: media plan API.

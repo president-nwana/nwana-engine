@@ -1,5 +1,15 @@
 # NWANA Engine Changelog
 
+## 2026-09-23 — Seven new operating-center screens, each with a downloadable report (ADR-0027)
+
+- New screens: Sites, Social, Ads, Sellers, Partners, Fundraising, NW Groups (`/operating-center/sites|social|ads|sellers|partners|fundraising|groups`). The main page stays a dashboard: 7 new compact summary cards with links, nothing else moved.
+- The shared button menu grows to 15 (Overview, Results, Funds, Media, Board, Uploads, Sponsorship, Activity + the 7 new screens), wrapping flex row under the header on every page, current page marked `aria-current="page"`.
+- Every new screen has a "Download report" button: `GET /api/operating-center/report/<screen>` (owner-key protected) returns a self-contained, print-friendly HTML document with the screen's current real data, the report date, and nothing internal (no keys, no internal notes, no email addresses). Saved as `nwana-<screen>-report-YYYY-MM-DD.html`, ready to hand to an outsider.
+- The sellers report directly answers what Zubie Five asked on 2026-09-22 (group network size, Series reach/registrations, brand relationships) with verified facts and honest "not yet tracked" where the machine has no data. Pipeline: Integrity 9 (meeting confirmed Fri 2026-09-25 2:00pm CT), Zubie Five (numbers requested), Sea Theory (evaluating), plus 7 earlier agencies contacted with no reply.
+- No-fabrication rule enforced on every screen: Sites shows 7 properties with "Analytics not connected"; Social shows only verified stats (LinkedIn 8 followers observed 2026-09-22; YouTube/Facebook "not recorded / not confirmed"); Ads shows "Not connected / Not set up" with the two planned campaigns labeled as machine spec, not live; Partners shows the registry's single partner entry (AARP, draft); Groups shows the license ladder with counts "not yet tracked"; Fundraising reads the live Fund object (goal, raised, stages, follow-up calendar).
+- New JSON overview APIs `/api/operating-center/<screen>/overview` (7), all 401 without the owner key. No migration, no auth change.
+- Verified: Vitest 246/246 (29 new tests in `test/operating-center-screens.spec.ts`), TypeScript clean, `new Function` script-parse regression tests for all 7 new pages and the main page.
+
 ## 2026-09-23 — Every operating-center panel gets its own screen (ADR-0026)
 
 - The main `/operating-center` page was overloaded on the owner's phone. Every panel now has its own screen; the main page is a dashboard of summary cards only.

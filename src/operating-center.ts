@@ -473,11 +473,13 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 	});
 }
 
-export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity";
+export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity" | "sites" | "social" | "ads" | "sellers" | "partners" | "fundraising" | "groups";
 
 /**
  * ADR-0023: shared button menu rendered directly under the header on every
  * operating-center page. Same markup everywhere so the cockpit navigates as one.
+ * ADR-0027: 15 buttons (7 new screens: sites, social, ads, sellers,
+ * partners, fundraising, groups).
  */
 export function operatingCenterMenu(active: OperatingCenterPageId): string {
 	const items: Array<{ id: OperatingCenterPageId; label: string; href: string }> = [
@@ -489,6 +491,13 @@ export function operatingCenterMenu(active: OperatingCenterPageId): string {
 		{ id: "uploads", label: "Uploads", href: "/operating-center/uploads" },
 		{ id: "sponsorship", label: "Sponsorship", href: "/operating-center/sponsorship" },
 		{ id: "activity", label: "Activity", href: "/operating-center/activity" },
+		{ id: "sites", label: "Sites", href: "/operating-center/sites" },
+		{ id: "social", label: "Social", href: "/operating-center/social" },
+		{ id: "ads", label: "Ads", href: "/operating-center/ads" },
+		{ id: "sellers", label: "Sellers", href: "/operating-center/sellers" },
+		{ id: "partners", label: "Partners", href: "/operating-center/partners" },
+		{ id: "fundraising", label: "Fundraising", href: "/operating-center/fundraising" },
+		{ id: "groups", label: "Groups", href: "/operating-center/groups" },
 	];
 	return (
 		'<nav class="oc-menu" aria-label="Operating center">' +
@@ -577,6 +586,41 @@ export function renderOperatingCenterHtml(): string {
 			<div id="sponsorship-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/sponsorship">Open sponsorship →</a></p>
 		</section>
+		<section class="panel" id="sites-card" style="margin-top:20px"><h2>Sites</h2>
+			<p class="meta">Every NWANA web property with a short description and traffic stats once analytics is connected. Each screen has a downloadable report.</p>
+			<div id="sites-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/sites">Open sites →</a></p>
+		</section>
+		<section class="panel" id="social-card" style="margin-top:20px"><h2>Social</h2>
+			<p class="meta">Accounts, pages, and groups with verified statistics. Each screen has a downloadable report.</p>
+			<div id="social-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/social">Open social →</a></p>
+		</section>
+		<section class="panel" id="ads-card" style="margin-top:20px"><h2>Google Ads + Analytics</h2>
+			<p class="meta">Campaigns, spend, keywords, and site analytics once the accounts are connected. Each screen has a downloadable report.</p>
+			<div id="ads-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/ads">Open ads →</a></p>
+		</section>
+		<section class="panel" id="sellers-card" style="margin-top:20px"><h2>Sellers</h2>
+			<p class="meta">The exclusive-seller pipeline: stages, next steps, and the answers an incoming seller asked for. Each screen has a downloadable report.</p>
+			<div id="sellers-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/sellers">Open sellers →</a></p>
+		</section>
+		<section class="panel" id="partners-card" style="margin-top:20px"><h2>Partners</h2>
+			<p class="meta">The partner pipeline from the outreach registry. Each screen has a downloadable report.</p>
+			<div id="partners-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/partners">Open partners →</a></p>
+		</section>
+		<section class="panel" id="fundraising-card" style="margin-top:20px"><h2>Fundraising</h2>
+			<p class="meta">The Fund object: the $50K Founding Circle bridge sprint, pipeline, and follow-up calendar. Each screen has a downloadable report.</p>
+			<div id="fundraising-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/fundraising">Open fundraising →</a></p>
+		</section>
+		<section class="panel" id="groups-card" style="margin-top:20px"><h2>NW Groups</h2>
+			<p class="meta">The group license ladder and the public funnel, with network statistics once tracked. Each screen has a downloadable report.</p>
+			<div id="groups-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/groups">Open groups →</a></p>
+		</section>
 		<section class="panel" id="board-summary-panel" style="margin-top:20px"><h2>Board workspace</h2>
 			<div id="board-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/board">Open board workspace →</a></p>
@@ -610,6 +654,13 @@ export function renderOperatingCenterHtml(): string {
 			loadBoardSummary();
 			loadUploadsSummary();
 			loadSponsorshipSummary();
+			loadSitesSummary();
+			loadSocialSummary();
+			loadAdsSummary();
+			loadSellersSummary();
+			loadPartnersSummary();
+			loadFundraisingSummary();
+			loadGroupsSummary();
 		}
 		async function pickNextMeetingLocal(meetings){
 			const today=new Date().toISOString().slice(0,10);
@@ -700,6 +751,72 @@ export function renderOperatingCenterHtml(): string {
 				assets.forEach(a=>{byStage[a.stage]=(byStage[a.stage]||0)+1});
 				box.innerHTML='<div class="meta">'+Object.entries(byStage).map(([s,c])=>esc(label[s]||s)+': <strong>'+c+'</strong>').join(' · ')+'</div>'+
 					'<div class="meta">'+assets.length+' total asset'+(assets.length===1?'':'s')+'</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadSitesSummary(){
+			const box=document.querySelector('#sites-summary');
+			try{
+				const data=await api('/api/operating-center/sites/overview');
+				const sites=data.sites||[];
+				box.innerHTML='<div class="meta">'+sites.length+' web propert'+(sites.length===1?'y':'ies')+'</div>'+
+					'<div class="meta">Analytics: <span class="unavailable">not connected</span></div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadSocialSummary(){
+			const box=document.querySelector('#social-summary');
+			try{
+				const data=await api('/api/operating-center/social/overview');
+				const accounts=data.accounts||[];
+				const connected=accounts.filter(a=>a.status==='Connected').length;
+				box.innerHTML='<div class="meta">'+accounts.length+' accounts known · '+connected+' connected</div>'+
+					'<div class="meta">LinkedIn: 8 followers (observed 2026-09-22)</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadAdsSummary(){
+			const box=document.querySelector('#ads-summary');
+			try{
+				const data=await api('/api/operating-center/ads/overview');
+				const planned=(data.planned_campaigns||[]).length;
+				box.innerHTML='<div class="meta">Google Ads: <span class="unavailable">not connected</span> · Analytics: <span class="unavailable">not set up</span></div>'+
+					'<div class="meta">'+planned+' planned campaigns (machine spec, not live)</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadSellersSummary(){
+			const box=document.querySelector('#sellers-summary');
+			try{
+				const data=await api('/api/operating-center/sellers/overview');
+				const sellers=data.sellers||[];
+				const dated=sellers.filter(s=>s.next_date).sort((a,b)=>String(a.next_date).localeCompare(String(b.next_date)));
+				box.innerHTML='<div class="meta">'+sellers.length+' seller records</div>'+
+					(dated.length?'<div class="meta">Next: '+esc(dated[0].company)+' — '+esc(dated[0].next_date)+'</div>':'<div class="unavailable">No dated next steps.</div>');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadPartnersSummary(){
+			const box=document.querySelector('#partners-summary');
+			try{
+				const data=await api('/api/operating-center/partners/overview');
+				const partners=data.partners||[];
+				box.innerHTML='<div class="meta">'+partners.length+' partner record'+(partners.length===1?'':'s')+'</div>'+
+					(partners.length?'<div class="meta">'+esc(partners[0].name)+' — '+esc(partners[0].stage)+'</div>':'<div class="unavailable">No partners yet.</div>');
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadFundraisingSummary(){
+			const box=document.querySelector('#fundraising-summary');
+			try{
+				const data=await api('/api/operating-center/fundraising/overview');
+				const f=data.fund;
+				if(!f){box.innerHTML='<div class="unavailable">No fund objects yet.</div>';return}
+				box.innerHTML='<div class="meta">$'+esc(f.goal_amount)+' goal · $'+esc(f.raised_amount)+' raised</div>'+
+					'<div class="meta">'+esc(f.prospect_count)+' prospects'+(f.follow_ups_due_now?' · <span class="followup-due">'+f.follow_ups_due_now+' follow-up'+(f.follow_ups_due_now===1?'':'s')+' due</span>':'')+'</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadGroupsSummary(){
+			const box=document.querySelector('#groups-summary');
+			try{
+				const data=await api('/api/operating-center/groups/overview');
+				const ladder=data.ladder||[];
+				box.innerHTML='<div class="meta">'+ladder.length+'-step license ladder</div>'+
+					'<div class="meta">Group counts: <span class="unavailable">not yet tracked</span></div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadLifecycleSummary(){
