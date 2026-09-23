@@ -12,6 +12,7 @@ import {
 	renderFundraisingHtml,
 	renderGroupsHtml,
 	renderMeetingsHtml,
+	renderOperationsHtml,
 	buildMachineProposals,
 	getSitesOverview,
 	getSocialOverview,
@@ -47,6 +48,7 @@ const NEW_PAGES: Array<[string, string, string, () => string]> = [
 	["fundraising", "Fundraising", "/operating-center/fundraising", renderFundraisingHtml],
 	["groups", "Groups", "/operating-center/groups", renderGroupsHtml],
 	["meetings", "Meetings", "/operating-center/meetings", renderMeetingsHtml],
+	["operations", "Operations", "/operating-center/operations", renderOperationsHtml],
 ];
 
 const ALL_FIFTEEN: Array<[string, string, string]> = [
@@ -61,7 +63,7 @@ const ALL_FIFTEEN: Array<[string, string, string]> = [
 	...NEW_PAGES.map(([id, label, href]) => [id, label, href] as [string, string, string]),
 ];
 
-describe("operating center menu (ADR-0028): 16 buttons", () => {
+describe("operating center menu (ADR-0028): 17 buttons", () => {
 	it("lists a button for every operating-center page", () => {
 		const menu = operatingCenterMenu("overview");
 		for (const [, label, href] of ALL_FIFTEEN) {
@@ -126,6 +128,7 @@ describe("new screens (ADR-0027/0028): valid inline scripts", () => {
 		expect(html).not.toContain('id="groups-list"');
 		expect(html).not.toContain('id="meetings-external-list"');
 		expect(html).not.toContain('id="meetings-board-upcoming"');
+		expect(html).not.toContain('id="operations-queue"');
 		const scripts = extractScripts(html);
 		for (const body of scripts) {
 			expect(() => new Function(body)).not.toThrow();
@@ -673,8 +676,8 @@ describe("reports (ADR-0027/0028): external-safe HTML documents", () => {
 		],
 	];
 
-	it("REPORT_SCREENS covers all 8 screens with page and report paths", () => {
-		expect(REPORT_SCREENS).toHaveLength(8);
+	it("REPORT_SCREENS covers all 9 screens with page and report paths", () => {
+		expect(REPORT_SCREENS).toHaveLength(9);
 		for (const s of REPORT_SCREENS) {
 			expect(s.reportPath).toBe(`/api/operating-center/report/${s.id}`);
 			expect(s.path).toBe(`/operating-center/${s.id}`);
