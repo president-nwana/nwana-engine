@@ -146,8 +146,8 @@ describe("board pre-meeting digest", () => {
 		expect(digest.open_submissions.map((s) => s.submission_id)).toEqual(["s1"]);
 
 		expect(digest.agenda.map((a) => a.submission_id)).toEqual(["s2", "s3"]);
-		expect(digest.agenda.find((a) => a.submission_id === "s2")?.carried_over).toBe(true);
-		expect(digest.agenda.find((a) => a.submission_id === "s3")?.carried_over).toBe(false);
+		expect(digest.agenda.find((a) => a.submission_id === "s2")?.preexisting).toBe(true);
+		expect(digest.agenda.find((a) => a.submission_id === "s3")?.preexisting).toBe(false);
 
 		expect(digest.recent_decisions).toHaveLength(1);
 		expect(digest.recent_decisions[0].responsible_person).toBe("A. Member");

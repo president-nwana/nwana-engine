@@ -104,7 +104,7 @@ export function renderBoardHtml(): string {
 					?'<div class="item"><strong>'+esc(m.title)+'</strong><div class="meta">'+esc(m.scheduled_for||'unscheduled')+' · '+esc(m.status)+(m.protocol_formed_at?' · protocol formed':' · protocol not formed yet')+'</div><div class="meta">Cadence: '+esc(d.cadence.weekday)+' '+esc(d.cadence.time)+' ('+esc(d.cadence.timezone)+')</div></div>'
 					:'<div class="unavailable">No upcoming meeting.</div>';
 				const subs=d.open_submissions.map(s=>'<div class="item"><strong>'+esc(s.title)+'</strong><div class="meta">'+esc(s.submission_type)+' · '+esc(s.submitted_by||'—')+'</div></div>').join('');
-				const agenda=d.agenda.map(a=>'<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.status)+(a.carried_over?' · carried over from a prior meeting':'')+'</div></div>').join('');
+				const agenda=d.agenda.map(a=>'<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.status)+(a.preexisting?' · on the agenda since before this meeting was created':'')+'</div></div>').join('');
 				const decisions=d.recent_decisions.map(x=>'<div class="item"><strong>'+esc(x.submission_title||x.decision_text)+'</strong><div class="meta">'+esc(x.outcome||'')+(x.responsible_person?' · '+esc(x.responsible_person):'')+(x.due_date?' · due '+esc(x.due_date):'')+'</div></div>').join('');
 				const overdue=d.overdue_work.map(w=>'<div class="item"><strong>'+esc(w.title)+'</strong><div class="meta">'+esc(w.status)+' · due '+esc(w.due_date||'—')+(w.assigned_to?' · '+esc(w.assigned_to):'')+'</div></div>').join('');
 				const blocked=d.blocked_work.map(w=>'<div class="item"><strong>'+esc(w.title)+'</strong><div class="meta">Blocked'+(w.blocker?': '+esc(w.blocker):'')+'</div></div>').join('');

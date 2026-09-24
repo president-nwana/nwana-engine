@@ -26,7 +26,7 @@ export interface DigestSubmission {
 
 export interface DigestAgendaItem extends DigestSubmission {
 	status: string;
-	carried_over: boolean;
+	preexisting: boolean;
 }
 
 export interface DigestDecision {
@@ -112,9 +112,13 @@ export async function getBoardDigest(
 			.all<DigestSubmission & { status: string }>();
 		agenda = rows.results.map((row) => ({
 			...row,
-			// Submitted before this meeting existed: rolled over from a
-			// prior meeting's unresolved agenda.
-			carried_over: row.created_at < upcoming.created_at,
+			// Existed before this meeting was created. This is honest
+			// about what the data proves: the item may have rolled over
+			// from a prior meeting's unresolved agenda, or it may be an
+			// older submission triaged onto this agenda for the first
+			// time. The meeting-close rollover overwrites meeting_id, so
+			// a true carry-over cannot be distinguished afterwards.
+			preexisting: row.created_at < upcoming.created_at,
 		}));
 	}
 
