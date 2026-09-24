@@ -169,9 +169,11 @@ export const NWANA_SITES: SiteRecord[] = [
 	{ url: "https://nwaofna.org", name: "nwaofna.org", description: "Main federation website. A new Cloudflare site is in staging; the DNS switch happens only after full owner approval." },
 	{ url: "https://ticketsignup.io/w/nwaofna", name: "ticketsignup.io/w/nwaofna", description: "Mirror of the main site on TicketSignup." },
 	{ url: "https://series.nwaofna.org", name: "series.nwaofna.org", description: "Series 2026 hub: race calendar, verified results, and season standings." },
+	{ url: "https://groups.nwaofna.org", name: "groups.nwaofna.org", description: "NW Groups hub on RunSignup/TicketSignup infrastructure." },
+	{ url: "https://pathways.nwaofna.org", name: "pathways.nwaofna.org", description: "NWANA Professional Pathways member site on RunSignup/TicketSignup infrastructure." },
 	{ url: "https://sport.nwaofna.org", name: "sport.nwaofna.org", description: "RunSignup race site: registrations and the online donation page." },
 	{ url: "https://albertfatikhov.nwaofna.org", name: "albertfatikhov.nwaofna.org", description: "Personal page of NWANA president Albert Fatikhov." },
-	{ url: "https://nwaofna.com", name: "nwaofna.com", description: "Legacy site with health and clinical Nordic walking content." },
+	{ url: "https://nwaofna.com", name: "nwaofna.com", description: "Legacy domain with health and clinical Nordic walking content. Does not currently resolve (verified 2026-09-24)." },
 	{ url: "https://academy.nwaofna.org", name: "academy.nwaofna.org", description: "Moodle learning platform for the NWANA Academy. Stays on its current hosting; not part of the site migration." },
 ];
 
@@ -201,8 +203,17 @@ const SITES_SCRIPT = `
 		try{
 			const data=await api('/api/operating-center/sites/overview');
 			const sites=data.sites||[];
-			box.innerHTML=sites.map(s=>'<div class="item"><strong><a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.name)+'</a></strong><div class="detail">'+esc(s.description)+'</div></div>').join('')+
-				'<div class="item"><strong>Traffic statistics<span class="badge-warn">Analytics not connected</span></strong><div class="detail">'+esc(data.analytics?data.analytics.note:'')+'</div></div>';
+			let trafficHtml='<div class="item"><strong>Traffic statistics<span class="badge-warn">Analytics not connected</span></strong><div class="detail">'+esc(data.analytics?data.analytics.note:'')+'</div></div>';
+			try{
+				const t=await api('/api/operating-center/analytics/traffic');
+				if(t.ok){
+					const rows=(t.hosts||[]).map(h=>'<div class="meta">'+esc(h.hostname||'(unknown host)')+': '+Number(h.sessions||0).toLocaleString('en-US')+' sessions · '+Number(h.total_users||0).toLocaleString('en-US')+' users</div>').join('');
+					trafficHtml='<div class="item"><strong>Traffic statistics</strong><div class="detail">GA4 property '+esc(t.property_id)+' · '+esc(t.date_range)+'</div><div class="detail">Total: '+Number(t.totals.sessions||0).toLocaleString('en-US')+' sessions · '+Number(t.totals.total_users||0).toLocaleString('en-US')+' users</div>'+(rows||'<div class="detail">No traffic recorded in this period.</div>')+'</div>';
+				}else if(t.error){
+					trafficHtml='<div class="item"><strong>Traffic statistics<span class="badge-warn">Analytics not connected</span></strong><div class="detail">'+esc(t.error)+'</div></div>';
+				}
+			}catch(te){/* keep the static not-connected note */}
+			box.innerHTML=sites.map(s=>'<div class="item"><strong><a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.name)+'</a></strong><div class="detail">'+esc(s.description)+'</div></div>').join('')+trafficHtml;
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
 `;

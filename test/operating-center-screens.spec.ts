@@ -175,9 +175,12 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		customers: ["customers/6758500147"],
 		execution_allowed: false as const,
 	});
-	it("sites: lists all 7 properties, analytics honestly not connected", () => {
+	it("sites: lists all 9 verified properties, analytics honestly not connected", () => {
 		const data = getSitesOverview();
-		expect(data.sites).toHaveLength(7);
+		expect(data.sites).toHaveLength(9);
+		const names = data.sites.map((s) => s.name);
+		expect(names).toContain("groups.nwaofna.org");
+		expect(names).toContain("pathways.nwaofna.org");
 		for (const s of data.sites) {
 			expect(s.url).toMatch(/^https:\/\//);
 			expect(s.description.length).toBeGreaterThan(10);

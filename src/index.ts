@@ -26,6 +26,12 @@ import {
         googleAdsAuthorizationUrl,
         handleGoogleAdsCallback,
 } from "./google-ads";
+import {
+        getGoogleAnalyticsStatus,
+        googleAnalyticsAuthorizationUrl,
+        handleGoogleAnalyticsCallback,
+        getGa4TrafficOverview,
+} from "./google-analytics";
 import { buildDesiredState } from "./google-ads-current";
 import {
 	advanceFundProspect,
@@ -5875,6 +5881,11 @@ export default {
 		if (request.method === "GET" && url.pathname === "/api/operating-center/sites/overview") {
 			return json(getSitesOverview());
 		}
+		// ADR-0033: GA4 read-only traffic overview (owner key required by the
+		// operatingCenterApiRoute gate above). One Data API request per call.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/analytics/traffic") {
+			return json(await getGa4TrafficOverview(env));
+		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/social/overview") {
 			return json(getSocialOverview());
 		}
@@ -6402,6 +6413,42 @@ export default {
 					ok: false,
 					connected: false,
 					error: error instanceof Error ? error.message : "Google Ads authorization failed",
+				}, 400);
+			}
+		}
+
+		// ADR-0033: Google Analytics 4 read-only connection. Same public
+		// connect/callback shape as Google Ads: the real gate is the Google
+		// account chooser (admin@nwaofna.org) plus property Viewer access.
+		if (request.method === "GET" && url.pathname === "/integrations/google-analytics/status") {
+			const status = await getGoogleAnalyticsStatus(env);
+			return json(status, status.ok ? 200 : status.configured ? 502 : 503);
+		}
+
+		if (request.method === "GET" && url.pathname === "/integrations/google-analytics/connect") {
+			try {
+				return Response.redirect(await googleAnalyticsAuthorizationUrl(env), 302);
+			} catch (error) {
+				return json({
+					ok: false,
+					connected: false,
+					error: error instanceof Error ? error.message : "Google Analytics connection could not start",
+				}, 503);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/integrations/google-analytics/callback") {
+			try {
+				const connection = await handleGoogleAnalyticsCallback(url, env);
+				return new Response(
+					`<!doctype html><html lang="en"><meta charset="utf-8"><title>NWANA Google Analytics connected</title><body style="font:20px system-ui;max-width:720px;margin:80px auto;padding:24px"><h1>Google Analytics connected</h1><p>NWANA Engine can read property ${connection.property_id} (read-only).</p><p>Nothing was changed in your Analytics account. You may close this tab.</p></body></html>`,
+					{ headers: { "content-type": "text/html; charset=utf-8" } },
+				);
+			} catch (error) {
+				return json({
+					ok: false,
+					connected: false,
+					error: error instanceof Error ? error.message : "Google Analytics authorization failed",
 				}, 400);
 			}
 		}

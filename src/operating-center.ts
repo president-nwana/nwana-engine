@@ -752,12 +752,15 @@ export function renderOperatingCenterHtml(): string {
 				const f=data.fundraising, s=data.sponsorship, d=data.donations;
 				const fundRows=f.funds.map(x=>'<div class="meta">'+esc(x.name)+': raised '+money(x.raised_amount)+' of '+money(x.goal_amount)+' goal · committed asks '+money(x.committed_ask_total)+'</div>').join('');
 				const stageLine=Object.entries(s.stage_counts).map(([st,c])=>esc(st)+': <strong>'+c+'</strong>').join(' · ');
+				const pipeStages={};
+				for(const x of f.funds){for(const [st,amt] of Object.entries(x.ask_by_stage||{})){pipeStages[st]=(pipeStages[st]||0)+Number(amt||0)}}
+				const pipeLine=Object.entries(pipeStages).map(([st,amt])=>esc(st)+': <strong>'+money(amt)+'</strong>').join(' · ');
 				box.innerHTML=
 					'<h4>Fundraising</h4><div class="meta">Total raised '+money(f.totals.raised_amount)+' of '+money(f.totals.goal_amount)+' goal · committed asks '+money(f.totals.committed_ask_total)+'</div>'+fundRows+
 					'<h4>Donations</h4><div class="meta">'+(d.available?'Connected':'<span class="unavailable">'+esc(d.reason)+'</span>')+'</div>'+
 					'<h4>Sponsorship revenue</h4><div class="meta">'+(stageLine||'<span class="unavailable">No sponsorship assets yet.</span>')+'</div><div class="meta">'+esc(s.note)+'</div>'+
 					'<h4>Commitments</h4><div class="meta">Fundraising committed asks: '+money(f.totals.committed_ask_total)+' · Sponsorship committed assets: <strong>'+s.committed_count+'</strong> (values not recorded)</div>'+
-					'<h4>Pipeline totals</h4><div class="meta">'+esc(data.disclaimer)+'</div>';
+					'<h4>Pipeline totals</h4><div class="meta">'+(pipeLine||'<span class="unavailable">No asks in pipeline yet.</span>')+'</div><div class="meta">'+esc(data.disclaimer)+'</div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadMediaSummary(){
@@ -797,8 +800,12 @@ export function renderOperatingCenterHtml(): string {
 			try{
 				const data=await api('/api/operating-center/sites/overview');
 				const sites=data.sites||[];
-				box.innerHTML='<div class="meta">'+sites.length+' web propert'+(sites.length===1?'y':'ies')+'</div>'+
-					'<div class="meta">Analytics: <span class="unavailable">not connected</span></div>';
+				let analyticsLine='<div class="meta">Analytics: <span class="unavailable">not connected</span></div>';
+				try{
+					const t=await api('/api/operating-center/analytics/traffic');
+					if(t.ok){analyticsLine='<div class="meta">Analytics: connected · '+Number(t.totals.sessions||0).toLocaleString('en-US')+' sessions / 28 days across '+t.hosts.length+' host'+(t.hosts.length===1?'':'s')+'</div>'}
+				}catch(te){}
+				box.innerHTML='<div class="meta">'+sites.length+' web propert'+(sites.length===1?'y':'ies')+'</div>'+analyticsLine;
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadSocialSummary(){
@@ -816,7 +823,12 @@ export function renderOperatingCenterHtml(): string {
 			try{
 				const data=await api('/api/operating-center/ads/overview');
 				const planned=(data.planned_campaigns||[]).length;
-				box.innerHTML='<div class="meta">Google Ads: <span class="unavailable">not connected</span> · Analytics: <span class="unavailable">not set up</span></div>'+
+				let analyticsBit='Analytics: <span class="unavailable">not connected</span>';
+				try{
+					const t=await api('/api/operating-center/analytics/traffic');
+					if(t.ok){analyticsBit='Analytics: connected ('+Number(t.totals.sessions||0).toLocaleString('en-US')+' sessions / 28 days)'}
+				}catch(te){}
+				box.innerHTML='<div class="meta">Google Ads: <span class="unavailable">not connected</span> · '+analyticsBit+'</div>'+
 					'<div class="meta">'+planned+' planned campaigns (machine spec, not live)</div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
