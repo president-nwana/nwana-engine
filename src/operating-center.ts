@@ -324,6 +324,8 @@ function activityLabel(action: string, module: string, details: string | null): 
 			return `Article drafted: ${d.title ?? d.article_id ?? "article"}`;
 		case "MEDIA_ARTICLE_PUBLISHED":
 			return `Article published to site news: ${d.article_id ?? "article"}`;
+		case "RESULT_PUBLISHED":
+			return `Series result published: ${d.publication_key ?? "result"}`;
 		case "DECISION_REQUEST_CREATED":
 			return `Decision requested: ${d.title ?? d.request_id ?? "item"}`;
 		case "FUND_CREATED":
@@ -922,6 +924,11 @@ export function renderRaceResultsHtml(): string {
 		</section>
 		<div id="app" hidden>
 			<section class="panel">
+				<h2>Result publication</h2>
+				<p class="meta">One click per ready result: publishes to 4 Meta destinations and the NWANA site news (winner announcement + next-race promo). Requires the owner key and an explicit confirmation. Already-published results are skipped automatically.</p>
+				<div id="pub-drafts">Loading…</div>
+			</section>
+			<section class="panel">
 				<h2>Series 2026 race lifecycle</h2>
 				<p class="meta">One row per distance. Stages: registration_open → awaiting_results → verifying (owner) → levels_computed → published → next_race_prep.</p>
 				<div><span class="message" id="lifecycle-message" aria-live="polite"></span></div>
@@ -998,6 +1005,32 @@ export function renderRaceResultsHtml(): string {
 				}));
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
+		async function loadPubDrafts(){
+			const box=document.querySelector('#pub-drafts');
+			try{
+				const data=await api('/sources/runsignup/series-2026/results-preview');
+				const ready=(data.drafts||[]).filter(d=>d.publication_required);
+				if(!ready.length){box.innerHTML='<div class="unavailable">No results ready for publication.</div>';return}
+				box.innerHTML=ready.map(d=>{
+					const title=(d.editorial_draft&&d.editorial_draft.title)||d.publication_key;
+					const card='/result-publications/card/'+encodeURIComponent(d.publication_key)+'.jpg';
+					return '<div class="event"><strong>'+esc(title)+'</strong>'+
+						'<div class="meta">'+esc((d.source&&d.source.distance)||'')+' · Status: '+esc(d.publication_status)+'</div>'+
+						'<div><a href="'+esc(card)+'" target="_blank" rel="noopener">Preview card</a></div>'+
+						'<button data-pubkey="'+esc(d.publication_key)+'" style="width:auto">Publish result</button></div>';
+				}).join('');
+				box.querySelectorAll('[data-pubkey]').forEach(btn=>btn.addEventListener('click',async()=>{
+					const key=btn.dataset.pubkey;
+					if(!confirm('Publish this result?\\n\\nDestinations: 4 Meta pages + NWANA site news (winner announcement + next-race promo).\\nThis cannot be undone.'))return;
+					btn.disabled=true;
+					try{
+						const res=await api('/result-publications/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({publication_key:key,confirmation:'PUBLISH'})});
+						alert(res.already_published?'Already published.':'Published.');
+						await loadPubDrafts();
+					}catch(err){alert(err.message);btn.disabled=false}
+				}));
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
 		async function refresh(){
 			const m=document.querySelector('#sync-message');
 			m.textContent='Refreshing results from RunSignup…';
@@ -1016,8 +1049,8 @@ export function renderRaceResultsHtml(): string {
 			try{renderResults(await api('/api/operating-center/race-results'))}
 			catch(err){document.querySelector('#results').innerHTML='<div class="panel"><div class="unavailable">'+esc(err.message)+'</div></div>'}
 		}
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();refresh();loadLifecycle()});
-		if(getKey()){showApp();refresh();loadLifecycle()}else{showGate('')}
+		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();refresh();loadLifecycle();loadPubDrafts()});
+		if(getKey()){showApp();refresh();loadLifecycle();loadPubDrafts()}else{showGate('')}
 	</script>
 </body></html>`;
 }

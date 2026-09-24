@@ -5501,6 +5501,11 @@ async function publishSeries2026Result(
 	request: Request,
 	env: Env,
 ): Promise<Response> {
+	// Owner gate: external publication (Meta + site news) requires the
+	// operating center key. The confirmation token alone is not enough.
+	if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
+		return json({ ok: false, error: "Unauthorized" }, 401);
+	}
 	const body = await request.json() as {
 		publication_key?: string;
 		confirmation?: string;
@@ -5671,6 +5676,23 @@ async function publishSeries2026Result(
 		raceId: draft.source.race_id,
 		eventId: draft.source.event_id,
 	});
+
+	// Audit: the owner's explicit PUBLISH confirmation is a consequential
+	// action; record it so the Activity feed shows what was published,
+	// where, and when.
+	await env.nwana_engine_db.prepare(`
+		INSERT INTO audit_events (audit_id, object_id, action, module, status, details)
+		VALUES (?, ?, 'RESULT_PUBLISHED', 'RESULTS', 'PUBLISHED', ?)
+	`).bind(
+		`AUDIT-${crypto.randomUUID()}`,
+		draft.publication_key,
+		JSON.stringify({
+			publication_key: draft.publication_key,
+			destinations: Object.keys(result),
+			site_news: siteNews,
+			next_race_news: nextRaceNews,
+		}),
+	).run();
 
 	return json({
 		ok: true,
