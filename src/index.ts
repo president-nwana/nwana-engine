@@ -49,6 +49,7 @@ import {
 	recordBoardDecision,
 	triageAgenda,
 } from "./board";
+import { getBoardDigest } from "./board-digest";
 import {
 	createBoardSubmission,
 	createInitiative,
@@ -6157,6 +6158,14 @@ export default {
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Work items list failed" }, 500);
+			}
+		}
+
+		if (url.pathname === "/api/board/digest" && request.method === "GET") {
+			try {
+				return json(await getBoardDigest(env.nwana_engine_db));
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Board digest failed" }, 500);
 			}
 		}
 

@@ -44,6 +44,10 @@ export function renderBoardHtml(): string {
 			</form>
 		</section>
 		<div id="app" hidden>
+			<section class="panel"><h2>Pre-meeting digest</h2>
+				<p class="meta">State of NWANA before the meeting: what the Board decided, what is done, what is overdue, and what needs the next decision.</p>
+				<div id="digest">Loading…</div>
+			</section>
 			<section class="panel">
 				<form id="board-form"><h2>Submit to the Board</h2>
 					<p class="meta">One intake for everything: a question, an initiative, a proposal, a thought, a problem, an opportunity, a task, a report, or a request to speak. Items without a requested meeting date join the nearest upcoming meeting protocol automatically.</p>
@@ -90,6 +94,29 @@ export function renderBoardHtml(): string {
 		function formJson(form){return Object.fromEntries([...new FormData(form)].map(([k,v])=>[k,String(v)]))}
 		let pendingSubmissionsCache=[];
 		let selectedMeetingId=null;
+		async function loadDigest(){
+			const box=document.querySelector('#digest');
+			try{
+				const d=await api('/api/board/digest');
+				const m=d.upcoming_meeting;
+				const sec=(title,body)=>'<h3>'+esc(title)+'</h3>'+(body||'<div class="unavailable">None.</div>');
+				const meetingHtml=m
+					?'<div class="item"><strong>'+esc(m.title)+'</strong><div class="meta">'+esc(m.scheduled_for||'unscheduled')+' · '+esc(m.status)+(m.protocol_formed_at?' · protocol formed':' · protocol not formed yet')+'</div><div class="meta">Cadence: '+esc(d.cadence.weekday)+' '+esc(d.cadence.time)+' ('+esc(d.cadence.timezone)+')</div></div>'
+					:'<div class="unavailable">No upcoming meeting.</div>';
+				const subs=d.open_submissions.map(s=>'<div class="item"><strong>'+esc(s.title)+'</strong><div class="meta">'+esc(s.submission_type)+' · '+esc(s.submitted_by||'—')+'</div></div>').join('');
+				const agenda=d.agenda.map(a=>'<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.status)+(a.carried_over?' · carried over from a prior meeting':'')+'</div></div>').join('');
+				const decisions=d.recent_decisions.map(x=>'<div class="item"><strong>'+esc(x.submission_title||x.decision_text)+'</strong><div class="meta">'+esc(x.outcome||'')+(x.responsible_person?' · '+esc(x.responsible_person):'')+(x.due_date?' · due '+esc(x.due_date):'')+'</div></div>').join('');
+				const overdue=d.overdue_work.map(w=>'<div class="item"><strong>'+esc(w.title)+'</strong><div class="meta">'+esc(w.status)+' · due '+esc(w.due_date||'—')+(w.assigned_to?' · '+esc(w.assigned_to):'')+'</div></div>').join('');
+				const blocked=d.blocked_work.map(w=>'<div class="item"><strong>'+esc(w.title)+'</strong><div class="meta">Blocked'+(w.blocker?': '+esc(w.blocker):'')+'</div></div>').join('');
+				box.innerHTML=
+					sec('Upcoming meeting',meetingHtml)+
+					sec('Submissions awaiting triage ('+d.open_submissions.length+')',subs)+
+					sec('Agenda ('+d.agenda.length+')',agenda)+
+					sec('Recent Board decisions',decisions)+
+					sec('Overdue work ('+d.overdue_work.length+')',overdue)+
+					sec('Blocked work ('+d.blocked_work.length+')',blocked);
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
 		async function load(){
 			const b=await api('/api/board/submissions');
 			pendingSubmissionsCache=b.submissions||[];
@@ -99,6 +126,7 @@ export function renderBoardHtml(): string {
 			try{cadence=(await api('/api/board/cadence')).cadence||null}catch(e){}
 			await loadMeetings(cadence);
 			await loadWorkItems();
+			await loadDigest();
 		}
 		function pickNextMeeting(meetings){
 			const today=new Date().toISOString().slice(0,10);
