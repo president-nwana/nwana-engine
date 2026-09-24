@@ -83,3 +83,35 @@ No tag installation automation, no Measurement Protocol writes, no event or
 conversion management, no Admin API property changes, no BigQuery export,
 no new GA4 property, no merging of GA4 data with fundraising/sponsorship
 pipelines.
+
+## Owner-confirmed tag facts (2026-09-24)
+
+The owner confirmed the following; the earlier "most likely" wording above is
+superseded:
+
+- `G-8RYTY6M2KD` is the primary NWANA GA4 Measurement ID, installed by the
+  owner on all NWANA sites. The Machine treats it as the canonical NWANA tag
+  unless GA4 Admin > Data Streams shows otherwise.
+- `G-QKEVS8BTWC` is a secondary tag of unknown ownership. It is not mixed
+  with the primary NWANA tag. Its owner and purpose are investigated
+  separately after the read-only connection is live.
+- No new property and no new Measurement ID are created.
+
+## Post-connection verification checklist (read-only)
+
+Once OAuth is connected, verify inside property 534556675 without changing
+anything:
+
+1. Which Web Data Stream carries Measurement ID `G-8RYTY6M2KD`.
+2. Which domains that stream accepts.
+3. Whether data from all NWANA sites actually arrives in this property.
+4. What `G-QKEVS8BTWC` is (separate stream/property/account?).
+5. Whether double tagging causes duplicated `page_view` or other events.
+
+## Tag freeze
+
+No tag is added, removed, or changed until both Measurement IDs' purpose is
+established and the double-counting risk is checked. In particular,
+`nwana-site.nwana-engine.workers.dev` (future nwaofna.org) currently has no
+GA tag; adding the existing `G-8RYTY6M2KD` there is planned before the
+domain migration, but only after the verification above.
