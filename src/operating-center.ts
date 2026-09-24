@@ -561,6 +561,11 @@ export function renderOperatingCenterHtml(): string {
 			<div id="fund-summary">Loading…</div>
 			<p class="meta"><a href="/operating-center/funds">Open funds →</a></p>
 		</section>
+		<section class="panel" id="money-card" style="margin-top:20px"><h2>Executive money view</h2>
+			<p class="meta">Fundraising, donations, sponsorship revenue, commitments, and pipeline totals side by side. Fundraising and sponsorship stay separate processes with separate lifecycles; this is visibility only.</p>
+			<div id="money-summary">Loading…</div>
+			<p class="meta"><a href="/operating-center/funds">Open funds →</a> · <a href="/operating-center/sponsorship">Open sponsorship →</a></p>
+		</section>
 		<section class="panel" id="media-card" style="margin-top:20px"><h2>Media plan</h2>
 			<p class="meta">You set the topics; the machine runs the plan and article lifecycle and drafts the articles.</p>
 			<div id="media-summary">Loading…</div>
@@ -664,6 +669,7 @@ export function renderOperatingCenterHtml(): string {
 			document.querySelector('#board-items').innerHTML=b.submissions.length?'<div class="meta">'+b.submissions.length+' pending submissions awaiting triage. The next meeting protocol forms automatically on Sunday.</div>':'<div class="unavailable">No pending Board items.</div>';
 			loadLifecycleSummary();
 			loadFundSummary();
+			loadMoneySummary();
 			loadMediaSummary();
 			loadActivitySummary();
 			loadBoardSummary();
@@ -736,6 +742,22 @@ export function renderOperatingCenterHtml(): string {
 				box.innerHTML='<div class="meta">'+data.funds.length+' fund'+(data.funds.length>1?'s':'')+' · raised '+money(raised)+' of '+money(goal)+' goal</div>'+
 					'<div class="meta'+(due?' followup-due':'')+'">'+due+' follow-up'+(due===1?'':'s')+' due now</div>'+
 					'<div class="meta">'+data.funds.map(f=>esc(f.fund.name)).join(' · ')+'</div>';
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}
+		async function loadMoneySummary(){
+			const box=document.querySelector('#money-summary');
+			const money=n=>'$'+Number(n||0).toLocaleString('en-US');
+			try{
+				const data=await api('/api/operating-center/money/overview');
+				const f=data.fundraising, s=data.sponsorship, d=data.donations;
+				const fundRows=f.funds.map(x=>'<div class="meta">'+esc(x.name)+': raised '+money(x.raised_amount)+' of '+money(x.goal_amount)+' goal · committed asks '+money(x.committed_ask_total)+'</div>').join('');
+				const stageLine=Object.entries(s.stage_counts).map(([st,c])=>esc(st)+': <strong>'+c+'</strong>').join(' · ');
+				box.innerHTML=
+					'<h4>Fundraising</h4><div class="meta">Total raised '+money(f.totals.raised_amount)+' of '+money(f.totals.goal_amount)+' goal · committed asks '+money(f.totals.committed_ask_total)+'</div>'+fundRows+
+					'<h4>Donations</h4><div class="meta">'+(d.available?'Connected':'<span class="unavailable">'+esc(d.reason)+'</span>')+'</div>'+
+					'<h4>Sponsorship revenue</h4><div class="meta">'+(stageLine||'<span class="unavailable">No sponsorship assets yet.</span>')+'</div><div class="meta">'+esc(s.note)+'</div>'+
+					'<h4>Commitments</h4><div class="meta">Fundraising committed asks: '+money(f.totals.committed_ask_total)+' · Sponsorship committed assets: <strong>'+s.committed_count+'</strong> (values not recorded)</div>'+
+					'<h4>Pipeline totals</h4><div class="meta">'+esc(data.disclaimer)+'</div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadMediaSummary(){

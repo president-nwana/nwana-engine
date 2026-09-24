@@ -66,6 +66,7 @@ import {
 } from "./operating-center";
 import { renderFundsHtml } from "./operating-center-funds";
 import { renderMediaHtml } from "./operating-center-media";
+import { getExecutiveMoneyView } from "./operating-center-money";
 import { renderSponsorshipHtml } from "./operating-center-sponsorship";
 import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
@@ -5896,6 +5897,9 @@ export default {
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/operations/overview") {
 			return json(await getOperationsOverview(env));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/money/overview") {
+			return json(await getExecutiveMoneyView(env.nwana_engine_db));
 		}
 
 		// ADR-0027: downloadable external-ready reports. Owner-key protected
