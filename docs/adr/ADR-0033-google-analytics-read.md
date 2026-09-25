@@ -144,3 +144,16 @@ Data API report (28 days, hostName x sessions/users/pageviews):
   UI confirmation (Data API readonly scope cannot list streams). Not a
   blocker: owner confirmed the tag, hostname data confirms the property
   collects NWANA traffic.
+
+## Final tag resolution (2026-09-24, GA4 Admin UI by owner)
+
+- Property 534556675 contains ONE Web stream: name "NWANA",
+  URL https://www.nwaofna.org, Stream ID 14590138484,
+  Measurement ID **G-8RYTY6M2KD**. Data collection active.
+- G-QKEVS8BTWC is NOT in NWANA's property. External tag (consistent with
+  the RunSignup-platform hypothesis); nothing to change, nothing to remove.
+- Double-counting risk in NWANA's property: none found.
+- Tag freeze lifted for the one planned action only: adding the existing
+  G-8RYTY6M2KD to nwana-site.nwana-engine.workers.dev as part of the
+  nwaofna.org migration (not before - staging hits would pollute the
+  production property).
