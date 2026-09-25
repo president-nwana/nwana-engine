@@ -115,3 +115,32 @@ established and the double-counting risk is checked. In particular,
 `nwana-site.nwana-engine.workers.dev` (future nwaofna.org) currently has no
 GA tag; adding the existing `G-8RYTY6M2KD` there is planned before the
 domain migration, but only after the verification above.
+
+## Post-connection verification results (2026-09-24, read-only)
+
+Connection live: OAuth as admin@nwaofna.org, property 534556675 readable.
+Data API report (28 days, hostName x sessions/users/pageviews):
+
+- Data arrives from all NWANA web hostnames: www.nwaofna.org, academy,
+  series, sport, groups, pathways, albertfatikhov subdomains, plus race
+  distance subdomains (1k/3k/5k/10k/15k/20k.nwaofna.org).
+- Top source is runsignup.com (399 sessions): the NWANA tag is also
+  installed on RunSignup pages (cross-domain registration flow), so
+  registration traffic reports into this property. Same for
+  ticketsignup.io, trisignup.com, bikesignup.com, adventuresignup.com,
+  paddlesignup.com, givesignup.org, runscore.runsignup.com.
+- Extra NWANA hostnames not in the 9-site Sites list: grow.nwaofna.org,
+  partners.nwaofna.org, license.nwaofna.org (live, sending data).
+- nwaofna.com sends nothing (DNS does not resolve - expected).
+- nwana-site.nwana-engine.workers.dev sends nothing (no tag yet - expected,
+  tag freeze holds).
+- Pageviews-per-session ratios look organic (e.g. 2.6 on runsignup.com);
+  no evidence of systematic double page_view inside this property.
+- G-QKEVS8BTWC hypothesis: RunSignup platform tag (its gtag config carries
+  "domain": "runsignup.com"; it appears across RunSignup-platform hostnames).
+  Its destination property is NOT visible from 534556675. Confirm via GA4
+  Admin > Data Streams (which stream/property carries that ID).
+- Stream <-> Measurement ID mapping for G-8RYTY6M2KD still needs GA4 Admin
+  UI confirmation (Data API readonly scope cannot list streams). Not a
+  blocker: owner confirmed the tag, hostname data confirms the property
+  collects NWANA traffic.
