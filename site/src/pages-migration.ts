@@ -998,24 +998,24 @@ export async function partnersPage(): Promise<string> {
 		["Future Championships", "The road to U.S. and North American Nordic Walking Championships."],
 	];
 	const rights: [string, string][] = [
-		["Founding status", "Permanent founding recognition across the NWANA ecosystem."],
-		["Category exclusivity", "Exclusive category position across NWANA properties."],
-		["Rights across multiple properties", "Series, Academy, Groups, media, and future Championships under one partnership."],
-		["Competition integration", "Integration into competitions and future U.S. and North American Championships."],
+		["A limited number of founding positions", "Founding positions are strictly limited. Once they are taken, they are gone — no new founding positions will ever be created."],
+		["Category exclusivity", "One partner per category across the NWANA ecosystem."],
+		["Permanent founding record", "Entry in the NWANA Founding Registry: the official historical record — website archive, headquarters recognition, and championship recognition."],
+		["Term architecture", "Permanent recognition plus long-term activation rights. Horizons are fixed individually in each founding agreement."],
+		["Championships rights", "Founding rights extend to future U.S. and North American Championships."],
+		["Future properties", "The position covers NWANA properties created during the partnership — the system keeps growing, and the position grows with it."],
+		["First-partner advantage", "The earliest partners secure positions and rights that later partners will never receive."],
 		["Content and media activation", "Storytelling, content, and media programs built around the partner."],
-		["Community and employee engagement", "Programs that connect the partner with local groups, participants, and employees."],
-		["Hospitality and VIP access", "VIP experiences at NWANA events and championships."],
-		["Long-term recognition", "Recognition that compounds as the system grows."],
-		["Custom activation rights", "Activation rights designed around the partner, not a fixed menu."],
+		["Community, employees, and hospitality", "Programs connecting the partner with local groups, participants, and employees, plus VIP hospitality at NWANA events."],
 	];
-	const capital: [string, string][] = [
-		["Operating team", "The people who run the federation every day."],
-		["National expansion", "Growth into new states, provinces, and regions."],
-		["Technology and automation", "The NWANA Engine: systems that scale without manual work."],
-		["Marketing and media", "Audience growth, storytelling, and public awareness."],
-		["Competition infrastructure", "Races, officiating, timing, results, and rankings."],
-		["Academy and community growth", "Instructor education and local group development."],
-		["Future flagship Championships", "U.S. and North American Championships built to last."],
+	const outcomes: [string, string][] = [
+		["A professional operating team", "A full-time team running the continental federation — not volunteers fitting it between other jobs."],
+		["National expansion", "NWANA operating in new states, provinces, and regions across North America."],
+		["Scalable technology", "Systems that serve thousands of participants, instructors, and groups without manual work."],
+		["Major competitions", "A real competition calendar: verified races, officiating, results, and rankings."],
+		["A North American championship platform", "The road to U.S. and North American Nordic Walking Championships."],
+		["An instructor and community network", "Trained instructors and local groups bringing Nordic Walking to communities across the continent."],
+		["National visibility", "A national audience for Nordic Walking — and for the partners who built it."],
 	];
 	const content = `
   ${pageHead("Founding & Strategic Partnerships", "Build Nordic Walking in North America with NWANA", "NWANA is building the North American infrastructure for Nordic Walking: education, instructor certification, community groups, competitions, technology, media, athlete development, and future championships. A small number of Founding Strategic Partners will help build this system at the beginning and secure long-term category, visibility, and activation rights across the NWANA ecosystem.")}
@@ -1026,32 +1026,45 @@ export async function partnersPage(): Promise<string> {
     <p>A small number of Founding Strategic Partners will have the opportunity to help build this system at the beginning and secure long-term category, visibility and activation rights across the NWANA ecosystem.</p>
   </div></div>
   <div class="section alt"><div class="wrap">
+    <div class="kicker">The central idea</div>
+    <h2>One partnership. The whole system.</h2>
+    <p>A Founding Strategic Partner does not buy the 2026 Series. Not a Challenge. Not the Academy. Not a Championship on its own.</p>
+    <p>The partner buys a position in the entire growing NWANA system — education, competition, community, media, technology, and future championships — at the moment when such a position still exists. Once the founding positions are taken, they are gone.</p>
+  </div></div>
+  <div class="section"><div class="wrap">
     <div class="kicker">Already built</div>
     <h2>You are funding a foundation, not an idea</h2>
     <p>The core of the system already exists and operates. Founding capital scales it.</p>
     <div class="grid cols-3" style="margin-top:22px">${system.map(([t, d]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join("")}</div>
   </div></div>
-  <div class="section"><div class="wrap">
+  <div class="section alt"><div class="wrap">
     <div class="kicker">The product</div>
     <h2>NWANA Founding Strategic Partner</h2>
-    <p>One partnership. The whole system. Founding Strategic Partners secure a long-term position across the NWANA ecosystem, with rights designed around the partner.</p>
+    <p>Founding Strategic Partners secure a long-term position across the NWANA ecosystem, with rights designed around the partner. Scarcity is structural: a limited number of positions, one partner per category, and rights the later partners will never receive.</p>
     <div class="grid cols-3" style="margin-top:22px">${rights.map(([t, d]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join("")}</div>
     <div class="grid cols-2" style="margin-top:26px">
-      <div class="card"><h3>Founding Strategic Partnerships</h3><p style="font-size:26px;font-weight:800;color:var(--navy)">$250,000+</p><p>Full founding position with category exclusivity and ecosystem-wide rights.</p></div>
+      <div class="card"><h3>Founding Strategic Partnerships</h3><p style="font-size:26px;font-weight:800;color:var(--navy)">Custom, multi-year</p><p>Full founding position with category exclusivity and ecosystem-wide rights. Investment levels are defined with each partner.</p></div>
       <div class="card"><h3>Major / Category Partnerships</h3><p style="font-size:26px;font-weight:800;color:var(--navy)">Custom</p><p>Scoped per partner: category, properties, term, and activation designed together.</p></div>
     </div>
-    <p style="margin-top:18px">Detailed tier structure is developed with each partner during the discussion.</p>
-  </div></div>
-  <div class="section alt"><div class="wrap">
-    <div class="kicker">A separate path</div>
-    <h2>Philanthropic Founding Circle</h2>
-    <p>For individuals and family offices who want to help build NWANA without buying commercial rights. Founding Circle gifts are philanthropic contributions to a 501(c)(3) public charity and carry recognition, not sponsorship rights. Commercial partnership rights and charitable recognition are separate by design.</p>
-    <p><a class="card-link" href="/ways-to-give">Ways to give →</a></p>
+    <p style="margin-top:18px">Investment levels are set once NWANA's budgets and product architecture are finalized — and discussed individually with each partner. No fixed price list is published at this stage by design.</p>
   </div></div>
   <div class="section"><div class="wrap">
-    <div class="kicker">Where the capital goes</div>
-    <h2>What founding capital builds</h2>
-    <div class="grid cols-3" style="margin-top:22px">${capital.map(([t, d]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join("")}</div>
+    <div class="kicker">The second path</div>
+    <h2>Philanthropic Founding Circle</h2>
+    <p>Not all founding capital comes from sponsorship. The Philanthropic Founding Circle is a separate, equal path for individuals, families, and family offices who want to provide operating and growth capital for NWANA — motivated by honor, respect, and founder status, not by commercial rights.</p>
+    <div class="grid cols-2" style="margin-top:22px">
+      <div class="card"><h3>Founder status</h3><p>Permanent recognition as a founder of the North American Nordic Walking system — in the NWANA Founding Registry, the official historical record, headquarters recognition, and championship recognition.</p></div>
+      <div class="card"><h3>Growth capital, directly</h3><p>Circle gifts fund the operating core: the professional team, national expansion, technology, competitions, and the championship platform.</p></div>
+      <div class="card"><h3>Philanthropy, not sponsorship</h3><p>Gifts are charitable contributions to NWANA, a 501(c)(3) public charity. They carry recognition — not commercial rights, category exclusivity, or activation.</p></div>
+      <div class="card"><h3>Separate by design</h3><p>Commercial partnership rights and charitable recognition never mix. Each path has its own agreement, its own recognition architecture, and its own purpose.</p></div>
+    </div>
+    <p style="margin-top:18px"><a class="card-link" href="/ways-to-give">Ways to give →</a></p>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">The result</div>
+    <h2>What your founding partnership makes possible</h2>
+    <p>Founding capital does not buy line items. It creates outcomes — the system your name will stand on.</p>
+    <div class="grid cols-3" style="margin-top:22px">${outcomes.map(([t, d]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join("")}</div>
   </div></div>
   <div class="section alt"><div class="wrap">
     <div class="kicker">Next step</div>
