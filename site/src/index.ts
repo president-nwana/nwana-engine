@@ -27,6 +27,7 @@ import {
 	supportPage,
 	termsConditionsPage,
 	termsPage,
+	tommyAunanPage,
 	waysToGivePage,
 } from "./pages-migration";
 import { esc, layout } from "./views";
@@ -162,6 +163,9 @@ export default {
 			}
 			if (request.method === "GET" && path === "/elite") {
 				return html(await elitePage());
+			}
+			if (request.method === "GET" && path === "/elite/tommy-aunan") {
+				return html(await tommyAunanPage());
 			}
 			if (request.method === "GET" && path === "/support") {
 				return html(await supportPage());

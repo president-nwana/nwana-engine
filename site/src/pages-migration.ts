@@ -825,6 +825,7 @@ export async function elitePage(): Promise<string> {
       <p>Albert Fatikhov is a World Championship medalist in competitive Nordic Walking and an active international-level athlete. His competitive record includes two World Championship medals, six Latvian Championship medals, and a successful return to regular competition in the United States through the NWANA Open Nordic Walking Series. At the 2024 World Championship in Lahti, Finland, Albert won the Silver Medal in the 4 x 5K men's relay and the Bronze Medal in the 5K individual race. During the 2026 season, he has recorded 23 victories in the NWANA Open Nordic Walking Series while competing across distances from 1K through 20K.</p>
       ${bullets(["Silver Medal, 4 x 5K Men's Relay, World Championship, Lahti, Finland (2024)", "Bronze Medal, 5K, World Championship, Lahti, Finland (2024)", "6 Latvian Championship Medals: 1 Bronze in 2023 and 5 medals in 2024", "23 NWANA Open Series Victories, 2026 season", "30:58 Official 5K Competition Best, Latvian Championship, Vakarbulli (2024)"])}
       <p><strong>Current Competitive Focus:</strong> 1K, 3K and 5K. Albert continues to compete actively while focusing on speed, technique, and performance development across the shorter Nordic Walking distances.</p>
+      <p><a class="card-link" href="https://albertfatikhov.nwaofna.org/" target="_blank" rel="noopener">albertfatikhov.nwaofna.org →</a></p>
     </div>
     <div class="card" style="margin-bottom:20px">
       <div class="kicker">United States</div>
@@ -835,6 +836,7 @@ export async function elitePage(): Promise<string> {
       <p>Tommy Aunan is one of the most decorated endurance athletes representing the United States on the international stage. A remarkably versatile competitor, Tommy has built an extraordinary career spanning 40 World Masters Championships, World Masters Games, and World Championships across Cross-Country Skiing, Biathlon, Athletics, and Nordic Walking. In Nordic Walking, Tommy has established himself as an elite international competitor, representing the USA at three Nordic Walking World Championships. At the 2024 World Championship in Lahti, Finland, he won the Silver Medal in the 10K and the Bronze Medal in the 5K individual races. Latest Achievement, Daegu 2026: At the 2026 World Masters Athletics Championships in Daegu, South Korea, Tommy added two more gold medals to his international record in the 10K and 20K Race Walk national team competitions. He is now a 9-time World Masters Athletics national team medalist, with 3 gold, 2 silver, and 4 bronze medals.</p>
       ${bullets(["Double Gold, 10K & 20K Race Walk National Team Competitions, World Masters Athletics Championships, Daegu, South Korea, 2026", "Silver Medal, 10K Nordic Walking World Championship, Lahti, Finland, 2024", "Bronze Medal, 5K Nordic Walking World Championship, Lahti, Finland, 2024", "9-Time World Masters Athletics Team Medalist (3 Gold, 2 Silver, 4 Bronze)", "8-Time USA Masters National Racewalk Champion", "34 USA National & Masters Medals", "Double Bronze, 5K & 20K Race Walk, World Masters Games, Sydney, Australia, 2009", "41 World Masters Events Across Cross-Country Skiing, Biathlon, Athletics, and Nordic Walking"])}
       <p>Tommy Aunan continues to compete internationally across multiple endurance disciplines and represents an exceptional level of longevity and achievement in Masters sport.</p>
+      <p><a class="card-link" href="/elite/tommy-aunan">Tommy Aunan's full profile and photo gallery →</a></p>
     </div>
     <div class="card" style="margin-bottom:20px">
       <div class="kicker">United States</div>
@@ -865,6 +867,65 @@ export async function elitePage(): Promise<string> {
   </div></div>`;
 
 	return layout("Elite Athletes", "elite", content, "NWANA Elite Athletes Club: verified international achievements, an intentionally limited roster, and recognition of elite talent.");
+}
+
+// ---------------- 19b. /elite/tommy-aunan ----------------
+
+export async function tommyAunanPage(): Promise<string> {
+	const gallery: [string, string][] = [
+		["https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/d44cbab6-cd07-4f2f-b1f5-089d87a65979-bQojH8.png", "Sprint Race · World Masters Biathlon Championship · Kontiolahti, Finland · March 20, 2026"],
+		["https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/385635c5-34f8-4e15-a013-7fe58a2e3bad-bQojPt.png", "World Masters Biathlon Championship · Kontiolahti, Finland"],
+		["https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/e6842f2b-0ba4-4971-b9d6-e4f4206e3a9e-bQojT4.png", "World Masters Biathlon Championship · Kontiolahti, Finland"],
+		["https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/012750dd-813b-49d5-9a0b-1993f156a4cb-bQojYc.png", "World Masters Athletics Championship · Gothenburg, Sweden · 2024 · 10km Racewalk"],
+		["https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/ef857035-826a-4fc4-8761-93adfc9840cf-bQoj0o.png", "Nordic Walking World Championship 2024 · Belchatow, Poland"],
+		["https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/4b81c485-9c18-4b4c-9673-4a624cdbf833-bQoj1Z.png", "World Masters XC-Ski Championship · Brusson, Italy · 2006"],
+	];
+	const content = `
+  ${pageHead("Tommy Aunan", "Tommy Aunan", "United States · Nordic Walking & Masters Athletics World Championship Medalist")}
+  <div class="section"><div class="wrap">
+    <div class="kicker">Elite Athletes Club</div>
+    <h2>United States · Nordic Walking & Masters Athletics World Championship Medalist</h2>
+    <p>One of the most decorated endurance athletes representing the United States on the international stage. Tommy has competed in <strong>40 World Masters Championships</strong> across Cross-Country Skiing, Biathlon, Athletics, and Nordic Walking — building a legendary career that spans two decades of world-class competition.</p>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">World Championship medals</div>
+    <h2>9x World Medalist</h2>
+    <div class="grid cols-4" style="margin-top:22px">
+      <div class="card"><h3>Double Gold</h3><p>10K / 20K Race Walk, National Team Competitions · World Masters Athletics Championships · Daegu, South Korea · 2026</p></div>
+      <div class="card"><h3>Silver Medal</h3><p>10K Nordic Walking · World Championship · Lahti, Finland · 2024</p></div>
+      <div class="card"><h3>Bronze Medal</h3><p>5K Nordic Walking · World Championship · Lahti, Finland · 2024</p></div>
+      <div class="card"><h3>Double Bronze</h3><p>5K & 20K Racewalk · World Masters Games · Sydney · 2009</p></div>
+    </div>
+    <p style="margin-top:18px">World Masters Athletics national team competitions: <strong>3 Gold · 2 Silver · 4 Bronze</strong>.</p>
+  </div></div>
+  <div class="section"><div class="wrap">
+    <div class="kicker">Photo gallery</div>
+    <h2>Championships and competitions across two decades</h2>
+    <div class="grid cols-3" style="margin-top:22px">
+      ${gallery.map(([src, caption]) => `<div class="card"><img src="${src}" alt="${caption}" style="width:100%;border-radius:12px;margin-bottom:10px"><p style="font-size:14px;color:var(--muted)">${caption}</p></div>`).join("")}
+    </div>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">Career achievements</div>
+    <h2>Across five disciplines</h2>
+    <div class="grid cols-2" style="margin-top:22px">
+      <div class="card"><h3>Nordic Walking</h3>${bullets(["Silver Medal, 10K – World Championship, Lahti, Finland 2024", "Bronze Medal, 5K – World Championship, Lahti, Finland 2024", "3x USA Representative at Nordic Walking World Championships", "Active ambassador for competitive Nordic Walking in North America"])}</div>
+      <div class="card"><h3>Racewalk</h3>${bullets(["8-time USA Masters National Racewalk Champion", "34 medals at USA National & Masters Championships", "9-time medalist in national team competitions at the World Masters Athletics Championships — 3 Gold, 2 Silver, 4 Bronze", "Double Gold — 10K & 20K Race Walk, national team competitions, World Masters Athletics Championships, Daegu, South Korea 2026", "Double Bronze — 5K & 20K Racewalk, World Masters Games, Sydney 2009"])}</div>
+      <div class="card"><h3>Biathlon</h3>${bullets(["Multiple World Masters Biathlon Championship competitor", "Most recently competed in the Sprint Race, World Masters Biathlon Championships, Kontiolahti, Finland · March 20, 2026"])}</div>
+      <div class="card"><h3>Cross-Country Skiing</h3>${bullets(["World Masters XC-Ski Championship competitor", "Represented USA at World Masters XC-Ski Championships, Brusson, Italy 2006"])}</div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Overall legacy</h3>${bullets(["40 World Masters Championships across Cross-Country Skiing, Biathlon, Athletics, and Nordic Walking", "One of the most versatile and decorated Masters endurance athletes in U.S. history", "Continues to set the standard for high-performance Nordic Walking in North America"])}</div>
+  </div></div>
+  <div class="section"><div class="wrap">
+    <div class="kicker">Invite Tommy to your event</div>
+    <h2>Raise your event's credibility</h2>
+    <p>Raise the credibility of your event with a World Championship medalist presence. Available for: sanctioned competitions; technique clinics; judging & standards; regional development; media & promotion; speaking engagements.</p>
+    <p><strong>How to invite:</strong> Submit request: city, date, and event format. NWANA confirms availability and scope. Official NWANA appearance is activated.</p>
+    <div style="margin-top:22px">${contactCard("Invite Tommy Aunan", "Request Tommy Aunan's appearance at your event.")}</div>
+    <p style="margin-top:22px"><a class="card-link" href="/elite">← Back to Elite Athletes</a></p>
+  </div></div>`;
+
+	return layout("Tommy Aunan", "elite", content, "Tommy Aunan: 9x World Medalist in Nordic Walking and Masters Athletics. Photo gallery, career achievements, and event invitations.");
 }
 
 // ---------------- 20. /support (Support / Funds) ----------------
