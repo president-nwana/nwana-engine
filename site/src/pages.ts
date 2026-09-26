@@ -184,7 +184,7 @@ export async function aboutPage(): Promise<string> {
     <h2>Albert Fatikhov</h2>
     <div class="grid cols-2">
       <div class="card">
-        <div class="board-photo"><img src="https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/18/13/824/e8e0a4a3-1b9b-46a4-8703-a83f72e3d5d6-bQnjMW.png" alt="Albert Fatikhov"></div>
+        <div class="board-photo"><img src="https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/efade10b-4183-42c3-8549-bdcfaed4b27c-bQoiOp.png" alt="Albert Fatikhov"></div>
         <p>NWANA was founded by Albert Fatikhov to build a full continental federation for Nordic walking in the United States: verified competitions, fair performance levels, instructor education, and local groups, all running as one machine.</p>
         <p>As an athlete, he is a World Championship medalist: silver in the 4x5K relay and bronze in the 5K at Lahti 2024. He leads the federation the way he races, from the front.</p>
         <div class="cta-row" style="margin-top:18px">
