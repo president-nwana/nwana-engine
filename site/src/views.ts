@@ -320,6 +320,8 @@ export function layout(title: string, active: string, content: string, descripti
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)} | NWANA</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 ${description ? `<meta name="description" content="${esc(description)}">` : ""}
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-8RYTY6M2KD"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','G-8RYTY6M2KD');</script>
