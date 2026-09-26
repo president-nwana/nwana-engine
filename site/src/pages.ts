@@ -184,6 +184,7 @@ export async function aboutPage(): Promise<string> {
     <h2>Albert Fatikhov</h2>
     <div class="grid cols-2">
       <div class="card">
+        <div class="board-photo"><img src="https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/18/13/824/e8e0a4a3-1b9b-46a4-8703-a83f72e3d5d6-bQnjMW.png" alt="Albert Fatikhov"></div>
         <p>NWANA was founded by Albert Fatikhov to build a full continental federation for Nordic walking in the United States: verified competitions, fair performance levels, instructor education, and local groups, all running as one machine.</p>
         <p>As an athlete, he is a World Championship medalist: silver in the 4x5K relay and bronze in the 5K at Lahti 2024. He leads the federation the way he races, from the front.</p>
         <div class="cta-row" style="margin-top:18px">
@@ -210,30 +211,30 @@ export async function aboutPage(): Promise<string> {
         <p class="role">Board Member for Sports</p>
         <p>Certified Nordic walking trainer with about ten years in the sport. She coaches individuals and groups on technique, functional movement, and long-term health, and works to keep Nordic walking accessible across ages, fitness levels, and goals.</p>
         <p class="email"><a href="mailto:lv@nwaofna.org">lv@nwaofna.org</a></p>
-        <p><a href="https://runsignup.com/w/nwaofna/Page/LIENE-VISOCKA?_gl=1*1hhevor*_gcl_au*MzM4MDE4MjMwLjE3ODc5MDIyMTk.*_ga*ODE1MDM0NzQ4LjE3NzQ4MzQwNDI.*_ga_QKEVS8BTWC*czE3OTAwNjIzODEkbzE3OCRnMSR0MTc5MDA2MjM4NCRqNTckbDAkaDA.">Full profile</a></p>
+        <p><a href="/board/liene-visocka">Full profile</a></p>
       </div>
       <div class="card board-card">
-        <div class="board-photo">MV</div>
+        <div class="board-photo"><img src="https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/18/13/824/460f6d1b-7fc7-4172-ad9c-a83f72e3d5d6-bQnj7l.png" alt="Maris Vainovskis"></div>
         <h3>Maris Vainovskis</h3>
         <p class="role">Board Director, NWANA</p>
         <p>Partner at an international law firm in Latvia with over 25 years in banking, capital markets, and international transactions, and a top executive of the World DanceSport Federation. A former DanceSport athlete, he discovered Nordic walking about five years ago, reached podiums at the Latvian national championships, won a world title at 10 km, and completed 107 km ultra-distance walks in full Nordic walking technique.</p>
         <p class="email"><a href="mailto:mv@nwaofna.org">mv@nwaofna.org</a></p>
-        <p><a href="https://runsignup.com/w/nwaofna/Page/MARIS-VAINOVSKIS?_gl=1*1cjz36j*_gcl_au*MzM4MDE4MjMwLjE3ODc5MDIyMTk.*_ga*ODE1MDM0NzQ4LjE3NzQ4MzQwNDI.*_ga_QKEVS8BTWC*czE3OTAwNjIzODEkbzE3OCRnMSR0MTc5MDA2MjM4NCRqNTckbDAkaDA.">Full profile</a></p>
+        <p><a href="/board/maris-vainovskis">Full profile</a></p>
       </div>
       <div class="card board-card">
-        <div class="board-photo">LR</div>
+        <div class="board-photo"><img src="https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/30/13/824/7d38b8df-7030-45ad-a7b1-2e66b49af94d-bQrckk.png" alt="Leonids Reinholds"></div>
         <h3>Leonids Reinholds</h3>
         <p class="role">Board Director, NWANA</p>
         <p>His Nordic walking journey began in 2022 with a goal of well-being, not medals: within eighteen months he lost 15 kg and found competition. After representing Latvia at the Lahti 2024 World Championships, he won European Championship bronze at 5 km, silver at 21 km, and team gold in 2025. On the board he focuses on strategic development and systems that make sport and health accessible to all.</p>
         <p class="email"><a href="mailto:leonids.reinholds@nwaofna.org">leonids.reinholds@nwaofna.org</a></p>
-        <p><a href="https://runsignup.com/w/nwaofna/Page/LEONIDS-REINHOLDS?_gl=1*1cjz36j*_gcl_au*MzM4MDE4MjMwLjE3ODc5MDIyMTk.*_ga*ODE1MDM0NzQwNDI.*_ga_QKEVS8BTWC*czE3OTAwNjIzODEkbzE3OCRnMSR0MTc5MDA2MjM4NCRqNTckbDAkaDA.">Full profile</a></p>
+        <p><a href="/board/leonids-reinholds">Full profile</a></p>
       </div>
       <div class="card board-card">
         <div class="board-photo"><img src="/board/albert-tazetdinov-sq.jpg" alt="Albert Tazetdinov"></div>
         <h3>Albert Tazetdinov</h3>
         <p class="role">CEO, NWANA</p>
         <p class="email"><a href="mailto:albert.tazetdinov@nwaofna.org">albert.tazetdinov@nwaofna.org</a></p>
-        <p><a href="https://runsignup.com/w/nwaofna/Page/ALBEERT-TAZETDINOV?_gl=1*7yzgy3*_gcl_au*MzM4MDE4MjMwLjE3ODc5MDIyMTk.*_ga*ODE1MDM0NzQ4LjE3NzQ4MzQwNDI.*_ga_QKEVS8BTWC*czE3OTAwNjIzODEkbzE3OCRnMSR0MTc5MDA2MjM4NCRqNTckbDAkaDA.">Full profile</a></p>
+        <p><a href="/board/albert-tazetdinov">Full profile</a></p>
       </div>
     </div>
   </div></div>

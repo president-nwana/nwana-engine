@@ -3,6 +3,7 @@
 
 import { aboutPage, calendarPage, homePage, newsArticlePage, newsPage, resultsPage, sellersPage, winnersPage } from "./pages";
 import {
+	albertTazetdinovPage,
 	antiDopingPage,
 	becomePartnerPage,
 	brandPage,
@@ -16,6 +17,9 @@ import {
 	formsPage,
 	governancePage,
 	groupsPage,
+	leonidsReinholdsPage,
+	lieneVisockaPage,
+	marisVainovskisPage,
 	mediaContactPage,
 	partnerNetworkPage,
 	partnersPage,
@@ -166,6 +170,18 @@ export default {
 			}
 			if (request.method === "GET" && path === "/elite/tommy-aunan") {
 				return html(await tommyAunanPage());
+			}
+			if (request.method === "GET" && path === "/board/liene-visocka") {
+				return html(await lieneVisockaPage());
+			}
+			if (request.method === "GET" && path === "/board/maris-vainovskis") {
+				return html(await marisVainovskisPage());
+			}
+			if (request.method === "GET" && path === "/board/leonids-reinholds") {
+				return html(await leonidsReinholdsPage());
+			}
+			if (request.method === "GET" && path === "/board/albert-tazetdinov") {
+				return html(await albertTazetdinovPage());
 			}
 			if (request.method === "GET" && path === "/support") {
 				return html(await supportPage());

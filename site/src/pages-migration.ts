@@ -928,6 +928,98 @@ export async function tommyAunanPage(): Promise<string> {
 	return layout("Tommy Aunan", "elite", content, "Tommy Aunan: 9x World Medalist in Nordic Walking and Masters Athletics. Photo gallery, career achievements, and event invitations.");
 }
 
+// ---------------- 19c. Board member profile pages ----------------
+
+function boardProfilePage(opts: { name: string; role: string; email: string; photo: string; paragraphs: string[]; closing?: string }): string {
+	const body = `
+  ${pageHead("Board of directors", opts.name, `${opts.role}, NWANA`)}
+  <div class="section"><div class="wrap">
+    <div class="card" style="max-width:780px">
+      <div class="board-photo"><img src="${opts.photo}" alt="${opts.name}"></div>
+      <h3>${opts.name}</h3>
+      <p class="role">${opts.role}, NWANA</p>
+      <p class="email"><a href="mailto:${opts.email}">${opts.email}</a></p>
+      ${opts.paragraphs.map((p) => `<p>${p}</p>`).join("")}
+      ${opts.closing ? `<p><strong>${opts.closing}</strong></p>` : ""}
+    </div>
+    <p style="margin-top:22px"><a class="card-link" href="/about">← Back to About NWANA</a></p>
+  </div></div>`;
+	return layout(opts.name, "about", body, `${opts.name}: ${opts.role} on the NWANA board of directors.`);
+}
+
+export async function lieneVisockaPage(): Promise<string> {
+	return boardProfilePage({
+		name: "Liene Visocka",
+		role: "Board Member for Sports",
+		email: "lv@nwaofna.org",
+		photo: "https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/18/13/824/c29de07a-1301-4d5d-887c-c2ba84a4b65a-bQnj5Y.png",
+		paragraphs: [
+			"My journey in Nordic walking began approximately ten years ago in Latvia, following an active period in sports and a desire to find a sustainable, effective form of physical activity.",
+			"I was seeking a discipline that would engage multiple muscle groups, support both physical and emotional well-being, and remain accessible without significant financial investment. At the same time, it was important for me to be involved in a structured activity where progress could be measured, analyzed, and continuously improved.",
+			"Nordic walking proved to be the ideal solution.",
+			"I began by attending guided training sessions under the supervision of a professional coach, where I developed proper technique and gained a deeper understanding of the sport. Alongside regular training, I actively participated in competitions, which allowed me to track my development and refine my skills.",
+			"Over time, I achieved noticeable improvements in posture, overall physical fitness, and endurance, while also experiencing the positive impact on mental balance and well-being.",
+			"As my experience grew, so did my motivation to share this knowledge and inspire others.",
+			"This led me to pursue professional education and become a certified Nordic walking trainer. Today, I work with individuals and groups, delivering structured training sessions focused on correct technique, functional movement, and long-term health benefits.",
+			"My approach emphasizes accessibility and sustainability, ensuring that Nordic walking can be adapted to different fitness levels, ages, and goals.",
+			"In parallel with coaching, I am committed to promoting Nordic walking as a valuable and versatile activity that contributes to overall health, community engagement, and active lifestyle development. Through my work, I aim to educate, motivate, and support people in building lasting healthy habits.",
+		],
+		closing: "My goal is to continue developing high-quality training programs, sharing knowledge, and contributing to the growth and recognition of Nordic walking at both local and international levels.",
+	});
+}
+
+export async function marisVainovskisPage(): Promise<string> {
+	return boardProfilePage({
+		name: "Maris Vainovskis",
+		role: "Board Director",
+		email: "mv@nwaofna.org",
+		photo: "https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/18/13/824/460f6d1b-7fc7-4172-ad9c-a83f72e3d5d6-bQnj7l.png",
+		paragraphs: [
+			"By profession, I am a partner at an international law firm in Latvia, heading Banking and Finance as well as Corporate and Commercial legal practices, with over 25 years of experience in banking, capital markets and international transactions.",
+			"Alongside that work, I serve as a top executive of the World DanceSport Federation (WDSF) – a role that keeps me closely connected to high-performance sport governance at the global level.",
+			"My own athletic background is in DanceSport, where I competed seriously as an athlete. That foundation gave me something lasting: an understanding of what disciplined, structured movement does for the body and the mind, and an instinct to keep seeking it regardless of what life demands.",
+			"About five years ago, I discovered Nordic walking. It began simply – poles in hand, fresh air, no expectations. But what started as casual walking gradually became something much more intentional. I started learning proper technique, training consistently, and then entering the Latvian national championships. The sport rewarded every step of that progression honestly and without shortcuts.",
+			"The results followed: podiums at the Latvian national championships, a world title at 10km, and eventually ultra-distance walks of 107 kilometres – completed in full Nordic walking technique.",
+			"I share these not as credentials, but as proof of what the discipline makes possible. Nordic walking is accessible to almost anyone. It engages more than 90% of the body's muscles, supports cardiovascular health, improves posture, and creates a form of movement that is sustainable across decades.",
+			"It scales effortlessly – from a first walk in a city park to a national championship start line to a 107km ultra. Correct technique is the key that unlocks all of it.",
+			"That is the message I want people to take away. Not the titles, but the arc. A busy professional, a former athlete, a person who simply picked up poles one day – and found a sport that gave back far more than it asked.",
+		],
+		closing: "As a Director of NWANA, that is the experience I hope to help others find.",
+	});
+}
+
+export async function leonidsReinholdsPage(): Promise<string> {
+	return boardProfilePage({
+		name: "Leonids Reinholds",
+		role: "Board Director",
+		email: "leonids.reinholds@nwaofna.org",
+		photo: "https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/30/13/824/7d38b8df-7030-45ad-a7b1-2e66b49af94d-bQrckk.png",
+		paragraphs: [
+			"Leonids Reinholds believes that a single step can change a life.",
+			"His journey in Nordic walking began in 2022 – not for medals, but for well-being. At the time, he weighed 96 kg, had no athletic background, and simply wanted to feel better. One training session became two, two became a routine, and the routine turned into confidence.",
+			"In a year and a half, he lost 15 kg and discovered that his body and mind were capable of much more.",
+			"In 2023, Leonids entered his first 10 km race. A broken leg ended the season early – but that setback became a turning point. After recovery, he did not return to where he had been; he moved forward.",
+			"He completed his first 21 km race, and in 2024 represented Latvia at the World Championships in Lahti, finishing 4th. In 2025, his progress continued with a European Championship bronze at 5 km, silver at 21 km, and gold as part of the Latvian men's national team.",
+			"Beyond medals, Leonids gained something deeper – an understanding of people.",
+			"He learned that everyone needs someone who says, \u201cYou can do this.\u201d That true community supports rather than compares. That meaningful change happens faster than we think when someone believes in us.",
+			"Today, as a Board Member at NWANA, Leonids focuses on strategic development and building systems that make sport and health accessible to all.",
+		],
+		closing: "His personal journey, professional mindset, and belief in people help NWANA grow as a community where everyone can feel: \u201cThis is possible for me too.\u201d",
+	});
+}
+
+export async function albertTazetdinovPage(): Promise<string> {
+	return boardProfilePage({
+		name: "Albert Tazetdinov",
+		role: "CEO",
+		email: "albert.tazetdinov@nwaofna.org",
+		photo: "https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/18/13/824/306a42b5-fb70-4478-85b4-28f2c2aa014d-bQnkcj.png",
+		paragraphs: [
+			"Albert Tazetdinov serves as the Chief Executive Officer of the Nordic Walking Association of North America, leading the organization's day-to-day operations as it builds the continental federation for Nordic walking.",
+		],
+	});
+}
+
 // ---------------- 20. /support (Support / Funds) ----------------
 
 export async function supportPage(): Promise<string> {
