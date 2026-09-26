@@ -78,6 +78,19 @@ import { renderSponsorshipHtml } from "./operating-center-sponsorship";
 import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
 import { renderUploadsHtml } from "./operating-center-uploads";
+import { renderCreationHtml, renderCreationPacketHtml } from "./operating-center-creation";
+import {
+	createCreationPacket,
+	listCreationPackets,
+	getCreationPacket,
+	buildWritePlan,
+	probeRunSignupCredentials,
+	saveProbeResult,
+	linkRunSignupRace,
+	applyCreationStep,
+	completeManualStep,
+	setPacketApiFields,
+} from "./object-creation";
 import {
 	renderSitesHtml,
 	renderSocialHtml,
@@ -5766,7 +5779,9 @@ export default {
 					url.pathname === "/operating-center/fundraising" ||
 					url.pathname === "/operating-center/groups" ||
 					url.pathname === "/operating-center/meetings" ||
-					url.pathname === "/operating-center/operations")
+					url.pathname === "/operating-center/operations" ||
+					url.pathname === "/operating-center/creation" ||
+					url.pathname === "/operating-center/creation/packet")
 			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
@@ -5875,6 +5890,8 @@ export default {
 		if (request.method === "GET" && url.pathname === "/operating-center/groups") return htmlPage(renderGroupsHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/meetings") return htmlPage(renderMeetingsHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/operations") return htmlPage(renderOperationsHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/creation") return htmlPage(renderCreationHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/creation/packet") return htmlPage(renderCreationPacketHtml);
 
 		// ADR-0027: overview APIs for the seven new screens.
 		// ADR-0028: meetings overview.
@@ -6024,7 +6041,7 @@ export default {
 		if (url.pathname === "/api/board/protocol/process" && request.method === "POST") {
 			const body = (await request.json().catch(() => ({}))) as { meeting_id?: string };
 			const result = await processProtocol(env.nwana_engine_db, String(body.meeting_id ?? ""));
-			return json({ ok: true, ...result });
+			return json(result);
 		}
 		if (url.pathname === "/api/operating-center/uploads" && request.method === "POST") {
 			return handleUpload(request, env.nwana_engine_db);
@@ -6278,10 +6295,165 @@ export default {
 					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
 					distance: body.distance,
 				});
-				return json({ ok: true, ...result });
+				return json(result);
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Write test failed" }, 500);
+			}
+		}
+
+		// Object creation workflow: the owner creates a new NWANA object once.
+		// The machine fills every field the official RunSignup API accepts,
+		// links the dashboard-created race, and hands the owner an exact
+		// manual last mile for the rest. Reads are owner-gated above; writes
+		// additionally require the explicit "APPLY_STEP" confirmation per step.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/object-creation/packets") {
+			try {
+				const packets = await listCreationPackets(env.nwana_engine_db);
+				return json({
+					ok: true,
+					packets: packets.map((p) => ({
+						packet_id: p.packet_id,
+						title: p.title,
+						kind: p.meta.kind,
+						kind_label: p.meta.kind,
+						status: p.status,
+						runsignup_race_id: p.meta.runsignup_race_id,
+						runsignup_race_name: p.meta.runsignup_race_name,
+						created_at: p.created_at,
+					})),
+				});
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Packets failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/object-creation/packets") {
+			try {
+				const body = (await request.json()) as Record<string, unknown>;
+				const packet = await createCreationPacket(env.nwana_engine_db, {
+					kind: body.kind as "challenge",
+					title: String(body.title ?? ""),
+					description: body.description ? String(body.description) : undefined,
+					event_date: body.event_date ? String(body.event_date) : undefined,
+					distance: body.distance ? String(body.distance) : undefined,
+					format: body.format ? String(body.format) : undefined,
+					external_race_url: body.external_race_url ? String(body.external_race_url) : undefined,
+					external_results_url: body.external_results_url ? String(body.external_results_url) : undefined,
+					facebook_page_id: body.facebook_page_id ? String(body.facebook_page_id) : undefined,
+					notes: body.notes ? String(body.notes) : undefined,
+				});
+				return json({ ok: true, packet });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Create packet failed" }, 400);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/object-creation/packet") {
+			try {
+				const packetId = url.searchParams.get("packet_id") ?? "";
+				const packet = await getCreationPacket(env.nwana_engine_db, packetId);
+				if (!packet) return json({ ok: false, error: "Unknown packet" }, 404);
+				return json({ ok: true, packet, plan: buildWritePlan(packet) });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Packet failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/object-creation/link") {
+			try {
+				const body = (await request.json()) as { packet_id?: string; race_id?: number; event_id?: number };
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const result = await linkRunSignupRace({
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					packetId: String(body.packet_id ?? ""),
+					raceId: Number(body.race_id),
+					eventId: body.event_id !== undefined ? Number(body.event_id) : undefined,
+				});
+				return json(result);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Link failed" }, 400);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/object-creation/probe") {
+			try {
+				const body = (await request.json()) as { packet_id?: string };
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const packetId = String(body.packet_id ?? "");
+				const probe = await probeRunSignupCredentials({ accessToken: env.RUNSIGNUP_ACCESS_TOKEN });
+				const packet = await saveProbeResult(env.nwana_engine_db, packetId, probe);
+				return json({ ok: true, probe, packet_id: packet.packet_id, write_access: packet.meta.write_access });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Probe failed" }, 400);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/object-creation/fields") {
+			try {
+				const body = (await request.json()) as Record<string, unknown> & { packet_id?: string };
+				const packetId = String(body.packet_id ?? "");
+				const num = (v: unknown): number | undefined => {
+					if (typeof v === "number" && Number.isInteger(v) && v > 0) return v;
+					return undefined;
+				};
+				const packet = await setPacketApiFields(env.nwana_engine_db, packetId, {
+					description: typeof body.description === "string" ? body.description : undefined,
+					event_date: typeof body.event_date === "string" ? body.event_date : undefined,
+					distance: typeof body.distance === "string" ? body.distance : undefined,
+					format: typeof body.format === "string" ? body.format : undefined,
+					external_race_url: typeof body.external_race_url === "string" ? body.external_race_url : undefined,
+					external_results_url: typeof body.external_results_url === "string" ? body.external_results_url : undefined,
+					facebook_page_id: typeof body.facebook_page_id === "string" ? body.facebook_page_id : undefined,
+					runsignup_event_id: num(body.runsignup_event_id),
+					registration_periods: Array.isArray(body.registration_periods) ? body.registration_periods as [] : undefined,
+					age_based_pricing: Array.isArray(body.age_based_pricing) ? body.age_based_pricing as [] : undefined,
+					questions: Array.isArray(body.questions) ? body.questions as [] : undefined,
+					append_questions: typeof body.append_questions === "boolean" ? body.append_questions : undefined,
+					coupons: Array.isArray(body.coupons) ? body.coupons as [] : undefined,
+					notes: typeof body.notes === "string" ? body.notes : undefined,
+				});
+				return json({ ok: true, packet, plan: buildWritePlan(packet) });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Save fields failed" }, 400);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/object-creation/apply") {
+			try {
+				const body = (await request.json()) as { packet_id?: string; step_id?: string; confirm?: string };
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const result = await applyCreationStep({
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					packetId: String(body.packet_id ?? ""),
+					stepId: String(body.step_id ?? ""),
+					confirm: String(body.confirm ?? ""),
+				});
+				return json(result);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Apply failed" }, 400);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/object-creation/manual") {
+			try {
+				const body = (await request.json()) as { packet_id?: string; step_id?: string };
+				const result = await completeManualStep(
+					env.nwana_engine_db,
+					String(body.packet_id ?? ""),
+					String(body.step_id ?? ""),
+				);
+				return json(result);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Manual step failed" }, 400);
 			}
 		}
 

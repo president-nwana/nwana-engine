@@ -475,7 +475,7 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 	});
 }
 
-export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity" | "sites" | "social" | "ads" | "sellers" | "partners" | "fundraising" | "groups" | "meetings" | "operations";
+export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity" | "sites" | "social" | "ads" | "sellers" | "partners" | "fundraising" | "groups" | "meetings" | "operations" | "creation";
 
 /**
  * ADR-0023: shared button menu rendered directly under the header on every
@@ -503,6 +503,7 @@ export function operatingCenterMenu(active: OperatingCenterPageId): string {
 		{ id: "groups", label: "Groups", href: "/operating-center/groups" },
 		{ id: "meetings", label: "Meetings", href: "/operating-center/meetings" },
 		{ id: "operations", label: "Operations", href: "/operating-center/operations" },
+		{ id: "creation", label: "Create", href: "/operating-center/creation" },
 	];
 	return (
 		'<nav class="oc-menu" aria-label="Operating center">' +

@@ -733,9 +733,9 @@ export async function runSignupGetJson(
 	return (await response.json()) as Record<string, unknown>;
 }
 
-// Shared with write-test flow below.
+// Shared with write-test flow below and the object-creation workflow.
 
-async function postRunSignupForm(
+export async function postRunSignupForm(
 	url: string,
 	accessToken: string,
 	payload: unknown,
