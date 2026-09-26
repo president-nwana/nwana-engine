@@ -13,8 +13,8 @@ import {
 	type SponsorshipAssetRecord,
 } from "../src/sponsorship-asset";
 
-// Minimal stateful D1 stub: tables sponsorship_assets and funds, keyed SQL
-// matching the exact statements issued by src/sponsorship-asset.ts.
+// Minimal stateful D1 stub: tables sponsorship_assets, funds, and objects,
+// keyed SQL matching the exact statements issued by src/sponsorship-asset.ts.
 function makeDb() {
 	const assets: SponsorshipAssetRecord[] = [];
 	const funds = [
@@ -25,6 +25,14 @@ function makeDb() {
 			goal_amount: 50000,
 			currency: "USD",
 			status: "active",
+		},
+	];
+	// Canonical objects (as the object creation workflow materializes them).
+	const objects = [
+		{
+			object_id: "SERIES-2027",
+			title: "NWANA Open Series 2027",
+			metadata: JSON.stringify({ description: "The 2027 open series." }),
 		},
 	];
 	const db = {
@@ -45,6 +53,10 @@ function makeDb() {
 					}
 					if (sql.startsWith("SELECT id, name, description, goal_amount, currency, status FROM funds WHERE id = ?")) {
 						return funds.find((f) => f.id === args[0]) ?? null;
+					}
+					if (sql.startsWith("SELECT object_id, title, metadata FROM objects WHERE object_id = ? LIMIT 1")) {
+						const row = objects.find((o) => o.object_id === args[0]);
+						return row ? { object_id: row.object_id, title: row.title, metadata: row.metadata } : null;
 					}
 					throw new Error(`unexpected first(): ${sql}`);
 				},
@@ -171,6 +183,20 @@ describe("package builder", () => {
 		expect(pkg.reference_pricing).toContain("2026-12-31");
 	});
 
+	it("builds a new property package with TBD pricing, never invented numbers", () => {
+		const pkg = buildSponsorshipAssetPackage({
+			object_type: "championship",
+			object_id: "RUNSIGNUP-RACE-906",
+			name: "US Championship",
+			description: "The national championship.",
+		});
+		expect(pkg.title).toContain("US Championship");
+		expect(pkg.description).toBe("The national championship.");
+		expect(pkg.reference_pricing).toContain("TBD");
+		expect(pkg.reference_pricing).not.toContain("$25,000");
+		expect(pkg.audience).toContain("NWANA community");
+	});
+
 	it("builds the Fund package with TBD pricing, never invented numbers", () => {
 		const pkg = buildSponsorshipAssetPackage({
 			object_type: "fund",
@@ -187,15 +213,31 @@ describe("package builder", () => {
 
 describe("generateSponsorshipAsset", () => {
 	it("rejects unknown object types without guessing", async () => {
-		const r = await generateSponsorshipAsset(makeDb(), "challenge", "x1");
+		const r = await generateSponsorshipAsset(makeDb(), "sponsor", "x1");
 		expect(r.ok).toBe(false);
 		if (!r.ok) expect(r.error).toContain("Unknown object type");
 	});
 
-	it("rejects unknown series", async () => {
-		const r = await generateSponsorshipAsset(makeDb(), "series", "SERIES_2027");
+	it("rejects an unknown series id", async () => {
+		const r = await generateSponsorshipAsset(makeDb(), "series", "SERIES-9999");
 		expect(r.ok).toBe(false);
-		if (!r.ok) expect(r.error).toContain("SERIES_2026");
+		if (!r.ok) expect(r.error).toContain("not found");
+	});
+
+	it("generates an asset for a new canonical series object", async () => {
+		const r = await generateSponsorshipAsset(makeDb(), "series", "SERIES-2027");
+		expect(r.ok).toBe(true);
+		if (r.ok) {
+			expect(r.asset.title).toContain("NWANA Open Series 2027");
+			expect(r.asset.description).toBe("The 2027 open series.");
+			expect(r.asset.stage).toBe("draft");
+		}
+	});
+
+	it("generates an asset for a challenge object", async () => {
+		const r = await generateSponsorshipAsset(makeDb(), "challenge", "SERIES-2027");
+		expect(r.ok).toBe(true);
+		if (r.ok) expect(r.asset.object_type).toBe("challenge");
 	});
 
 	it("rejects a missing fund", async () => {

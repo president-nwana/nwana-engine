@@ -123,10 +123,12 @@ export function sponsorshipAssetNextAction(
 	}
 }
 
-export type SponsorshipAssetObjectType = "series" | "fund";
+export type SponsorshipAssetObjectType = "series" | "championship" | "challenge" | "fund";
 
 export const SPONSORSHIP_ASSET_OBJECT_TYPES: readonly SponsorshipAssetObjectType[] = [
 	"series",
+	"championship",
+	"challenge",
 	"fund",
 ];
 
@@ -168,6 +170,13 @@ const PRICING_FUND_TBD =
 	"$25K HQ Founder) are charitable gifts, not sponsorship. 2027 sponsorship " +
 	"inventory and pricing to be finalized with the sales partner.";
 
+// New competition properties fan out here after creation (see
+// src/object-fanout.ts). Facts come from the canonical object row — the
+// machine never guesses audience/delivers for a new property.
+const PRICING_PROPERTY_TBD =
+	"TBD. 2027 sponsorship inventory and pricing to be finalized with the " +
+	"sales partner. Founding-partner positioning available on request.";
+
 // Verified Series 2026 facts (machine master map; Series 2026 is the live
 // closed loop: hub series.nwaofna.org, weekly virtual races through Dec 2026).
 export const SERIES_2026_FACTS = {
@@ -193,13 +202,36 @@ export const SERIES_2026_FACTS = {
 export function buildSponsorshipAssetPackage(
 	input: SponsorshipAssetPackageInput,
 ): SponsorshipAssetPackage {
-	if (input.object_type === "series") {
+	// SERIES_2026 keeps its verified facts and reference grid (existing
+	// behavior, unchanged).
+	if (input.object_type === "series" && input.object_id === SERIES_2026_FACTS.object_id) {
 		return {
 			title: `Sponsorship package: ${input.name}`,
 			description: input.description,
 			audience: SERIES_2026_FACTS.audience,
 			delivers: SERIES_2026_FACTS.delivers,
 			reference_pricing: PRICING_2026_REFERENCE,
+		};
+	}
+	// New competition properties: name/description from the canonical
+	// object; audience/delivers are generic federation copy — the machine
+	// never invents property facts. Pricing stays TBD until the 2027
+	// inventory is finalized with the sales partner.
+	if (
+		input.object_type === "series" ||
+		input.object_type === "championship" ||
+		input.object_type === "challenge"
+	) {
+		return {
+			title: `Sponsorship package: ${input.name}`,
+			description: input.description,
+			audience:
+				"NWANA community: Nordic walkers, clubs, and active-lifestyle " +
+				"audiences across North America.",
+			delivers:
+				"Brand association with an official NWANA competition property; " +
+				"visibility across NWANA channels and at the event.",
+			reference_pricing: PRICING_PROPERTY_TBD,
 		};
 	}
 	return {
@@ -249,6 +281,39 @@ interface FundRow {
 	status: string;
 }
 
+/**
+ * Resolve a canonical Machine object (series, championship, challenge)
+ * created through the object creation workflow. Facts come from the
+ * object's own row — never guessed, never inferred from titles or URLs.
+ */
+async function resolveCanonicalObject(
+	db: D1Database,
+	object_type: SponsorshipAssetObjectType,
+	object_id: string,
+): Promise<
+	| { ok: true; input: SponsorshipAssetPackageInput }
+	| { ok: false; error: string }
+> {
+	const row = await db
+		.prepare(`SELECT object_id, title, metadata FROM objects WHERE object_id = ? LIMIT 1`)
+		.bind(object_id)
+		.first<{ object_id: string; title: string; metadata: string | null }>();
+	if (!row) {
+		return { ok: false, error: `Object "${object_id}" not found.` };
+	}
+	let description = row.title;
+	try {
+		const meta = row.metadata ? (JSON.parse(row.metadata) as { description?: string | null }) : null;
+		if (meta?.description) description = meta.description;
+	} catch {
+		// metadata is optional; fall back to the title.
+	}
+	return {
+		ok: true,
+		input: { object_type, object_id, name: row.title, description },
+	};
+}
+
 async function resolveParentObject(
 	db: D1Database,
 	object_type: string,
@@ -264,21 +329,25 @@ async function resolveParentObject(
 		};
 	}
 	if (object_type === "series") {
-		if (object_id !== SERIES_2026_FACTS.object_id) {
+		if (object_id === SERIES_2026_FACTS.object_id) {
 			return {
-				ok: false,
-				error: `Unknown series "${object_id}". The only series in the engine is ${SERIES_2026_FACTS.object_id}.`,
+				ok: true,
+				input: {
+					object_type,
+					object_id,
+					name: SERIES_2026_FACTS.name,
+					description: SERIES_2026_FACTS.description,
+				},
 			};
 		}
-		return {
-			ok: true,
-			input: {
-				object_type,
-				object_id,
-				name: SERIES_2026_FACTS.name,
-				description: SERIES_2026_FACTS.description,
-			},
-		};
+		// New series objects created through the creation workflow fan out
+		// here automatically; facts come from the canonical object row.
+		return resolveCanonicalObject(db, object_type, object_id);
+	}
+	if (object_type === "championship" || object_type === "challenge") {
+		// Championship/challenge properties fan out here on creation;
+		// facts come from the canonical object row.
+		return resolveCanonicalObject(db, object_type, object_id);
 	}
 	const fund = await db
 		.prepare(`SELECT id, name, description, goal_amount, currency, status FROM funds WHERE id = ?`)

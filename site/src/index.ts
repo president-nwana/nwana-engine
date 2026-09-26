@@ -1,7 +1,7 @@
 // nwana-site: the public NWANA federation website.
 // Server-rendered pages, read-only access to the engine D1.
 
-import { aboutPage, calendarPage, homePage, newsArticlePage, newsPage, resultsPage, sellersPage, winnersPage } from "./pages";
+import { aboutPage, calendarPage, challengesPage, homePage, newsArticlePage, newsPage, resultsPage, sellersPage, seriesPage, winnersPage } from "./pages";
 import {
 	albertTazetdinovPage,
 	antiDopingPage,
@@ -102,6 +102,12 @@ export default {
 			}
 			if (request.method === "GET" && path === "/calendar") {
 				return html(await calendarPage(env.nwana_site_db));
+			}
+			if (request.method === "GET" && path === "/challenges") {
+				return html(await challengesPage(env.nwana_site_db));
+			}
+			if (request.method === "GET" && path === "/series") {
+				return html(await seriesPage(env.nwana_site_db));
 			}
 			if (request.method === "GET" && path === "/winners") {
 				return html(await winnersPage(env.nwana_site_db));

@@ -273,3 +273,120 @@ export async function getStandings(db: D1Database, distance: Distance): Promise<
 			a.bestTimeSecs - b.bestTimeSecs,
 	);
 }
+
+// ---------------------------------------------------------------------------
+// Object fan-out: the canonical public calendar.
+// Created once in the Machine (Operating Center -> creation packet -> link);
+// the site reads it directly from the shared D1, no data copies.
+// kind='competition' feeds /calendar and the homepage; kind='challenge'
+// feeds /challenges only. The two are never mixed in a public view.
+// ---------------------------------------------------------------------------
+
+export interface CalendarItem {
+	id: number;
+	object_id: string;
+	kind: "competition" | "challenge";
+	title: string;
+	event_date: string | null;
+	url: string | null;
+	series_ref: string | null;
+	championship_ref: string | null;
+	status: string;
+}
+
+interface CalendarItemRow {
+	id: number;
+	object_id: string;
+	kind: "competition" | "challenge";
+	title: string;
+	event_date: string | null;
+	url: string | null;
+	series_ref: string | null;
+	championship_ref: string | null;
+	status: string;
+}
+
+function mapCalendarRow(r: CalendarItemRow): CalendarItem {
+	return {
+		id: r.id,
+		object_id: r.object_id,
+		kind: r.kind,
+		title: r.title,
+		event_date: r.event_date,
+		url: r.url,
+		series_ref: r.series_ref,
+		championship_ref: r.championship_ref,
+		status: r.status,
+	};
+}
+
+/** Competition calendar: series, championships, competition events. Never challenges. */
+export async function getCompetitionCalendar(db: D1Database, limit = 80): Promise<CalendarItem[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT id, object_id, kind, title, event_date, url, series_ref, championship_ref, status
+			 FROM public_calendar
+			 WHERE kind = 'competition' AND status != 'cancelled' AND (event_date IS NULL OR event_date >= ?)
+			 ORDER BY event_date ASC, title ASC
+			 LIMIT ?`,
+		)
+		.bind(todayISO(), limit)
+		.all<CalendarItemRow>();
+	return (results ?? []).map(mapCalendarRow);
+}
+
+/** Challenges calendar: challenges only. Never competitions. */
+export async function getChallengeCalendar(db: D1Database, limit = 80): Promise<CalendarItem[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT id, object_id, kind, title, event_date, url, series_ref, championship_ref, status
+			 FROM public_calendar
+			 WHERE kind = 'challenge' AND status != 'cancelled' AND (event_date IS NULL OR event_date >= ?)
+			 ORDER BY event_date ASC, title ASC
+			 LIMIT ?`,
+		)
+		.bind(todayISO(), limit)
+		.all<CalendarItemRow>();
+	return (results ?? []).map(mapCalendarRow);
+}
+
+/** Series and championship objects for the /series page. */
+export interface SeriesObject {
+	object_id: string;
+	object_type: string;
+	title: string;
+	created_at: string | null;
+}
+
+export async function getCompetitionSeries(db: D1Database, limit = 40): Promise<SeriesObject[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT object_id, object_type, title, created_at
+			 FROM objects
+			 WHERE object_type IN ('series', 'championship') AND status = 'active'
+			 ORDER BY created_at DESC
+			 LIMIT ?`,
+		)
+		.bind(limit)
+		.all<SeriesObject>();
+	return results ?? [];
+}
+
+/** Calendar rows scoped to one series or championship (its own row + its events). */
+export async function getCalendarForSeries(
+	db: D1Database,
+	seriesId: string,
+): Promise<CalendarItem[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT id, object_id, kind, title, event_date, url, series_ref, championship_ref, status
+			 FROM public_calendar
+			 WHERE kind = 'competition' AND status != 'cancelled'
+			   AND (object_id = ? OR series_ref = ? OR championship_ref = ?)
+			   AND (event_date IS NULL OR event_date >= ?)
+			 ORDER BY event_date ASC, title ASC`,
+		)
+		.bind(seriesId, seriesId, seriesId, todayISO())
+		.all<CalendarItemRow>();
+	return (results ?? []).map(mapCalendarRow);
+}

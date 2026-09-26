@@ -6341,6 +6341,9 @@ export default {
 					external_race_url: body.external_race_url ? String(body.external_race_url) : undefined,
 					external_results_url: body.external_results_url ? String(body.external_results_url) : undefined,
 					facebook_page_id: body.facebook_page_id ? String(body.facebook_page_id) : undefined,
+					parent_object_id: body.parent_object_id ? String(body.parent_object_id) : undefined,
+					announce_news: body.announce_news === true,
+					sponsorship_relevant: body.sponsorship_relevant !== false,
 					notes: body.notes ? String(body.notes) : undefined,
 				});
 				return json({ ok: true, packet });
@@ -6357,6 +6360,35 @@ export default {
 				return json({ ok: true, packet, plan: buildWritePlan(packet) });
 			} catch (error) {
 				return json({ ok: false, error: error instanceof Error ? error.message : "Packet failed" }, 500);
+			}
+		}
+
+		// Object fan-out: the canonical public calendar as the Operating
+		// Center sees it. Competition and challenge sections are kept
+		// strictly separate, mirroring the public site.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/object-creation/calendar") {
+			try {
+				const db = env.nwana_engine_db;
+				const kind = url.searchParams.get("kind");
+				const rows = async (k: "competition" | "challenge") => {
+					try {
+						const { results } = await db
+							.prepare(
+								`SELECT object_id, kind, title, event_date, url, series_ref, championship_ref, status, updated_at
+								 FROM public_calendar WHERE kind = ? ORDER BY event_date ASC, title ASC LIMIT 200`,
+							)
+							.bind(k)
+							.all();
+						return results ?? [];
+					} catch {
+						return null;
+					}
+				};
+				const competition = kind && kind !== "competition" ? undefined : await rows("competition");
+				const challenge = kind && kind !== "challenge" ? undefined : await rows("challenge");
+				return json({ ok: true, competition, challenge });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Calendar failed" }, 500);
 			}
 		}
 
@@ -6410,6 +6442,9 @@ export default {
 					external_race_url: typeof body.external_race_url === "string" ? body.external_race_url : undefined,
 					external_results_url: typeof body.external_results_url === "string" ? body.external_results_url : undefined,
 					facebook_page_id: typeof body.facebook_page_id === "string" ? body.facebook_page_id : undefined,
+					parent_object_id: typeof body.parent_object_id === "string" ? body.parent_object_id : undefined,
+					announce_news: typeof body.announce_news === "boolean" ? body.announce_news : undefined,
+					sponsorship_relevant: typeof body.sponsorship_relevant === "boolean" ? body.sponsorship_relevant : undefined,
 					runsignup_event_id: num(body.runsignup_event_id),
 					registration_periods: Array.isArray(body.registration_periods) ? body.registration_periods as [] : undefined,
 					age_based_pricing: Array.isArray(body.age_based_pricing) ? body.age_based_pricing as [] : undefined,

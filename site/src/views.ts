@@ -226,9 +226,11 @@ export function header(active: string): string {
 		link("/", "Home", "home"),
 		link("/about", "About", "about"),
 		link("/elite", "Elite Athletes", "elite"),
-		drop("Compete", ["results", "calendar", "winners"], [
+		drop("Compete", ["results", "calendar", "challenges", "series", "winners"], [
 			{ href: "/results", l: "Results", n: "Verified results and standings" },
-			{ href: "/calendar", l: "Calendar", n: "Upcoming Series races" },
+			{ href: "/calendar", l: "Calendar", n: "Competition calendar: series, championships, events" },
+			{ href: "/challenges", l: "Challenges", n: "Challenges, separate from competitions" },
+			{ href: "/series", l: "Series & Championships", n: "Series and championship pages" },
 			{ href: "/winners", l: "Winners", n: "Congratulations to level winners" },
 		]),
 		drop("Learn", ["choose-your-path", "events"], [
@@ -318,7 +320,9 @@ export function footer(): string {
     <a href="/faq">FAQ</a>
     <a href="mailto:info@nwaofna.org">info@nwaofna.org</a>
     <a href="/news">News</a>
-    <a href="/calendar">Race calendar</a>
+    <a href="/calendar">Competition calendar</a>
+    <a href="/challenges">Challenges</a>
+    <a href="/series">Series &amp; Championships</a>
   </div>
 </div></footer>
 <div class="copyright"><div class="wrap">© ${new Date().getFullYear()} Nordic Walking Association of North America, Inc. All rights reserved.</div></div>`;

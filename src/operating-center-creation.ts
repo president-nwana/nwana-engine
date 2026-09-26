@@ -171,6 +171,8 @@ const CREATION_LIST_SCRIPT = `
 		const f=new FormData(e.currentTarget);
 		const body={};
 		['kind','title','description','event_date','distance','format','external_race_url','external_results_url','facebook_page_id','notes'].forEach(k=>{const v=String(f.get(k)||'').trim();if(v)body[k]=v});
+		const parent=String(f.get('parent_object_id')||'').trim();if(parent)body.parent_object_id=parent;
+		body.announce_news=f.get('announce_news')==='on';
 		try{
 			const data=await api('/api/operating-center/object-creation/packets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
 			location.href='/operating-center/creation/packet?packet_id='+encodeURIComponent(data.packet.packet_id);
@@ -207,6 +209,10 @@ export function renderCreationHtml(): string {
 				<div class="row">
 					<div><label for="np-url">External race URL</label><input id="np-url" name="external_race_url" placeholder="https://…"></div>
 					<div><label for="np-results">External results URL</label><input id="np-results" name="external_results_url" placeholder="https://…"></div>
+				</div>
+				<div class="row">
+					<div><label for="np-parent">Parent series / championship object ID</label><input id="np-parent" name="parent_object_id" placeholder="optional — e.g. RUNSIGNUP-RACE-123"></div>
+					<div><label class="check"><input type="checkbox" id="np-news" name="announce_news"> Announce on the public site (news item)</label></div>
 				</div>
 				<label for="np-notes">Notes</label>
 				<textarea id="np-notes" name="notes" placeholder="Internal notes for the owner."></textarea>
@@ -253,7 +259,20 @@ const CREATION_DETAIL_SCRIPT = `
 				?'<div class="detail"><b>RunSignup race:</b> '+esc(plan.runsignup_race_id)+(meta.runsignup_race_name?' — '+esc(meta.runsignup_race_name):'')+'</div>'
 				:'<div class="detail"><b>RunSignup race:</b> not linked yet</div>')+
 			(plan.probe_note?'<div class="detail"><b>Probe:</b> '+esc(plan.probe_note)+'</div>':'')+
-			'<div class="detail meta">'+esc(plan.report||'')+'</div></section>';
+			'<div class="detail meta">'+esc(plan.report||'')+'</div>';
+		// Published surfaces: where the linked object automatically appeared
+		// (fan-out ran inside the link action — no second manual entry).
+		if(meta.fanout){
+			const f=meta.fanout;
+			const items=[];
+			if(f.calendar)items.push('<b>Public calendar</b> ('+esc(f.calendar.kind)+')');
+			if(f.parent_relationship)items.push('<b>Series/championship link</b>');
+			if(f.news)items.push('<b>News</b> /'+esc(f.news.slug));
+			if(f.sponsorship_asset)items.push('<b>Sponsorship draft</b>'+(f.sponsorship_asset.generated?' (new)':''));
+			if(f.activity)items.push('<b>Activity log</b>');
+			h+='<div class="detail"><b>Published surfaces:</b> '+(items.length?items.join(' · '):'none')+'</div>';
+		}
+		h+='</section>';
 
 		h+='<section class="panel"><h2>1. Link the dashboard-created race</h2>'+
 			'<p class="meta">Create the object in the RunSignup dashboard first (the API cannot do it), then paste the Race ID. The machine verifies it with a read-only API call.</p>'+
@@ -312,7 +331,10 @@ const CREATION_DETAIL_SCRIPT = `
 			'<div class="row"><div><label for="f-url">External race URL</label><input id="f-url" name="external_race_url" value="'+esc(meta.external_race_url||'')+'"></div>'+
 			'<div><label for="f-results">External results URL</label><input id="f-results" name="external_results_url" value="'+esc(meta.external_results_url||'')+'"></div></div>'+
 			'<div class="row"><div><label for="f-event">Event ID</label><input id="f-event" name="runsignup_event_id" inputmode="numeric" value="'+esc(meta.runsignup_event_id||'')+'"></div>'+
-			'<div><label for="f-append">Questions mode</label><select id="f-append" name="append_questions"><option value="T"'+(meta.append_questions===false?'':' selected')+'>Append (safe, keeps existing)</option><option value="F"'+(meta.append_questions===false?' selected':'')+'>Replace (deletes omitted)</option></select></div></div>'+
+			'<div><label for="f-parent">Parent series / championship object ID</label><input id="f-parent" name="parent_object_id" value="'+esc(meta.parent_object_id||'')+'"></div></div>'+
+			'<div class="row"><div><label class="check"><input type="checkbox" id="f-news" name="announce_news"'+(meta.announce_news?' checked':'')+'> Announce on the public site</label></div>'+
+			'<div><label class="check"><input type="checkbox" id="f-spons" name="sponsorship_relevant"'+(meta.sponsorship_relevant===false?'':' checked')+'> Sponsorship-relevant</label></div></div>'+
+			'<div class="row"><div><label for="f-append">Questions mode</label><select id="f-append" name="append_questions"><option value="T"'+(meta.append_questions===false?'':' selected')+'>Append (safe, keeps existing)</option><option value="F"'+(meta.append_questions===false?' selected':'')+'>Replace (deletes omitted)</option></select></div></div>'+
 			'<label for="f-periods">Registration periods (JSON array)</label><textarea id="f-periods" name="registration_periods">'+esc(prettify(meta.registration_periods||[]))+'</textarea>'+
 			'<label for="f-pricing">Age-based pricing (JSON array)</label><textarea id="f-pricing" name="age_based_pricing">'+esc(prettify(meta.age_based_pricing||[]))+'</textarea>'+
 			'<label for="f-questions">Questions (JSON array)</label><textarea id="f-questions" name="questions">'+esc(prettify(meta.questions||[]))+'</textarea>'+
@@ -356,6 +378,9 @@ const CREATION_DETAIL_SCRIPT = `
 			const f=new FormData(e.currentTarget);
 			const body={packet_id:packetId()};
 			['description','event_date','distance','format','external_race_url','external_results_url','facebook_page_id','notes'].forEach(k=>{body[k]=String(f.get(k)||'')});
+		const par=String(f.get('parent_object_id')||'').trim();body.parent_object_id=par;
+		body.announce_news=f.get('announce_news')==='on';
+		body.sponsorship_relevant=f.get('sponsorship_relevant')==='on';
 			const eid=String(f.get('runsignup_event_id')||'').trim();
 			if(eid)body.runsignup_event_id=Number(eid);
 			body.append_questions=String(f.get('append_questions')||'T')==='T';

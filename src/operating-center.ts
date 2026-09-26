@@ -290,6 +290,16 @@ async function count(db: D1Database, sql: string): Promise<number> {
 	return Number(row?.total ?? 0);
 }
 
+/** Count that returns null instead of throwing when the table does not
+ * exist yet (e.g. a migration pending application). */
+async function safeCount(db: D1Database, sql: string): Promise<number | null> {
+	try {
+		return await count(db, sql);
+	} catch {
+		return null;
+	}
+}
+
 // ADR-0023: activity feed. What is happening (audit trail), what is new
 // (recent events), what requires reading (owner attention items). Built
 // from the audit log plus explicit queues. No per-member read state: there
@@ -445,13 +455,17 @@ export async function acknowledgeRead(request: Request, db: D1Database): Promise
 }
 
 export async function getOperatingCenterOverview(db: D1Database): Promise<Response> {
-	const [initiatives, boardItems, decisions, workItems, objects, publishedResults] = await Promise.all([
+	const [initiatives, boardItems, decisions, workItems, objects, publishedResults, calendarCompetition, calendarChallenge] = await Promise.all([
 		count(db, "SELECT COUNT(*) AS total FROM initiatives WHERE status IN ('NEW', 'UNDER_REVIEW', 'PROPOSED')"),
 		count(db, "SELECT COUNT(*) AS total FROM board_submissions WHERE status IN ('PENDING', 'AGENDA')"),
 		count(db, "SELECT COUNT(*) AS total FROM decision_requests WHERE status = 'PENDING'"),
 		count(db, "SELECT COUNT(*) AS total FROM work_items WHERE status IN ('READY', 'IN_PROGRESS', 'BLOCKED')"),
 		count(db, "SELECT COUNT(*) AS total FROM objects"),
 		count(db, "SELECT COUNT(*) AS total FROM result_publication_history WHERE status = 'PUBLISHED'"),
+		// Object fan-out: canonical public calendar counts, kept separate by kind.
+		// Resilient to the migration not being applied yet (returns null).
+		safeCount(db, "SELECT COUNT(*) AS total FROM public_calendar WHERE kind = 'competition' AND status != 'cancelled'"),
+		safeCount(db, "SELECT COUNT(*) AS total FROM public_calendar WHERE kind = 'challenge' AND status != 'cancelled'"),
 	]);
 
 	return response({
@@ -464,9 +478,18 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 			active_work_items: workItems,
 			connected_objects: objects,
 			published_results: publishedResults,
+			public_calendar_competition: calendarCompetition,
+			public_calendar_challenge: calendarChallenge,
 		},
 		sections: {
 			competition_calendar: { available: true, endpoint: "/api/operating-center/race-lifecycle" },
+			public_calendar: {
+				available: true,
+				endpoint: "/api/operating-center/object-creation/calendar",
+				competition: calendarCompetition,
+				challenge: calendarChallenge,
+				note: "Created once in the Machine; appears here, on the public site calendars, and in sponsorship drafts automatically.",
+			},
 			sponsors: { available: false, reason: "Sponsor pipeline is not connected yet" },
 			donations: { available: false, reason: "Donation outcome feed is not connected yet" },
 			google_ads: { available: true, endpoint: "/integrations/google-ads/status" },

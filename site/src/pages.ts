@@ -1,6 +1,7 @@
 // Page renderers for the NWANA public site. All copy is English, no em-dashes.
 
 import {
+	CalendarItem,
 	DISTANCES,
 	Distance,
 	LEVEL_NAMES,
@@ -8,6 +9,10 @@ import {
 	RaceEvent,
 	StandingRow,
 	genderLabel,
+	getCalendarForSeries,
+	getChallengeCalendar,
+	getCompetitionCalendar,
+	getCompetitionSeries,
 	getNews,
 	getNewsItem,
 	getPastResults,
@@ -37,26 +42,123 @@ function statBand(stats: { finishes: number; events: number; athletes: number })
   </div></div>`;
 }
 
-function upcomingCard(event: RaceEvent): string {
-	const reg = registrationUrl(event);
+// ---------------------------------------------------------------------------
+// Object fan-out: unified calendar entries from the canonical public
+// calendar (created once in the Machine) merged with the legacy race
+// results table. Competition and challenge entries are never mixed.
+// ---------------------------------------------------------------------------
+
+interface CalEntry {
+	title: string;
+	event_date: string | null;
+	sub: string;
+	url: string | null;
+}
+
+function entryFromRaceEvent(event: RaceEvent): CalEntry {
+	return {
+		title: event.event_name ?? `${event.distance} Nordic Walking Race`,
+		event_date: event.event_date,
+		sub: `${weekdayOf(event.event_date)} · ${event.distance} · Virtual, poles mandatory · Results verified after the race`,
+		url: registrationUrl(event),
+	};
+}
+
+function entryFromCalendarItem(item: CalendarItem, sub: string): CalEntry {
+	return {
+		title: item.title,
+		event_date: item.event_date,
+		sub: `${weekdayOf(item.event_date)} · ${sub}`,
+		url: item.url,
+	};
+}
+
+/** Merge entries, dropping exact title+date duplicates (the same object can
+ * appear in both the legacy results table and the new public calendar). */
+function mergeEntries(lists: CalEntry[][], limit: number): CalEntry[] {
+	const seen = new Set<string>();
+	const merged: CalEntry[] = [];
+	for (const list of lists) {
+		for (const e of list) {
+			const key = `${e.title}||${e.event_date ?? ""}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			merged.push(e);
+		}
+	}
+	merged.sort((a, b) => (a.event_date ?? "9999").localeCompare(b.event_date ?? "9999"));
+	return merged.slice(0, limit);
+}
+
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const MONTH_SHORT: Record<string, string> = { "01":"Jan","02":"Feb","03":"Mar","04":"Apr","05":"May","06":"Jun","07":"Jul","08":"Aug","09":"Sep","10":"Oct","11":"Nov","12":"Dec" };
+
+function calRowHtml(e: CalEntry): string {
+	const [y, m, d] = (e.event_date ?? "--").split("-");
+	return `<div class="cal-row">
+    <div class="cal-date"><div class="d">${esc(d ?? "")}</div><div class="m">${esc(MONTH_SHORT[m] ?? "")}</div></div>
+    <div class="cal-info">
+      <div class="t">${esc(e.title)}</div>
+      <div class="s">${esc(e.sub)}</div>
+    </div>
+    ${e.url ? `<a class="btn btn-navy" href="${esc(e.url)}">Register</a>` : ""}
+  </div>`;
+}
+
+function calMonthSections(entries: CalEntry[]): string {
+	const dated = entries.filter((e) => e.event_date);
+	const undated = entries.filter((e) => !e.event_date);
+	const months = new Map<string, CalEntry[]>();
+	for (const e of dated) {
+		const key = (e.event_date ?? "").slice(0, 7);
+		if (!months.has(key)) months.set(key, []);
+		months.get(key)!.push(e);
+	}
+	const monthName = (ym: string) => {
+		const [y, m] = ym.split("-").map(Number);
+		return `${MONTH_NAMES[m - 1]} ${y}`;
+	};
+	const datedHtml = [...months.entries()]
+		.map(([ym, list]) => `
+        <div class="month">${esc(monthName(ym))}</div>
+        ${list.map(calRowHtml).join("")}`)
+		.join("");
+	const undatedHtml = undated.length
+		? `<div class="month">Dates to be announced</div>${undated.map(calRowHtml).join("")}`
+		: "";
+	return datedHtml + undatedHtml;
+}
+
+function upcomingCardFromEntry(e: CalEntry): string {
 	return `<div class="card">
-    <div class="meta">${esc(weekdayOf(event.event_date))}, ${esc(formatDate(event.event_date))} <span class="badge soft" style="margin-left:8px">${esc(event.distance)}</span></div>
-    <h3>${esc(event.event_name ?? `${event.distance} Nordic Walking Race`)}</h3>
-    <p style="font-size:14.5px">A verified NWANA Series race. Poles mandatory, every finisher verified.</p>
-    ${reg ? `<a class="card-link" href="${esc(reg)}">Register on RunSignup →</a>` : `<span style="color:var(--muted);font-size:14px">Registration opens soon.</span>`}
+    <div class="meta">${esc(weekdayOf(e.event_date))}, ${esc(formatDate(e.event_date))}</div>
+    <h3>${esc(e.title)}</h3>
+    <p style="font-size:14.5px">${esc(e.sub)}</p>
+    ${e.url ? `<a class="card-link" href="${esc(e.url)}">Register →</a>` : `<span style="color:var(--muted);font-size:14px">Registration opens soon.</span>`}
   </div>`;
 }
 
 export async function homePage(db: D1Database): Promise<string> {
-	const [stats, upcoming, latest, news] = await Promise.all([
+	// Homepage "next races" block: competition only. Merges the legacy race
+	// results table with the canonical public calendar (objects created once
+	// in the Machine); challenges never appear here.
+	const [stats, upcoming, competition, latest, news] = await Promise.all([
 		getSeasonStats(db),
-		getUpcoming(db, 3),
+		getUpcoming(db, 60),
+		getCompetitionCalendar(db, 60),
 		getPastResults(db, undefined, 1),
 		getNews(db, 3),
 	]);
+	const upcomingEntries = mergeEntries(
+		[
+			upcoming.map(entryFromRaceEvent),
+			competition.map((c) => entryFromCalendarItem(c, "NWANA competition")),
+		],
+		3,
+	);
 
-	const nextRaces = upcoming.length > 0
-		? `<div class="grid cols-3">${upcoming.map(upcomingCard).join("")}</div>
+	const nextRaces = upcomingEntries.length > 0
+		? `<div class="grid cols-3">${upcomingEntries.map(upcomingCardFromEntry).join("")}</div>
        <p style="margin-top:18px"><a class="card-link" href="/calendar">See the full calendar →</a></p>`
 		: emptyState("The next race dates are being finalized. Check back soon, the calendar never stays empty for long.");
 
@@ -336,48 +438,101 @@ export async function resultsPage(db: D1Database, distance: string | null, view:
 }
 
 export async function calendarPage(db: D1Database): Promise<string> {
-	const events = await getUpcoming(db, 80);
+	// Competition calendar only: the canonical public calendar (objects
+	// created once in the Machine) plus the legacy race results table.
+	// Challenges never appear here.
+	const [upcoming, competition] = await Promise.all([
+		getUpcoming(db, 80),
+		getCompetitionCalendar(db, 80),
+	]);
+	const entries = mergeEntries(
+		[
+			upcoming.map(entryFromRaceEvent),
+			competition.map((c) => entryFromCalendarItem(c, "NWANA competition")),
+		],
+		160,
+	);
 
 	let body: string;
-	if (events.length === 0) {
+	if (entries.length === 0) {
 		body = emptyState("No upcoming races are scheduled right now. The Series runs weekly, so check back soon.");
 	} else {
-		const months = new Map<string, RaceEvent[]>();
-		for (const event of events) {
-			const key = (event.event_date ?? "").slice(0, 7);
-			if (!months.has(key)) months.set(key, []);
-			months.get(key)!.push(event);
-		}
-		const monthName = (ym: string) => {
-			const [y, m] = ym.split("-").map(Number);
-			return `${["January","February","March","April","May","June","July","August","September","October","November","December"][m - 1]} ${y}`;
-		};
-		body = [...months.entries()]
-			.map(([ym, list]) => `
-        <div class="month">${esc(monthName(ym))}</div>
-        ${list.map((event) => {
-			const reg = registrationUrl(event);
-			const [y, m, d] = (event.event_date ?? "--").split("-");
-			return `<div class="cal-row">
-            <div class="cal-date"><div class="d">${esc(d ?? "")}</div><div class="m">${esc({ "01":"Jan","02":"Feb","03":"Mar","04":"Apr","05":"May","06":"Jun","07":"Jul","08":"Aug","09":"Sep","10":"Oct","11":"Nov","12":"Dec" }[m] ?? "")}</div></div>
-            <div class="cal-info">
-              <div class="t">${esc(event.event_name ?? `${event.distance} Nordic Walking Race`)}</div>
-              <div class="s">${esc(weekdayOf(event.event_date))} · ${esc(event.distance)} · Virtual, poles mandatory · Results verified after the race</div>
-            </div>
-            ${reg ? `<a class="btn btn-navy" href="${esc(reg)}">Register</a>` : ""}
-          </div>`;
-		}).join("")}`)
-			.join("");
+		body = calMonthSections(entries);
 	}
 
 	const content = `
   <div class="page-head"><div class="wrap">
     <h1>Competition calendar</h1>
-    <p>Every upcoming NWANA Series race. All races are virtual: walk your distance anywhere, submit your result, get verified.</p>
+    <p>Every upcoming NWANA competition: Series races, championships, and competition events. Challenges have their own calendar.</p>
   </div></div>
   <div class="section"><div class="wrap">${body}</div></div>`;
 
 	return layout("Competition Calendar", "calendar", content, "Upcoming NWANA Nordic walking competitions. Register and race.");
+}
+
+export async function challengesPage(db: D1Database): Promise<string> {
+	// Challenges calendar only: never mixes with competitions.
+	const challenges = await getChallengeCalendar(db, 80);
+	const entries = mergeEntries(
+		[challenges.map((c) => entryFromCalendarItem(c, "NWANA challenge"))],
+		80,
+	);
+
+	let body: string;
+	if (entries.length === 0) {
+		body = emptyState("No challenges are open right now. Check back soon, new challenges are announced regularly.");
+	} else {
+		body = calMonthSections(entries);
+	}
+
+	const content = `
+  <div class="page-head"><div class="wrap">
+    <h1>Challenges</h1>
+    <p>NWANA challenges: personal and team challenges that take you deeper into Nordic walking. Separate from the competition calendar, which lists races and championships only.</p>
+  </div></div>
+  <div class="section"><div class="wrap">${body}</div></div>`;
+
+	return layout("Challenges", "challenges", content, "NWANA Nordic walking challenges. Personal and team challenges, separate from the competition calendar.");
+}
+
+export async function seriesPage(db: D1Database): Promise<string> {
+	const seriesList = await getCompetitionSeries(db, 40);
+
+	let body: string;
+	if (seriesList.length === 0) {
+		body = emptyState("Series and championship pages are being prepared. Check back soon.");
+	} else {
+		const sections = await Promise.all(
+			seriesList.map(async (s) => {
+				const rows = await getCalendarForSeries(db, s.object_id);
+				const rowsHtml = rows.length
+					? `<div class="cal-list">${rows.map((r) => `
+              <div class="cal-row">
+                <div class="cal-info">
+                  <div class="t">${esc(r.title)}</div>
+                  <div class="s">${esc(weekdayOf(r.event_date))}, ${esc(formatDate(r.event_date))}</div>
+                </div>
+                ${r.url ? `<a class="btn btn-navy" href="${esc(r.url)}">Register</a>` : ""}
+              </div>`).join("")}</div>`
+					: `<p class="meta">Events are being scheduled.</p>`;
+				return `<div class="card" style="margin-bottom:24px">
+          <div class="kicker">${esc(s.object_type === "championship" ? "Championship" : "Series")}</div>
+          <h2>${esc(s.title)}</h2>
+          ${rowsHtml}
+        </div>`;
+			}),
+		);
+		body = sections.join("");
+	}
+
+	const content = `
+  <div class="page-head"><div class="wrap">
+    <h1>Series &amp; Championships</h1>
+    <p>NWANA competition properties: series and championships, with their upcoming events. Created once in NWANA Machine, shown here automatically.</p>
+  </div></div>
+  <div class="section"><div class="wrap">${body}</div></div>`;
+
+	return layout("Series & Championships", "series", content, "NWANA series and championships with upcoming competition events.");
 }
 
 export async function winnersPage(db: D1Database): Promise<string> {

@@ -71,6 +71,20 @@ function makeCreationDb() {
 							updated_at: row.updated_at,
 						};
 					}
+					// Object fan-out lookups: no parent object, no existing
+					// news slug, no existing sponsorship asset in these tests.
+					if (sql.startsWith("SELECT object_type FROM objects WHERE object_id = ? LIMIT 1")) {
+						return null;
+					}
+					if (sql.startsWith("SELECT object_id, title, metadata FROM objects WHERE object_id = ? LIMIT 1")) {
+						return null;
+					}
+					if (sql.startsWith("SELECT id FROM site_news WHERE slug = ? LIMIT 1")) {
+						return null;
+					}
+					if (sql.startsWith("SELECT * FROM sponsorship_assets WHERE id = ?")) {
+						return null;
+					}
 					throw new Error(`unexpected first(): ${sql}`);
 				},
 				async all() {
@@ -122,8 +136,22 @@ function makeCreationDb() {
 					if (sql.startsWith("INSERT INTO relationships")) {
 						const [relationship_id, subject_object_id, target_object_id, metadata] = args as [string, string, string, string];
 						if (!relationships.some((r) => r.relationship_id === relationship_id)) {
-							relationships.push({ relationship_id, subject_object_id, relationship_type: "linked_to", target_object_id, metadata });
+							relationships.push({ relationship_id, subject_object_id, relationship_type: sql.includes("'linked_to'") ? "linked_to" : "part_of", target_object_id, metadata });
 						}
+						return { success: true };
+					}
+					// Object fan-out (runs inside linkRunSignupRace): the legacy
+					// stub records nothing, it only needs to accept the writes.
+					if (sql.startsWith("INSERT INTO public_calendar")) {
+						return { success: true };
+					}
+					if (sql.startsWith("INSERT INTO audit_events")) {
+						return { success: true };
+					}
+					if (sql.startsWith("INSERT INTO site_news")) {
+						return { success: true };
+					}
+					if (sql.startsWith("INSERT INTO sponsorship_assets")) {
 						return { success: true };
 					}
 					throw new Error(`unexpected run(): ${sql}`);

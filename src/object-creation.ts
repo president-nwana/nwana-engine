@@ -29,14 +29,21 @@
 // Storage: the creation packet is a row in the existing `objects` table
 // (object_type = 'creation_packet'); the linked RunSignup race is another
 // `objects` row (source = 'runsignup', source_type = 'race'); the link is a
-// row in the existing `relationships` table. No new migration.
+// row in the existing `relationships` table.
+// On link, the object fans out automatically into every surface where it
+// belongs (see src/object-fanout.ts): the public_calendar projection
+// (competition and challenge kept strictly separate), the activity log,
+// optional news, optional sponsorship draft. One new migration (0032)
+// carries the public_calendar table shared with nwana-site.
 
 import {
 	postRunSignupForm,
 	runSignupGetJson,
 	type RunSignupWriteAccess,
 } from "./race-lifecycle";
+import { fanoutLinkedObject, type FanoutSummary } from "./object-fanout";
 
+export type { FanoutSummary };
 export type { RunSignupWriteAccess };
 
 export const OBJECT_CREATION_PACKET_TYPE = "creation_packet";
@@ -304,6 +311,14 @@ export interface CreationPacketInput {
 	external_race_url?: string;
 	external_results_url?: string;
 	facebook_page_id?: string;
+	// Object fan-out fields: create once in the Machine, appear everywhere.
+	// Parent series/championship object id (verified in objects — never guessed).
+	parent_object_id?: string;
+	// Publish a public news item when the object materializes.
+	announce_news?: boolean;
+	// Whether this object is sponsorship-relevant (default true for
+	// sellable kinds: series, championship, challenge).
+	sponsorship_relevant?: boolean;
 	// Advanced API fields; used only when the owner supplies them.
 	runsignup_event_id?: number;
 	registration_periods?: RegistrationPeriodInput[];
@@ -323,6 +338,16 @@ export interface CreationPacketMeta {
 	external_race_url: string | null;
 	external_results_url: string | null;
 	facebook_page_id: string | null;
+	// Object fan-out: parent series/championship object id (verified).
+	parent_object_id: string | null;
+	// Object fan-out: publish a public news item on materialization.
+	announce_news: boolean;
+	// Object fan-out: sponsorship-relevant property (default true for
+	// sellable kinds).
+	sponsorship_relevant: boolean;
+	// Object fan-out: last fan-out summary, persisted so the Operating
+	// Center can show where the object appeared without recomputing.
+	fanout: FanoutSummary | null;
 	runsignup_event_id: number | null;
 	registration_periods: RegistrationPeriodInput[];
 	age_based_pricing: AgeBasedPricingInput[];
@@ -762,6 +787,10 @@ function metaFromInput(input: CreationPacketInput): CreationPacketMeta {
 		external_race_url: clean(input.external_race_url),
 		external_results_url: clean(input.external_results_url),
 		facebook_page_id: clean(input.facebook_page_id),
+		parent_object_id: clean(input.parent_object_id),
+		announce_news: input.announce_news === true,
+		sponsorship_relevant: input.sponsorship_relevant !== false,
+		fanout: null,
 		runsignup_event_id:
 			typeof input.runsignup_event_id === "number" ? input.runsignup_event_id : null,
 		registration_periods: input.registration_periods ?? [],
@@ -960,7 +989,7 @@ export interface LinkRunSignupRaceInput {
 
 export async function linkRunSignupRace(
 	input: LinkRunSignupRaceInput,
-): Promise<{ ok: true; packet_id: string; race_id: number; race_name: string | null }> {
+): Promise<{ ok: true; packet_id: string; race_id: number; race_name: string | null; fanout: FanoutSummary }> {
 	const packet = await getCreationPacket(input.db, input.packetId);
 	if (!packet) throw new Error(`Unknown packet: ${input.packetId}`);
 	if (!Number.isInteger(input.raceId) || input.raceId <= 0) {
@@ -1028,6 +1057,9 @@ export async function linkRunSignupRace(
 		external_race_url: packet.meta.external_race_url ?? undefined,
 		external_results_url: packet.meta.external_results_url ?? undefined,
 		facebook_page_id: packet.meta.facebook_page_id ?? undefined,
+		parent_object_id: packet.meta.parent_object_id ?? undefined,
+		announce_news: packet.meta.announce_news,
+		sponsorship_relevant: packet.meta.sponsorship_relevant,
 		runsignup_event_id: packet.meta.runsignup_event_id ?? undefined,
 		registration_periods: packet.meta.registration_periods,
 		age_based_pricing: packet.meta.age_based_pricing,
@@ -1043,9 +1075,18 @@ export async function linkRunSignupRace(
 			s.step_id === "dashboard_create_object" ? "done" : (prev ?? s.status);
 		return { ...s, status };
 	});
+
+	// Fan-out: the moment the packet is linked, the object automatically
+	// appears in every internal and public surface where it belongs —
+	// public calendar, parent relationship, activity log, optional news,
+	// optional sponsorship draft. Own-D1 writes only; no RunSignup writes,
+	// so this needs no extra confirmation beyond the link action.
+	// Idempotent: re-linking re-materializes the same rows.
+	const fanout = await fanoutLinkedObject(input.db, packet, runsignupObjectId);
+	packet.meta.fanout = fanout;
 	await savePacketMeta(input.db, packet.packet_id, packet.meta);
 
-	return { ok: true, packet_id: packet.packet_id, race_id: input.raceId, race_name: raceName };
+	return { ok: true, packet_id: packet.packet_id, race_id: input.raceId, race_name: raceName, fanout };
 }
 
 // ---------------------------------------------------------------------------
@@ -1273,6 +1314,10 @@ export interface PacketApiFieldsInput {
 	external_results_url?: string;
 	facebook_page_id?: string;
 	runsignup_event_id?: number;
+	// Object fan-out fields (editable before the link step).
+	parent_object_id?: string;
+	announce_news?: boolean;
+	sponsorship_relevant?: boolean;
 	registration_periods?: RegistrationPeriodInput[];
 	age_based_pricing?: AgeBasedPricingInput[];
 	questions?: Array<Record<string, unknown>>;
@@ -1304,6 +1349,9 @@ export async function setPacketApiFields(
 		external_race_url: clean(fields.external_race_url, m.external_race_url) ?? undefined,
 		external_results_url: clean(fields.external_results_url, m.external_results_url) ?? undefined,
 		facebook_page_id: clean(fields.facebook_page_id, m.facebook_page_id) ?? undefined,
+		parent_object_id: clean(fields.parent_object_id, m.parent_object_id) ?? undefined,
+		announce_news: fields.announce_news ?? m.announce_news,
+		sponsorship_relevant: fields.sponsorship_relevant ?? m.sponsorship_relevant,
 		runsignup_event_id:
 			fields.runsignup_event_id !== undefined ? fields.runsignup_event_id : (m.runsignup_event_id ?? undefined),
 		registration_periods: fields.registration_periods ?? m.registration_periods,
@@ -1319,7 +1367,7 @@ export async function setPacketApiFields(
 	) {
 		throw new Error("A valid event ID is required.");
 	}
-	packet.meta = { ...metaFromInput(input), write_access: m.write_access, probe: m.probe, runsignup_race_id: m.runsignup_race_id, runsignup_race_name: m.runsignup_race_name };
+	packet.meta = { ...metaFromInput(input), write_access: m.write_access, probe: m.probe, runsignup_race_id: m.runsignup_race_id, runsignup_race_name: m.runsignup_race_name, fanout: m.fanout };
 	// Preserve statuses and execution state of steps that survived the rebuild.
 	const prev = new Map(m.steps.map((s) => [s.step_id, s]));
 	packet.meta.steps = packet.meta.steps.map((s) => {
