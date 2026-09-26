@@ -982,9 +982,95 @@ export async function contactPage(): Promise<string> {
 	return layout("Contact NWANA", "contact", content, "Contact NWANA: email-first contact with purpose-specific subject lines for media, partners, sponsors, donors, and the public.");
 }
 
-// ---------------- 23. /partners (Partner Network) ----------------
+// ---------------- 23. /partners (Founding & Strategic Partnerships) ----------------
 
 export async function partnersPage(): Promise<string> {
+	const system: [string, string][] = [
+		["Academy", "Instructor and coach education for Nordic Walking, online and in person."],
+		["Instructor & Coach Certification", "Defined certification and licensing pathways for professionals across North America."],
+		["NW Groups", "Local group pathways for communities, clubs, employers, and public programs."],
+		["2026 Competition Series", "Weekly verified Nordic Walking races across six distances and five fair performance levels."],
+		["Challenges", "Virtual and team participation challenges that bring new people into the sport."],
+		["2027 Series", "The next season of the NWANA competition calendar, now in planning."],
+		["Partner Network", "Organizations across North America putting NWANA infrastructure to work."],
+		["NWANA Engine", "The operating technology behind education, registration, licensing, groups, events, and communications."],
+		["Results & Athlete Infrastructure", "Verified results, standings, rankings, and athlete development records."],
+		["Future Championships", "The road to U.S. and North American Nordic Walking Championships."],
+	];
+	const rights: [string, string][] = [
+		["Founding status", "Permanent founding recognition across the NWANA ecosystem."],
+		["Category exclusivity", "Exclusive category position across NWANA properties."],
+		["Rights across multiple properties", "Series, Academy, Groups, media, and future Championships under one partnership."],
+		["Competition integration", "Integration into competitions and future U.S. and North American Championships."],
+		["Content and media activation", "Storytelling, content, and media programs built around the partner."],
+		["Community and employee engagement", "Programs that connect the partner with local groups, participants, and employees."],
+		["Hospitality and VIP access", "VIP experiences at NWANA events and championships."],
+		["Long-term recognition", "Recognition that compounds as the system grows."],
+		["Custom activation rights", "Activation rights designed around the partner, not a fixed menu."],
+	];
+	const capital: [string, string][] = [
+		["Operating team", "The people who run the federation every day."],
+		["National expansion", "Growth into new states, provinces, and regions."],
+		["Technology and automation", "The NWANA Engine: systems that scale without manual work."],
+		["Marketing and media", "Audience growth, storytelling, and public awareness."],
+		["Competition infrastructure", "Races, officiating, timing, results, and rankings."],
+		["Academy and community growth", "Instructor education and local group development."],
+		["Future flagship Championships", "U.S. and North American Championships built to last."],
+	];
+	const content = `
+  ${pageHead("Founding & Strategic Partnerships", "Build Nordic Walking in North America with NWANA", "NWANA is building the North American infrastructure for Nordic Walking: education, instructor certification, community groups, competitions, technology, media, athlete development, and future championships. A small number of Founding Strategic Partners will help build this system at the beginning and secure long-term category, visibility, and activation rights across the NWANA ecosystem.")}
+  <div class="section"><div class="wrap">
+    <div class="kicker">The opportunity</div>
+    <h2>This is not a logo on a single race</h2>
+    <p>NWANA is building the North American infrastructure for Nordic Walking: education, instructor certification, community groups, competitions, technology, media, athlete development and future championships.</p>
+    <p>A small number of Founding Strategic Partners will have the opportunity to help build this system at the beginning and secure long-term category, visibility and activation rights across the NWANA ecosystem.</p>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">Already built</div>
+    <h2>You are funding a foundation, not an idea</h2>
+    <p>The core of the system already exists and operates. Founding capital scales it.</p>
+    <div class="grid cols-3" style="margin-top:22px">${system.map(([t, d]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join("")}</div>
+  </div></div>
+  <div class="section"><div class="wrap">
+    <div class="kicker">The product</div>
+    <h2>NWANA Founding Strategic Partner</h2>
+    <p>One partnership. The whole system. Founding Strategic Partners secure a long-term position across the NWANA ecosystem, with rights designed around the partner.</p>
+    <div class="grid cols-3" style="margin-top:22px">${rights.map(([t, d]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join("")}</div>
+    <div class="grid cols-2" style="margin-top:26px">
+      <div class="card"><h3>Founding Strategic Partnerships</h3><p style="font-size:26px;font-weight:800;color:var(--navy)">$250,000+</p><p>Full founding position with category exclusivity and ecosystem-wide rights.</p></div>
+      <div class="card"><h3>Major / Category Partnerships</h3><p style="font-size:26px;font-weight:800;color:var(--navy)">Custom</p><p>Scoped per partner: category, properties, term, and activation designed together.</p></div>
+    </div>
+    <p style="margin-top:18px">Detailed tier structure is developed with each partner during the discussion.</p>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">A separate path</div>
+    <h2>Philanthropic Founding Circle</h2>
+    <p>For individuals and family offices who want to help build NWANA without buying commercial rights. Founding Circle gifts are philanthropic contributions to a 501(c)(3) public charity and carry recognition, not sponsorship rights. Commercial partnership rights and charitable recognition are separate by design.</p>
+    <p><a class="card-link" href="/ways-to-give">Ways to give →</a></p>
+  </div></div>
+  <div class="section"><div class="wrap">
+    <div class="kicker">Where the capital goes</div>
+    <h2>What founding capital builds</h2>
+    <div class="grid cols-3" style="margin-top:22px">${capital.map(([t, d]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join("")}</div>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">Next step</div>
+    <h2>Start the conversation</h2>
+    <p>Contact the President and the partnership team at <a href="mailto:info@nwaofna.org">info@nwaofna.org</a>.</p>
+    <div class="cta-row" style="margin-top:18px">
+      ${mailto("Founding Partnership Discussion", "Discuss a Founding Partnership")}
+      ${mailto("Request: Partnership Brief", "Request the Partnership Brief")}
+    </div>
+    <div class="card" style="margin-top:26px"><h3>Looking for the Partner Network?</h3><p>Organizations that want to distribute, deliver, or support NWANA programs through the network model can explore the <a class="card-link" href="/partner-network">NWANA Partner Network →</a></p></div>
+    <div class="note" style="margin-top:26px"><strong>Disclaimer.</strong> Submitting an inquiry does not create partner, sponsor, license, sanction, or endorsement status. Partnership scope is confirmed separately by NWANA.</div>
+  </div></div>`;
+
+	return layout("Founding & Strategic Partnerships", "partners", content, "NWANA Founding and Strategic Partnerships: help build the North American infrastructure for Nordic Walking and secure long-term category, visibility, and activation rights.");
+}
+
+// ---------------- 23b. /partner-network (Partner Network) ----------------
+
+export async function partnerNetworkPage(): Promise<string> {
 	const types: [string, string, string[]][] = [
 		["01", "Sport Federation / Governing Body", ["Sport integration", "Education", "Competition", "Technical cooperation"], ],
 		["02", "Sports Club / Sports Organization", ["Add Nordic Walking programs", "Teams", "Sections", "Events"]],
@@ -1037,7 +1123,7 @@ export async function partnersPage(): Promise<string> {
 	];
 	const typeCardsWithDesc = types.map(([num, name, tags], i) => `<div class="card"><div class="meta">${esc(num)}</div><h3>${esc(name)}</h3><p style="font-size:14px;color:var(--muted)">${esc(typeDescs[i])}</p><p style="font-size:13.5px">${tags.map((t) => `<span class="threshold" style="margin:0 6px 6px 0;display:inline-block">${esc(t)}</span>`).join("")}</p></div>`).join("");
 	const content = `
-  ${pageHead("Partners", "NWANA Partner Network", "NWANA Partner Network connects organizations with the infrastructure, programs, and opportunities of the Nordic Walking Association of North America. NWANA works with national and regional networks, sports organizations, government and public agencies, healthcare and aging organizations, schools and universities, corporations, foundations, equipment and outdoor brands, event organizers, research institutions, media, local businesses, and other organizations that can help develop Nordic Walking across North America. Partners may distribute opportunities through existing networks, support local delivery, fund or sponsor NWANA programs, provide equipment or professional services, host activities and events, contribute research, or support public awareness and regional development. NWANA builds the continental infrastructure. Partners help put it to work.")}
+  ${pageHead("Partner Network", "NWANA Partner Network", "NWANA Partner Network connects organizations with the infrastructure, programs, and opportunities of the Nordic Walking Association of North America. NWANA works with national and regional networks, sports organizations, government and public agencies, healthcare and aging organizations, schools and universities, corporations, foundations, equipment and outdoor brands, event organizers, research institutions, media, local businesses, and other organizations that can help develop Nordic Walking across North America. Partners may distribute opportunities through existing networks, support local delivery, fund or sponsor NWANA programs, provide equipment or professional services, host activities and events, contribute research, or support public awareness and regional development. NWANA builds the continental infrastructure. Partners help put it to work.")}
   <div class="section"><div class="wrap">
     <div class="kicker">A network built to put infrastructure to work</div>
     <h2>You already have the people, places, networks, or resources</h2>
@@ -1065,7 +1151,7 @@ export async function partnersPage(): Promise<string> {
     <div class="kicker">Two big paths</div>
     <div class="grid cols-2">
       <div class="card"><h3>Bring NWANA to your network</h3><p>Already have members, chapters, locations, campuses, agencies, facilities, or communities? Explore how your organization can make NWANA infrastructure available across the network you already serve.</p><p><a class="card-link" href="/partners/become-a-partner">Become a Partner →</a></p></div>
-      <div class="card"><h3>Help build the system</h3><p>Want to fund, sponsor, equip, host, or strengthen Nordic Walking across North America? Support NWANA's organizational capacity, education, local development, competition, regional expansion, equipment access, research, or future championships.</p><p><a class="card-link" href="/sponsors">Sponsors →</a></p></div>
+      <div class="card"><h3>Help build the system</h3><p>Want to fund, sponsor, equip, host, or strengthen Nordic Walking across North America? Support NWANA's organizational capacity, education, local development, competition, regional expansion, equipment access, research, or future championships.</p><p><a class="card-link" href="/partners">Founding Partnerships →</a></p></div>
     </div>
     <h2 style="margin-top:34px">What NWANA brings</h2>
     <p><strong>You Do Not Have to Start From Zero.</strong></p>
@@ -1082,7 +1168,7 @@ export async function partnersPage(): Promise<string> {
     <div style="margin-top:26px">${contactCard("Partner Inquiry", "Partner inquiry: info@nwaofna.org. Please include your organization, audience, resources, location, and proposed area of collaboration.")}</div>
   </div></div>`;
 
-	return layout("Partner Network", "partners", content, "NWANA Partner Network: 20 partner types, four partnership roles, and two paths to collaborate across North America.");
+	return layout("Partner Network", "partner-network", content, "NWANA Partner Network: 20 partner types, four partnership roles, and two paths to collaborate across North America.");
 }
 
 // ---------------- 24. /partners/become-a-partner ----------------

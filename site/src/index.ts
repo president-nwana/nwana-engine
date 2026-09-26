@@ -17,6 +17,7 @@ import {
 	governancePage,
 	groupsPage,
 	mediaContactPage,
+	partnerNetworkPage,
 	partnersPage,
 	pressPage,
 	privacyPage,
@@ -173,6 +174,9 @@ export default {
 			}
 			if (request.method === "GET" && path === "/partners") {
 				return html(await partnersPage());
+			}
+			if (request.method === "GET" && path === "/partner-network") {
+				return html(await partnerNetworkPage());
 			}
 			if (request.method === "GET" && path === "/partners/become-a-partner") {
 				return html(await becomePartnerPage());

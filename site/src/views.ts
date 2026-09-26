@@ -231,11 +231,12 @@ export function header(active: string): string {
 			{ href: "/choose-your-path", l: "Choose Your Path", n: "Find your role in NWANA" },
 			{ href: "/events", l: "Events", n: "Forums, clinics, fundraisers, gatherings" },
 		]),
-		drop("Get Involved", ["support", "ways-to-give", "sponsors", "partners", "groups", "contact", "sellers"], [
+		drop("Get Involved", ["support", "ways-to-give", "sponsors", "partners", "partner-network", "groups", "contact", "sellers"], [
 			{ href: "/support", l: "Support / Funds", n: "Donations and fundraising" },
 			{ href: "/ways-to-give", l: "Ways to Give", n: "DAF, checks, matching gifts" },
 			{ href: "/sponsors", l: "Sponsors", n: "Sponsor the growth of the sport" },
-			{ href: "/partners", l: "Partners", n: "Partner Network and collaboration" },
+			{ href: "/partners", l: "Partnerships", n: "Founding and strategic partnerships" },
+			{ href: "/partner-network", l: "Partner Network", n: "Organizations collaborating with NWANA" },
 			{ href: "/groups", l: "Umbrella NW Groups", n: "Organize groups under one structure" },
 			{ href: "/sellers", l: "For Sellers", n: "Sell the sponsorship inventory" },
 			{ href: "/contact", l: "Contact", n: "Reach the federation office" },
@@ -292,7 +293,8 @@ export function footer(): string {
     <a href="/support">Support / Funds</a>
     <a href="/ways-to-give">Ways to Give</a>
     <a href="/sponsors">Sponsors</a>
-    <a href="/partners">Partners</a>
+    <a href="/partners">Partnerships</a>
+    <a href="/partner-network">Partner Network</a>
     <a href="/groups">Umbrella NW Groups</a>
     <a href="/sellers">For Sellers</a>
   </div>
