@@ -91,6 +91,7 @@ a{color:var(--navy-2)}
 .hero{background:radial-gradient(1200px 500px at 80% -10%,#1d3a6b 0%,var(--navy) 55%,#071627 100%);color:#fff;padding:76px 0 70px;position:relative;overflow:hidden}
 .hero:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(115deg,transparent 0 46px,rgba(201,162,39,.05) 46px 48px);pointer-events:none}
 .hero .wrap{position:relative;z-index:1}
+.hero-photo{background:linear-gradient(100deg,rgba(7,22,39,.95) 0%,rgba(7,22,39,.80) 45%,rgba(7,22,39,.30) 78%,rgba(7,22,39,.50) 100%),url("https://d368g9lw5ileu7.cloudfront.net/uploads/generic/genericWebsites-281/281959/websiteBanner-gSfrPnT6-bQJFtd.jpg") center 35%/cover no-repeat,#071627}
 .eyebrow{display:inline-block;color:var(--gold-2);letter-spacing:2.5px;text-transform:uppercase;font-size:12.5px;font-weight:700;margin-bottom:16px}
 .hero h1{color:#fff;font-size:clamp(34px,5.2vw,58px);max-width:16em;margin-bottom:18px}
 .hero h1 .gold{color:var(--gold-2)}

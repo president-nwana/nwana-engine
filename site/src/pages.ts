@@ -86,7 +86,7 @@ export async function homePage(db: D1Database): Promise<string> {
 		: emptyState("News from the federation will appear here. Race reports, winner announcements, and federation updates, published as they happen.");
 
 	const content = `
-  <div class="hero"><div class="wrap">
+  <div class="hero hero-photo"><div class="wrap">
     <span class="eyebrow">Nordic Walking Association of North America</span>
     <h1>Every generation gets its fitness movement.<br><span class="gold">Nordic walking is next.</span></h1>
     <p class="lead">NWANA is building Nordic walking as a continental sport: weekly verified races across North America, fair performance levels where every pace has its own podium, and a path from your first kilometer to the world stage.</p>
