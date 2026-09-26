@@ -29,6 +29,7 @@ import {
 	safetyPage,
 	sponsorsPage,
 	supportPage,
+	svenThorslundPage,
 	termsConditionsPage,
 	termsPage,
 	tommyAunanPage,
@@ -170,6 +171,9 @@ export default {
 			}
 			if (request.method === "GET" && path === "/elite/tommy-aunan") {
 				return html(await tommyAunanPage());
+			}
+			if (request.method === "GET" && path === "/elite/sven-thorslund") {
+				return html(await svenThorslundPage());
 			}
 			if (request.method === "GET" && path === "/board/liene-visocka") {
 				return html(await lieneVisockaPage());

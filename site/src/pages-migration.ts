@@ -841,9 +841,8 @@ export async function elitePage(): Promise<string> {
     <div class="card" style="margin-bottom:20px">
       <div class="kicker">United States</div>
       <h3>Sven Thorslund, World Championship Medalist</h3>
-      <div style="display:flex;gap:14px;flex-wrap:wrap;margin:14px 0">
-        <img src="/elite/sven-thorslund-lahti.jpg" alt="Sven Thorslund competing at the 2026 Nordic Walking World Championships in Lahti" style="max-width:300px;width:100%;border-radius:12px">
-        <img src="/elite/sven-thorslund-silver.jpg" alt="Sven Thorslund, M55 10K silver medalist, Lahti 2026" style="max-width:300px;width:100%;border-radius:12px">
+      <div style="margin:14px 0">
+        <img src="/elite/sven-thorslund-379.jpg" alt="Sven Thorslund competing at the 2026 Nordic Walking World Championships in Lahti" style="max-width:300px;width:100%;border-radius:12px">
       </div>
       <p>Sven Thorslund is a Swedish-American Nordic walker and one of the fastest-rising athletes in North America. His disciplined, technique-driven style and exceptional endurance have positioned him as a standout competitor on the international stage.</p>
       ${bullets(["Silver Medal, M55 10K, Nordic Walking World Championships, Lahti, Finland (2026)", "7th place, 5K, Nordic Walking World Championships, Lahti, Finland (2026)", "Selected for the U.S. 5K Relay Team, Lahti 2026"])}
@@ -851,6 +850,7 @@ export async function elitePage(): Promise<string> {
       <p><strong>NWANA development pathway.</strong> Sven credits NWANA for recognizing his potential early and supporting his participation in Lahti. Their guidance played a central role in his breakthrough performance and contributed to placing the United States on the event's country medal list.</p>
       <p><strong>Global background.</strong> His passion for international movement is rooted in years of global adventure trekking, including expeditions in Nepal, Morocco, and Tanzania.</p>
       <p>Sven is an active participant in the NWANA Virtual Competition Series, steadily climbing the rankings through consistent performance and disciplined technique work — engaged across both virtual and in-person formats.</p>
+      <p><a class="card-link" href="/elite/sven-thorslund">Sven Thorslund's full profile →</a></p>
     </div>
     <div class="card">
       <div class="kicker">Limited by design</div>
@@ -926,6 +926,52 @@ export async function tommyAunanPage(): Promise<string> {
   </div></div>`;
 
 	return layout("Tommy Aunan", "elite", content, "Tommy Aunan: 9x World Medalist in Nordic Walking and Masters Athletics. Photo gallery, career achievements, and event invitations.");
+}
+
+// ---------------- 19b2. /elite/sven-thorslund ----------------
+
+export async function svenThorslundPage(): Promise<string> {
+	const content = `
+  ${pageHead("Sven Thorslund", "Sven Thorslund", "United States · Nordic Walking World Championship Medalist")}
+  <div class="section"><div class="wrap">
+    <div class="kicker">Elite Athletes Club</div>
+    <h2>United States · Nordic Walking World Championship Medalist</h2>
+    <div style="margin:18px 0;max-width:420px">
+      <img src="/elite/sven-thorslund-silver.jpg" alt="Sven Thorslund, M55 10K silver medalist, Lahti 2026" style="width:100%;border-radius:12px">
+    </div>
+    <p>Sven Thorslund is a Swedish-American Nordic walker competing for the United States internationally — and one of the fastest-rising athletes in North America. At the Nordic Walking World Championships in Lahti, Finland, in September 2026, he won the <strong>silver medal in the M55 10K</strong>, finished <strong>7th in the 5K</strong>, and was selected for the <strong>U.S. 5K Relay Team</strong>.</p>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">Lahti 2026</div>
+    <h2>World Championship results</h2>
+    <div class="grid cols-3" style="margin-top:22px">
+      <div class="card"><h3>Silver Medal</h3><p>M55 10K · Nordic Walking World Championships · Lahti, Finland · 2026</p></div>
+      <div class="card"><h3>7th place</h3><p>5K · Nordic Walking World Championships · Lahti, Finland · 2026</p></div>
+      <div class="card"><h3>U.S. Relay Team</h3><p>Selected for the U.S. 5K Relay Team · Lahti 2026</p></div>
+    </div>
+  </div></div>
+  <div class="section"><div class="wrap">
+    <div class="kicker">Training and technique</div>
+    <h2>Built in Miami's heat</h2>
+    <p>Training year-round in Miami's demanding heat and humidity, Sven focuses on cadence efficiency, upper-chain endurance, and precision of original technique — fast, consistent, and technically refined. His disciplined, technique-driven style and exceptional endurance have positioned him as a standout competitor on the international stage.</p>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">NWANA development pathway</div>
+    <h2>Recognized early, supported to the podium</h2>
+    <p>Sven credits NWANA for recognizing his potential early and supporting his participation in Lahti. Their guidance played a central role in his breakthrough performance and contributed to placing the United States on the event's country medal list.</p>
+    <p style="margin-top:14px">His passion for international movement is rooted in years of global adventure trekking, including expeditions in Nepal, Morocco, and Tanzania.</p>
+    <p style="margin-top:14px">Sven is an active participant in the NWANA Virtual Competition Series, steadily climbing the rankings through consistent performance and disciplined technique work — engaged across both virtual and in-person formats.</p>
+  </div></div>
+  <div class="section"><div class="wrap">
+    <div class="kicker">Invite Sven to your event</div>
+    <h2>A world medalist at your start line</h2>
+    <p>Raise the credibility of your event with a World Championship medalist presence. Available for: sanctioned competitions; technique clinics; judging & standards; regional development; media & promotion; speaking engagements.</p>
+    <p><strong>How to invite:</strong> Submit request: city, date, and event format. NWANA confirms availability and scope. Official NWANA appearance is activated.</p>
+    <div style="margin-top:22px">${contactCard("Invite Sven Thorslund", "Request Sven Thorslund's appearance at your event.")}</div>
+    <p style="margin-top:22px"><a class="card-link" href="/elite">← Back to Elite Athletes</a></p>
+  </div></div>`;
+
+	return layout("Sven Thorslund", "elite", content, "Sven Thorslund: Nordic Walking World Championship silver medalist (M55 10K, Lahti 2026). Profile, results, and event invitations.");
 }
 
 // ---------------- 19c. Board member profile pages ----------------
