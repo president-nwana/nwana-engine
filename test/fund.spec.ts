@@ -92,6 +92,7 @@ describe("Fund lifecycle stages (ADR-0015)", () => {
 			"committed",
 			"stewardship",
 			"recognition",
+			"declined",
 		]);
 	});
 
@@ -139,6 +140,21 @@ describe("Fund lifecycle stages (ADR-0015)", () => {
 		expect(result.reason).toContain("cannot move");
 	});
 
+	it("allows sent -> declined and follow_up -> declined; declined is terminal", () => {
+		expect(transitionFundProspect("sent", "declined")).toEqual({
+			ok: true,
+			to: "declined",
+			reason: null,
+		});
+		expect(transitionFundProspect("follow_up", "declined")).toEqual({
+			ok: true,
+			to: "declined",
+			reason: null,
+		});
+		expect(transitionFundProspect("declined", "follow_up").ok).toBe(false);
+		expect(transitionFundProspect("declined", "sent").ok).toBe(false);
+	});
+
 	it("treats recognition as terminal", () => {
 		expect(allowedFundTransitions("recognition")).toEqual([]);
 		const result = transitionFundProspect("recognition", "prospect");
@@ -166,16 +182,19 @@ describe("Bridge sprint seed (factual Pool 4)", () => {
 		expect(BRIDGE_SPRINT_FUND.slug).toBe("50k-manhattan-hq-bridge-sprint");
 	});
 
-	it("seeds exactly the 15 Pool 4 prospects, all at sent", () => {
+	it("seeds exactly the 15 Pool 4 prospects: 14 at sent, Federer declined", () => {
 		expect(BRIDGE_SPRINT_PROSPECTS).toHaveLength(15);
 		const ids = BRIDGE_SPRINT_PROSPECTS.map((p) => p.id);
 		expect(new Set(ids).size).toBe(15);
 		for (const p of BRIDGE_SPRINT_PROSPECTS) {
-			expect(p.stage).toBe("sent");
 			expect(p.sent_at).toBe("2026-09-22T14:19:00.000Z");
 			expect(p.one_pager_version).toBe("v5");
 			expect(p.ask_amount).toBeGreaterThan(0);
 		}
+		const atSent = BRIDGE_SPRINT_PROSPECTS.filter((p) => p.stage === "sent");
+		expect(atSent).toHaveLength(14);
+		const federer = BRIDGE_SPRINT_PROSPECTS.find((p) => p.name === "Roger Federer");
+		expect(federer?.stage).toBe("declined");
 	});
 
 	it("includes the $25K HQ Founder ask for Federer", () => {
@@ -204,7 +223,8 @@ describe("Fund D1 operations", () => {
 		expect(view.funds).toHaveLength(1);
 		const fund = view.funds[0];
 		expect(fund.fund.goal_amount).toBe(50000);
-		expect(fund.stage_counts.sent).toBe(15);
+		expect(fund.stage_counts.sent).toBe(14);
+		expect(fund.stage_counts.declined).toBe(1);
 		expect(fund.stage_counts.committed).toBe(0);
 		expect(fund.prospects).toHaveLength(15);
 		expect(fund.prospects[0].next_action.length).toBeGreaterThan(10);
@@ -218,8 +238,9 @@ describe("Fund D1 operations", () => {
 		expect(moved.ok).toBe(true);
 		if (moved.ok) expect(moved.prospect.stage).toBe("follow_up");
 		const view = await getFundView(db);
-		expect(view.funds[0].stage_counts.sent).toBe(14);
+		expect(view.funds[0].stage_counts.sent).toBe(13);
 		expect(view.funds[0].stage_counts.follow_up).toBe(1);
+		expect(view.funds[0].stage_counts.declined).toBe(1);
 	});
 
 	it("rejects an illegal transition without touching the row", async () => {
@@ -230,7 +251,8 @@ describe("Fund D1 operations", () => {
 		expect(rejected.ok).toBe(false);
 		if (!rejected.ok) expect(rejected.error).toContain("cannot move");
 		const view = await getFundView(db);
-		expect(view.funds[0].stage_counts.sent).toBe(15);
+		expect(view.funds[0].stage_counts.sent).toBe(14);
+		expect(view.funds[0].stage_counts.declined).toBe(1);
 	});
 
 	it("returns an empty view before any fund exists", async () => {

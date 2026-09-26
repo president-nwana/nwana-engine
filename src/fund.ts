@@ -6,6 +6,9 @@
 //   prospect -> verified -> drafted -> sent -> follow_up -> committed
 //   -> stewardship -> recognition
 //
+//   declined is a terminal branch: a prospect that refuses at any point
+//   after contact leaves the pipeline and is never contacted again.
+//
 // The owner still presses Send and signs every outreach letter. The machine
 // never sends on its own: it tracks pipeline state, surfaces the next action
 // per stage, and routes committed funds into stewardship and public
@@ -28,6 +31,7 @@ export const FUND_STAGES = [
 	"committed",
 	"stewardship",
 	"recognition",
+	"declined",
 ] as const;
 
 export type FundStage = (typeof FUND_STAGES)[number];
@@ -41,20 +45,23 @@ export const FUND_STAGE_LABELS: Record<FundStage, string> = {
 	committed: "Committed",
 	stewardship: "Stewardship",
 	recognition: "Public recognition",
+	declined: "Declined",
 };
 
 // Forward flow plus one-step corrections backward, plus the direct
 // sent -> committed path when a prospect commits without a follow-up nudge.
 // recognition is terminal: a recognized donor stays recognized.
+// declined is terminal: a refusal after contact ends the pipeline.
 const FUND_TRANSITIONS: Record<FundStage, FundStage[]> = {
 	prospect: ["verified"],
 	verified: ["prospect", "drafted"],
 	drafted: ["verified", "sent"],
-	sent: ["drafted", "follow_up", "committed"],
-	follow_up: ["sent", "committed"],
+	sent: ["drafted", "follow_up", "committed", "declined"],
+	follow_up: ["sent", "committed", "declined"],
 	committed: ["follow_up", "stewardship"],
 	stewardship: ["committed", "recognition"],
 	recognition: [],
+	declined: [],
 };
 
 export function isFundStage(value: string): value is FundStage {
@@ -114,6 +121,8 @@ export function fundProspectNextAction(stage: FundStage): string {
 			return "Keep the donor close: progress updates, recognition offer.";
 		case "recognition":
 			return "Public recognition is live. Route to the next object.";
+		case "declined":
+			return "No further action — the prospect declined. Do not contact again.";
 	}
 }
 
@@ -174,18 +183,20 @@ function seedProspect(
 	ask_amount: number,
 	ask_tier: string,
 	subject: string,
+	stage: FundStage = "sent",
+	notes = "Pool 4. Draft staged by the assistant; owner pressed Send 2026-09-22 ~10:19am ET; verified in Sent mail.",
 ): FundProspectSeed {
 	return {
 		id: `fund-50k-bridge-sprint-${slug}`,
 		name,
 		email,
-		stage: "sent",
+		stage,
 		ask_amount,
 		ask_tier,
 		subject,
 		one_pager_version: "v5",
 		sent_at: SENT_AT,
-		notes: "Pool 4. Draft staged by the assistant; owner pressed Send 2026-09-22 ~10:19am ET; verified in Sent mail.",
+		notes,
 	};
 }
 
@@ -196,7 +207,7 @@ export const BRIDGE_SPRINT_PROSPECTS: FundProspectSeed[] = [
 	seedProspect("pau-gasol", "Pau Gasol (via Hector De La Torre)", "hdelatorre@gasolfoundation.org", 10000, "$10K Founding Partner", "A new American sport, built for health"),
 	seedProspect("cal-ripken-jr", "Cal Ripken Jr.", "info@ripkenfoundation.org", 10000, "$10K Founding Partner", "From the Iron Man streak to a continental series"),
 	seedProspect("novak-djokovic", "Novak Djokovic", "contact@novakdjokovicfoundation.org", 10000, "$10K Founding Partner", "A sport every child can compete in"),
-	seedProspect("roger-federer", "Roger Federer", "foundation@rogerfederer.com", 25000, "$25K HQ Founder", "A sport built to last a lifetime"),
+	seedProspect("roger-federer", "Roger Federer", "foundation@rogerfederer.com", 25000, "$25K HQ Founder", "A sport built to last a lifetime", "declined", "Pool 4. Draft staged by the assistant; owner pressed Send 2026-09-22 ~10:19am ET; verified in Sent mail. Declined 2026-09-25: Federer Foundation replied they do not forward messages to Roger and support only early learning in Southern Africa and Switzerland. Do not contact again."),
 	seedProspect("ben-greenfield", "Ben Greenfield", "ben@bengreenfieldfitness.com", 5000, "$5K Founder", "Your audience needs a sport"),
 	seedProspect("denise-austin", "Denise Austin", "press@deniseaustin.com", 5000, "$5K Founder", "A sport for the active-aging generation"),
 	seedProspect("rhonda-patrick", "Rhonda Patrick", "team@foundmyfitness.com", 5000, "$5K Founder", "Exercise science needs a sport"),
