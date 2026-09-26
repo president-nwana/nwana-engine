@@ -188,6 +188,8 @@ footer h4{color:#fff;font-size:14px;letter-spacing:1.5px;text-transform:uppercas
 footer a{color:#c6d2e8;text-decoration:none;font-size:14.5px;display:block;padding:3px 0}
 footer a:hover{color:var(--gold-2)}
 footer p{font-size:14px;color:#9fb0cc}
+.social-row{display:flex;gap:16px;flex-wrap:wrap;margin-top:14px}
+.social-row a{display:inline-block;padding:4px 0}
 .copyright{border-top:1px solid rgba(255,255,255,.12);padding:16px 0;font-size:12.5px;color:#8a99b8}
 .copyright .wrap{display:block;padding-top:0;padding-bottom:0}
 .note{background:#fff8e6;border:1px solid #e8d9a8;border-radius:10px;padding:14px 18px;font-size:14px;color:#6b5518;margin:18px 0}
@@ -270,6 +272,15 @@ export function footer(): string {
     <p>The Nordic Walking Association of North America is building Nordic walking as a continental sport: weekly verified competitions, fair performance levels, instructor education, and a path from a first kilometer to the world stage.</p>
     <p>A 501(c)(3) public charity. Contributions are tax-deductible.</p>
     <a aria-label="Nordic Walking Association of North America Inc NWANA" href="https://app.candid.org/profile/16510915/nordic-walking-association-of-north-america-inc-nwana-33-2444142/?pkId=31facfb4-fd0b-404a-9f53-147e33297404" target="_blank" rel="noopener" style="display:inline-block;margin-top:12px"><img alt="Candid transparency seal" src="https://widgets.guidestar.org/prod/v1/pdp/transparency-seal/16510915/svg" style="max-width:150px"></a>
+    <h4 style="margin-top:20px">Follow NWANA</h4>
+    <div class="social-row">
+      <a href="https://www.facebook.com/nwaofna" target="_blank" rel="noopener">Facebook</a>
+      <a href="https://www.instagram.com/nwana.official" target="_blank" rel="noopener">Instagram</a>
+      <a href="https://www.twitter.com/nwaofna" target="_blank" rel="noopener">X</a>
+      <a href="https://www.linkedin.com/company/nwana" target="_blank" rel="noopener">LinkedIn</a>
+      <a href="https://www.youtube.com/@NWANA.Official" target="_blank" rel="noopener">YouTube</a>
+      <a href="https://www.strava.com/clubs/nwaofna" target="_blank" rel="noopener">Strava</a>
+    </div>
   </div>
   <div>
     <h4>Governance</h4>
