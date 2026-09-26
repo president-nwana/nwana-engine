@@ -321,6 +321,8 @@ export function layout(title: string, active: string, content: string, descripti
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)} | NWANA</title>
 ${description ? `<meta name="description" content="${esc(description)}">` : ""}
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-8RYTY6M2KD"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','G-8RYTY6M2KD');</script>
 <style>${CSS}</style>
 </head>
 <body>
