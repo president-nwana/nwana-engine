@@ -830,6 +830,20 @@ export async function elitePage(): Promise<string> {
       ${bullets(["Double Gold, 10K & 20K Race Walk National Team Competitions, World Masters Athletics Championships, Daegu, South Korea, 2026", "Silver Medal, 10K Nordic Walking World Championship, Lahti, Finland, 2024", "Bronze Medal, 5K Nordic Walking World Championship, Lahti, Finland, 2024", "9-Time World Masters Athletics Team Medalist (3 Gold, 2 Silver, 4 Bronze)", "8-Time USA Masters National Racewalk Champion", "34 USA National & Masters Medals", "Double Bronze, 5K & 20K Race Walk, World Masters Games, Sydney, Australia, 2009", "41 World Masters Events Across Cross-Country Skiing, Biathlon, Athletics, and Nordic Walking"])}
       <p>Tommy Aunan continues to compete internationally across multiple endurance disciplines and represents an exceptional level of longevity and achievement in Masters sport.</p>
     </div>
+    <div class="card" style="margin-bottom:20px">
+      <div class="kicker">United States</div>
+      <h3>Sven Thorslund, World Championship Medalist</h3>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin:14px 0">
+        <img src="/elite/sven-thorslund-lahti.jpg" alt="Sven Thorslund competing at the 2026 Nordic Walking World Championships in Lahti" style="max-width:300px;width:100%;border-radius:12px">
+        <img src="/elite/sven-thorslund-silver.jpg" alt="Sven Thorslund, M55 10K silver medalist, Lahti 2026" style="max-width:300px;width:100%;border-radius:12px">
+      </div>
+      <p>Sven Thorslund is a Swedish-American Nordic walker and one of the fastest-rising athletes in North America. His disciplined, technique-driven style and exceptional endurance have positioned him as a standout competitor on the international stage.</p>
+      ${bullets(["Silver Medal, M55 10K, Nordic Walking World Championships, Lahti, Finland (2026)", "7th place, 5K, Nordic Walking World Championships, Lahti, Finland (2026)", "Selected for the U.S. 5K Relay Team, Lahti 2026"])}
+      <p><strong>Training and technique.</strong> Training year-round in Miami's demanding heat and humidity, Sven focuses on cadence efficiency, upper-chain endurance, and precision of original technique — fast, consistent, and technically refined.</p>
+      <p><strong>NWANA development pathway.</strong> Sven credits NWANA for recognizing his potential early and supporting his participation in Lahti. Their guidance played a central role in his breakthrough performance and contributed to placing the United States on the event's country medal list.</p>
+      <p><strong>Global background.</strong> His passion for international movement is rooted in years of global adventure trekking, including expeditions in Nepal, Morocco, and Tanzania.</p>
+      <p>Sven is an active participant in the NWANA Virtual Competition Series, steadily climbing the rankings through consistent performance and disciplined technique work — engaged across both virtual and in-person formats.</p>
+    </div>
     <div class="card">
       <div class="kicker">Limited by design</div>
       <h3>Future Elite Athlete</h3>
