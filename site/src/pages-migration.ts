@@ -999,11 +999,11 @@ export async function partnersPage(): Promise<string> {
 	];
 	const rights: [string, string][] = [
 		["A limited number of founding positions", "Founding positions are strictly limited. Once they are taken, they are gone — no new founding positions will ever be created."],
-		["Category exclusivity", "One partner per category across the NWANA ecosystem."],
+		["Category exclusivity", "Category exclusivity may be available and is defined in each founding agreement."],
 		["Permanent founding record", "Entry in the NWANA Founding Registry: the official historical record — website archive, headquarters recognition, and championship recognition."],
 		["Term architecture", "Permanent recognition plus long-term activation rights. Horizons are fixed individually in each founding agreement."],
-		["Championships rights", "Founding rights extend to future U.S. and North American Championships."],
-		["Future properties", "The position covers NWANA properties created during the partnership — the system keeps growing, and the position grows with it."],
+		["Championships rights", "Championship integration and rights are defined in each founding agreement."],
+		["Future properties", "Rights involving future NWANA properties are defined in each founding agreement."],
 		["First-partner advantage", "The earliest partners secure positions and rights that later partners will never receive."],
 		["Content and media activation", "Storytelling, content, and media programs built around the partner."],
 		["Community, employees, and hospitality", "Programs connecting the partner with local groups, participants, and employees, plus VIP hospitality at NWANA events."],
@@ -1040,7 +1040,7 @@ export async function partnersPage(): Promise<string> {
   <div class="section alt"><div class="wrap">
     <div class="kicker">The product</div>
     <h2>NWANA Founding Strategic Partner</h2>
-    <p>Founding Strategic Partners secure a long-term position across the NWANA ecosystem, with rights designed around the partner. Scarcity is structural: a limited number of positions, one partner per category, and rights the later partners will never receive.</p>
+    <p>Founding Strategic Partners secure a long-term position across the NWANA ecosystem, with rights designed around the partner. Scarcity is structural: a limited number of positions, exclusivity defined per agreement, and rights the later partners will never receive.</p>
     <div class="grid cols-3" style="margin-top:22px">${rights.map(([t, d]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join("")}</div>
     <div class="grid cols-2" style="margin-top:26px">
       <div class="card"><h3>Founding Strategic Partnerships</h3><p style="font-size:26px;font-weight:800;color:var(--navy)">Custom, multi-year</p><p>Full founding position with category exclusivity and ecosystem-wide rights. Investment levels are defined with each partner.</p></div>
