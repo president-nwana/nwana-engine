@@ -19,7 +19,6 @@ export type PackChannel =
 	| "linkedin"
 	| "youtube"
 	| "eventbrite"
-	| "strava"
 	| "generic";
 
 export interface PackTopEntry {
@@ -85,7 +84,6 @@ const TEXT_LIMIT: Record<PackChannel, number> = {
 	linkedin: 3000,
 	youtube: 4000,
 	eventbrite: 4000,
-	strava: 400,
 	generic: 4000,
 };
 
@@ -327,7 +325,7 @@ export function buildAllPacks(
 	objectType: PackObjectType,
 	data: PackObjectData,
 ): Record<PackChannel, DistributionPack> {
-	const channels: PackChannel[] = ["threads", "linkedin", "youtube", "eventbrite", "strava", "generic"];
+	const channels: PackChannel[] = ["threads", "linkedin", "youtube", "eventbrite", "generic"];
 	const out = {} as Record<PackChannel, DistributionPack>;
 	for (const channel of channels) out[channel] = buildPack(objectType, data, channel);
 	return out;
@@ -342,7 +340,6 @@ export const PACK_CHANNELS: readonly PackChannel[] = [
 	"linkedin",
 	"youtube",
 	"eventbrite",
-	"strava",
 	"generic",
 ];
 

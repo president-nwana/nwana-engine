@@ -880,7 +880,7 @@ const SOCIAL_SCRIPT = `
 			if(typeEl&&typeEl.value)params.set('type',typeEl.value);
 			const data=await api('/api/operating-center/distribution/packs?'+params.toString());
 			let html='<div class="detail"><strong>Packet:</strong> '+esc(data.packet.title)+'<span class="badge">'+esc(data.objectTypeLabel)+'</span></div>';
-			const order=['threads','linkedin','youtube','eventbrite','strava','generic'];
+			const order=['threads','linkedin','youtube','eventbrite','generic'];
 			for(const ch of order){
 				const pk=(data.packs||{})[ch];
 				if(!pk)continue;
@@ -941,7 +941,6 @@ export function renderSocialHtml(): string {
 				<option value="linkedin">LinkedIn</option>
 				<option value="youtube">YouTube</option>
 				<option value="eventbrite">Eventbrite</option>
-				<option value="strava">Strava</option>
 				<option value="generic">Generic</option>
 			</select>
 			<button type="button" id="pack-build">Build packs</button>

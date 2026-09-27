@@ -40,7 +40,6 @@ describe("manual-distribution-packs", () => {
 			"linkedin",
 			"youtube",
 			"eventbrite",
-			"strava",
 			"generic",
 		]);
 		expect(packObjectTypeLabel("challenge")).toBe("Challenge");
@@ -71,8 +70,8 @@ describe("manual-distribution-packs", () => {
 	});
 
 	it("competition_event pack carries date, location and registration", () => {
-		const pack = buildPack("competition_event", FULL_EVENT, "strava");
-		expect(pack.text.length).toBeLessThanOrEqual(400);
+		const pack = buildPack("competition_event", FULL_EVENT, "generic");
+		expect(pack.text.length).toBeLessThanOrEqual(4000);
 		expect(pack.text).toContain("October 18, 2026");
 		expect(pack.text).toContain("Saint Petersburg, FL");
 		expect(pack.text).toContain("https://runsignup.com/Race/FL/SaintPetersburg/NWANANWSeries");
