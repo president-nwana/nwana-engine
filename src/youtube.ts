@@ -25,7 +25,8 @@ export interface YouTubeEnv {
 }
 
 const PROVIDER = "YOUTUBE";
-export const YOUTUBE_SCOPE = "https://www.googleapis.com/auth/youtube.upload";
+export const YOUTUBE_SCOPE =
+	"https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly";
 export const YOUTUBE_TITLE_LIMIT = 100;
 export const GOOGLE_YOUTUBE_DEFAULT_REDIRECT_URI =
 	"https://nwana-engine.nwana-engine.workers.dev/integrations/youtube/callback";
