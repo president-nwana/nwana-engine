@@ -104,6 +104,8 @@ import {
 	getAdsOverview,
 	getSellersOverview,
 	getPartnersOverview,
+	updateSellerStage,
+	updatePartnerStage,
 	getFundraisingOverview,
 	getGroupsOverview,
 	getMeetingsOverview,
@@ -5910,10 +5912,48 @@ export default {
 			return json(await getAdsOverview(env));
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/sellers/overview") {
-			return json(getSellersOverview());
+			try {
+				return json(await getSellersOverview(env.nwana_engine_db));
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Sellers overview failed" }, 500);
+			}
+		}
+		if (request.method === "POST" && url.pathname === "/api/operating-center/sellers/stage") {
+			try {
+				const body = await request.json() as { seller_id?: string; to_stage?: string };
+				if (!body.seller_id || !body.to_stage) {
+					return json({ ok: false, error: "seller_id and to_stage are required" }, 400);
+				}
+				const result = await updateSellerStage(env.nwana_engine_db, body.seller_id, body.to_stage);
+				if (!result.ok) {
+					return json(result, 400);
+				}
+				return json(result);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Seller stage update failed" }, 500);
+			}
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/partners/overview") {
-			return json(getPartnersOverview());
+			try {
+				return json(await getPartnersOverview(env.nwana_engine_db));
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Partners overview failed" }, 500);
+			}
+		}
+		if (request.method === "POST" && url.pathname === "/api/operating-center/partners/stage") {
+			try {
+				const body = await request.json() as { partner_id?: string; to_stage?: string };
+				if (!body.partner_id || !body.to_stage) {
+					return json({ ok: false, error: "partner_id and to_stage are required" }, 400);
+				}
+				const result = await updatePartnerStage(env.nwana_engine_db, body.partner_id, body.to_stage);
+				if (!result.ok) {
+					return json(result, 400);
+				}
+				return json(result);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Partner stage update failed" }, 500);
+			}
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/fundraising/overview") {
 			return json(await getFundraisingOverview(env.nwana_engine_db));
@@ -5960,11 +6000,11 @@ export default {
 					return reportFile(buildAdsReport(data), screen, data.generated_at.slice(0, 10));
 				}
 				if (screen === "sellers") {
-					const data = getSellersOverview();
+					const data = await getSellersOverview(env.nwana_engine_db);
 					return reportFile(buildSellersReport(data), screen, data.generated_at.slice(0, 10));
 				}
 				if (screen === "partners") {
-					const data = getPartnersOverview();
+					const data = await getPartnersOverview(env.nwana_engine_db);
 					return reportFile(buildPartnersReport(data), screen, data.generated_at.slice(0, 10));
 				}
 				if (screen === "fundraising") {

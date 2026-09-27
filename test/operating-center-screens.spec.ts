@@ -19,6 +19,8 @@ import {
 	getAdsOverview,
 	getSellersOverview,
 	getPartnersOverview,
+	updateSellerStage,
+	updatePartnerStage,
 	getFundraisingOverview,
 	getGroupsOverview,
 	getMeetingsOverview,
@@ -34,6 +36,27 @@ import {
 } from "../src/operating-center-screens";
 import type { GoogleAdsEnv } from "../src/google-ads";
 import { buildLiveCampaignsQuery } from "../src/google-ads";
+
+
+// Fake D1 for the sellers/partners pipeline (mirrors migration 0033 seed shape).
+function makePipelineDb(sellers: Array<Record<string, unknown>>, partners: Array<Record<string, unknown>>) {
+	return {
+		prepare: (sql: string) => ({
+			bind: function () { return this; },
+			all: async () => ({ results: /FROM sellers/.test(sql) ? sellers : partners }),
+			first: async () => null,
+			run: async () => ({}),
+		}),
+	} as never;
+}
+
+const SELLER_SEED = [
+	{ id: "integrity-9", company: "Integrity 9", contact: "David Hayob", role: "Chief Revenue Officer", stage: "Meeting confirmed", stage_updated_at: "2026-09-21T00:00:00.000Z", last_event: "Owner confirmed Fri 2026-09-25 2:00-3:00pm CT.", last_event_date: "2026-09-21", next_step: "Join the call.", next_date: "2026-09-25", source_of_relationship: null, sort_order: 1 },
+	{ id: "zubie-five", company: "Zubie Five", contact: "Adam Zubiate", role: "Founder", stage: "Reply received — numbers requested", stage_updated_at: null, last_event: "Adam replied 2026-09-22.", last_event_date: "2026-09-22", next_step: "Send the numbers.", next_date: null, source_of_relationship: null, sort_order: 2 },
+];
+const PARTNER_SEED = [
+	{ id: "aarp", name: "AARP", subject: "National member-benefit partnership", stage: "Draft — no recipient yet", stage_updated_at: null, last_event: "Draft staged 2026-09-17.", last_event_date: "2026-09-17", sort_order: 1 },
+];
 
 function extractScripts(html: string): string[] {
 	return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
@@ -566,8 +589,8 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		}
 	});
 
-	it("sellers: real pipeline, Integrity 9 call dated, Zubie Five answers honest", () => {
-		const data = getSellersOverview();
+	it("sellers: real pipeline, Integrity 9 call dated, Zubie Five answers honest", async () => {
+		const data = await getSellersOverview(makePipelineDb(SELLER_SEED, PARTNER_SEED));
 		const i9 = data.sellers.find((s) => s.company === "Integrity 9");
 		expect(i9?.next_date).toBe("2026-09-25");
 		expect(i9?.stage).toBe("Meeting confirmed");
@@ -578,8 +601,50 @@ describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 		expect(brands.answer).toMatch(/no signed brand relationships/i);
 	});
 
-	it("partners: real registry entries only (AARP draft)", () => {
-		const data = getPartnersOverview();
+
+// Fake D1 with working bind/first/run for stage-update tests.
+function makeStageDb(rows: Array<Record<string, unknown>>) {
+	const api: Record<string, unknown> = {};
+	let args: unknown[] = [];
+	api.bind = (...a: unknown[]) => { args = a; return api; };
+	api.all = async () => ({ results: rows });
+	api.first = async () => {
+		const id = args[0] as string;
+		return rows.find((r) => r.id === id) ?? null;
+	};
+	api.run = async () => {
+		const [stage, , , id] = args as string[];
+		const row = rows.find((r) => r.id === id);
+		if (row) row.stage = stage;
+		return {};
+	};
+	return { prepare: (_sql: string) => api } as never;
+}
+
+	it("sellers: stage update writes through to D1", async () => {
+		const rows = SELLER_SEED.map((r) => ({ ...r }));
+		const db = makeStageDb(rows);
+		const okRes = await updateSellerStage(db, "zubie-five", "Call booked");
+		expect(okRes.ok).toBe(true);
+		expect(rows.find((r) => r.id === "zubie-five")?.stage).toBe("Call booked");
+		const missing = await updateSellerStage(db, "nope", "X");
+		expect(missing.ok).toBe(false);
+		const empty = await updateSellerStage(db, "zubie-five", "  ");
+		expect(empty.ok).toBe(false);
+	});
+
+	it("partners: stage update writes through to D1", async () => {
+		const rows = PARTNER_SEED.map((r) => ({ ...r }));
+		const db = makeStageDb(rows);
+		const okRes = await updatePartnerStage(db, "aarp", "Recipient identified");
+		expect(okRes.ok).toBe(true);
+		expect(rows.find((r) => r.id === "aarp")?.stage).toBe("Recipient identified");
+		const missing = await updatePartnerStage(db, "nope", "X");
+		expect(missing.ok).toBe(false);
+	});
+
+	it("partners: real registry entries only (AARP draft)", async () => {
+		const data = await getPartnersOverview(makePipelineDb(SELLER_SEED, PARTNER_SEED));
 		expect(data.partners).toHaveLength(1);
 		expect(data.partners[0].name).toBe("AARP");
 		expect(data.partners[0].stage).toContain("Draft");
@@ -650,8 +715,8 @@ describe("reports (ADR-0027/0028): external-safe HTML documents", () => {
 				{ id: "111", name: "NWANA 5K race, September 27", status: "ENABLED", daily_budget_usd: 10.97, impressions: 120, clicks: 9, conversions: 0, cost_usd: 122.89 },
 			],
 		})))],
-		["sellers", () => buildSellersReport(getSellersOverview())],
-		["partners", () => buildPartnersReport(getPartnersOverview())],
+		["sellers", async () => buildSellersReport(await getSellersOverview(makePipelineDb(SELLER_SEED, PARTNER_SEED)))],
+		["partners", async () => buildPartnersReport(await getPartnersOverview(makePipelineDb(SELLER_SEED, PARTNER_SEED)))],
 		["groups", () => buildGroupsReport(getGroupsOverview())],
 		[
 			"meetings",
@@ -701,8 +766,8 @@ describe("reports (ADR-0027/0028): external-safe HTML documents", () => {
 		});
 	}
 
-	it("sellers report answers what Zubie Five asked", () => {
-		const html = buildSellersReport(getSellersOverview());
+	it("sellers report answers what Zubie Five asked", async () => {
+		const html = buildSellersReport(await getSellersOverview(makePipelineDb(SELLER_SEED, PARTNER_SEED)));
 		expect(html).toContain("Integrity 9");
 		expect(html).toContain("2026-09-25");
 		expect(html).toMatch(/not yet tracked/i);

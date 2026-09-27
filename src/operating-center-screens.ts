@@ -799,108 +799,35 @@ export interface SellerRecord {
 	next_date: string | null;
 }
 
-export const SELLERS: SellerRecord[] = [
-	{
-		company: "Integrity 9",
-		contact: "David Hayob",
-		role: "Chief Revenue Officer",
-		stage: "Meeting confirmed",
-		last_event: "Owner confirmed Fri 2026-09-25 2:00-3:00pm CT (3:00pm ET, 10:00pm Riga). Awaiting the Teams link from David.",
-		last_event_date: "2026-09-21",
-		next_step: "Join the call with the Latvian board members; decide on exclusivity terms (minimum commitments, milestones, termination rights) if they ask.",
-		next_date: "2026-09-25",
-	},
-	{
-		company: "Zubie Five",
-		contact: "Adam Zubiate",
-		role: "Founder",
-		stage: "Reply received — numbers requested",
-		last_event: "Adam replied 2026-09-22 asking for group-network size, virtual Series reach and registrations, and any brand relationships before a first call. Proposed call Tue-Thu, week of Sep 28.",
-		last_event_date: "2026-09-22",
-		next_step: "Send the requested numbers (this report answers them) and book the call at zubiefive.com/meet.",
-		next_date: null,
-	},
-	{
-		company: "Sea Theory",
-		contact: "Brianna Appel",
-		role: "Founder",
-		stage: "Evaluating",
-		last_event: "Reply 2026-09-16: submit property and inventory via their portal for review by their sponsorship operators. Inventory document prepared 2026-09-17.",
-		last_event_date: "2026-09-17",
-		next_step: "Owner decides whether to register on the Sea Theory portal (one opportunity at a time).",
-		next_date: null,
-	},
-	{
-		company: "Elevate",
-		contact: "newbiz@oneelevate.com",
-		role: "Sponsorship sales agency",
-		stage: "Contacted — no reply",
-		last_event: "Sent 2026-09-03; follow-up sent 2026-09-16. Only an autoresponder received.",
-		last_event_date: "2026-09-16",
-		next_step: "None scheduled.",
-		next_date: null,
-	},
-	{
-		company: "Playfly",
-		contact: "Contact@playfly.com",
-		role: "Sponsorship sales agency",
-		stage: "Contacted — no reply",
-		last_event: "Sent 2026-09-03; follow-up sent 2026-09-16. No reply.",
-		last_event_date: "2026-09-16",
-		next_step: "None scheduled.",
-		next_date: null,
-	},
-	{
-		company: "Arco Global Media",
-		contact: "ben@arcoglobalmedia.com",
-		role: "Sponsorship sales agency",
-		stage: "Contacted — no reply",
-		last_event: "Sent 2026-09-03; follow-up sent 2026-09-16. No reply.",
-		last_event_date: "2026-09-16",
-		next_step: "None scheduled.",
-		next_date: null,
-	},
-	{
-		company: "The Sho Agency",
-		contact: "hello@theshoagency.com",
-		role: "Sponsorship sales agency",
-		stage: "Contacted — no reply",
-		last_event: "Sent 2026-09-03; follow-up sent 2026-09-16. No reply.",
-		last_event_date: "2026-09-16",
-		next_step: "None scheduled.",
-		next_date: null,
-	},
-	{
-		company: "Sportsman Solutions",
-		contact: "info@sportsmansolutions.com",
-		role: "Commission seller",
-		stage: "Contacted — no reply",
-		last_event: "Sent 2026-09-03; follow-up sent 2026-09-16. No reply.",
-		last_event_date: "2026-09-16",
-		next_step: "None scheduled.",
-		next_date: null,
-	},
-	{
-		company: "NXS Management",
-		contact: "nick@nxs.management",
-		role: "Sponsorship sales agency",
-		stage: "Contacted — no reply",
-		last_event: "Sent 2026-09-03; follow-up sent 2026-09-16. No reply. A further follow-up draft is staged, awaiting the owner's Send.",
-		last_event_date: "2026-09-16",
-		next_step: "Owner decides whether to send the staged follow-up.",
-		next_date: null,
-	},
-	{
-		company: "SSEC",
-		contact: "info@gosponsorship.com",
-		role: "Commission seller",
-		stage: "Contacted — no reply",
-		last_event: "Sent 2026-09-16 by the owner from the Gmail app.",
-		last_event_date: "2026-09-16",
-		next_step: "None scheduled.",
-		next_date: null,
-	},
-];
+// Sellers pipeline lives in D1 since migration 0033. The original constant is
+// preserved verbatim as seed data in migrations/0033-seller-partner-pipeline.sql.
+export interface SellerRow {
+	id: string;
+	company: string;
+	contact: string | null;
+	role: string | null;
+	stage: string;
+	stage_updated_at: string | null;
+	last_event: string | null;
+	last_event_date: string | null;
+	next_step: string | null;
+	next_date: string | null;
+	source_of_relationship: string | null;
+	sort_order: number;
+}
+
+function toSellerRecord(row: SellerRow): SellerRecord {
+	return {
+		company: row.company,
+		contact: row.contact ?? "",
+		role: row.role ?? "",
+		stage: row.stage,
+		last_event: row.last_event ?? "",
+		last_event_date: row.last_event_date ?? "",
+		next_step: row.next_step ?? "",
+		next_date: row.next_date,
+	};
+}
 
 export interface SellersOverview {
 	ok: true;
@@ -910,11 +837,14 @@ export interface SellersOverview {
 	zubie_five_answers: Array<{ question: string; answer: string }>;
 }
 
-export function getSellersOverview(): SellersOverview {
+export async function getSellersOverview(db: D1Database): Promise<SellersOverview> {
+	const rows = await db
+		.prepare(`SELECT * FROM sellers ORDER BY sort_order ASC, company ASC`)
+		.all<SellerRow>();
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
-		sellers: SELLERS,
+		sellers: (rows.results ?? []).map(toSellerRecord),
 		zubie_five_answers: [
 			{
 				question: "How many groups and participants are in the community network?",
@@ -930,6 +860,31 @@ export function getSellersOverview(): SellersOverview {
 			},
 		],
 	};
+}
+
+export async function updateSellerStage(
+	db: D1Database,
+	sellerId: string,
+	toStage: string,
+): Promise<{ ok: true; seller: SellerRow } | { ok: false; error: string }> {
+	const stage = toStage.trim();
+	if (!stage) return { ok: false, error: "to_stage is required" };
+	const existing = await db
+		.prepare(`SELECT id FROM sellers WHERE id = ?`)
+		.bind(sellerId)
+		.first<{ id: string }>();
+	if (!existing) return { ok: false, error: `Seller "${sellerId}" not found` };
+	const now = new Date().toISOString();
+	await db
+		.prepare(`UPDATE sellers SET stage = ?, stage_updated_at = ?, updated_at = ? WHERE id = ?`)
+		.bind(stage, now, now, sellerId)
+		.run();
+	const updated = await db
+		.prepare(`SELECT * FROM sellers WHERE id = ?`)
+		.bind(sellerId)
+		.first<SellerRow>();
+	if (!updated) return { ok: false, error: `Seller "${sellerId}" not found` };
+	return { ok: true, seller: updated };
 }
 
 const SELLERS_SCRIPT = `
@@ -979,15 +934,28 @@ export interface PartnerRecord {
 	last_event_date: string;
 }
 
-export const PARTNERS: PartnerRecord[] = [
-	{
-		name: "AARP",
-		subject: "National member-benefit partnership: Series + instructor course discount",
-		stage: "Draft — no recipient yet",
-		last_event: "Draft staged in Gmail 2026-09-17 from the owner's mailbox. The proposed discount figure is not confirmed and no verified public AARP partnerships address was found, so the draft has no recipient.",
-		last_event_date: "2026-09-17",
-	},
-];
+// Partner pipeline lives in D1 since migration 0033. The original constant is
+// preserved verbatim as seed data in migrations/0033-seller-partner-pipeline.sql.
+export interface PartnerRow {
+	id: string;
+	name: string;
+	subject: string | null;
+	stage: string;
+	stage_updated_at: string | null;
+	last_event: string | null;
+	last_event_date: string | null;
+	sort_order: number;
+}
+
+function toPartnerRecord(row: PartnerRow): PartnerRecord {
+	return {
+		name: row.name,
+		subject: row.subject ?? "",
+		stage: row.stage,
+		last_event: row.last_event ?? "",
+		last_event_date: row.last_event_date ?? "",
+	};
+}
 
 export interface PartnersOverview {
 	ok: true;
@@ -996,13 +964,41 @@ export interface PartnersOverview {
 	note: string;
 }
 
-export function getPartnersOverview(): PartnersOverview {
+export async function getPartnersOverview(db: D1Database): Promise<PartnersOverview> {
+	const rows = await db
+		.prepare(`SELECT * FROM partners ORDER BY sort_order ASC, name ASC`)
+		.all<PartnerRow>();
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
-		partners: PARTNERS,
+		partners: (rows.results ?? []).map(toPartnerRecord),
 		note: "The partner pipeline is thin: one drafted partnership, no signed partners. New entries appear here as the registry grows.",
 	};
+}
+
+export async function updatePartnerStage(
+	db: D1Database,
+	partnerId: string,
+	toStage: string,
+): Promise<{ ok: true; partner: PartnerRow } | { ok: false; error: string }> {
+	const stage = toStage.trim();
+	if (!stage) return { ok: false, error: "to_stage is required" };
+	const existing = await db
+		.prepare(`SELECT id FROM partners WHERE id = ?`)
+		.bind(partnerId)
+		.first<{ id: string }>();
+	if (!existing) return { ok: false, error: `Partner "${partnerId}" not found` };
+	const now = new Date().toISOString();
+	await db
+		.prepare(`UPDATE partners SET stage = ?, stage_updated_at = ?, updated_at = ? WHERE id = ?`)
+		.bind(stage, now, now, partnerId)
+		.run();
+	const updated = await db
+		.prepare(`SELECT * FROM partners WHERE id = ?`)
+		.bind(partnerId)
+		.first<PartnerRow>();
+	if (!updated) return { ok: false, error: `Partner "${partnerId}" not found` };
+	return { ok: true, partner: updated };
 }
 
 const PARTNERS_SCRIPT = `
