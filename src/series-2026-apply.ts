@@ -43,6 +43,10 @@ import {
 import { SERIES_2026_SOURCES, type Series2026Source } from "./series-2026-results";
 
 export const APPLY_LEVELS_CONFIRMATION = "APPLY_LEVELS";
+// Deliberate full-distance rebuild (e.g. standings restore). Bypasses the
+// per-event stage gate but keeps the owner gate, explicit confirmation,
+// write-access check and audit log. ADR-0041: clear only inside full rebuild.
+export const REBUILD_DISTANCE_CONFIRMATION = "REBUILD_DISTANCE";
 
 const PERFORMANCE_LEVEL_FIELD = "Performance Level";
 const LEVEL_PLACE_FIELD = "Level Place";
@@ -816,8 +820,9 @@ export async function applySeries2026Levels(
 		steps: [],
 	};
 
-	if (input.confirmation !== APPLY_LEVELS_CONFIRMATION) {
-		const result = fail(base, "confirm", `Explicit confirmation "${APPLY_LEVELS_CONFIRMATION}" is required.`);
+	const isRebuild = input.confirmation === REBUILD_DISTANCE_CONFIRMATION;
+	if (input.confirmation !== APPLY_LEVELS_CONFIRMATION && !isRebuild) {
+		const result = fail(base, "confirm", `Explicit confirmation "${APPLY_LEVELS_CONFIRMATION}" or "${REBUILD_DISTANCE_CONFIRMATION}" is required.`);
 		return result;
 	}
 
@@ -850,19 +855,26 @@ export async function applySeries2026Levels(
 	}
 	const events = row.events_json ? (JSON.parse(row.events_json) as LifecycleEventView[]) : [];
 	const event = events.find((entry) => entry.event_id === input.eventId);
+	const steps: ApplyStepResult[] = [];
+	const push = (step: ApplyStepResult) => steps.push(step);
 	if (!event) {
 		const result = fail(base, "check_stage", `Event ${input.eventId} is not in the last synced state. Run a lifecycle sync first.`);
 		await logApply(input.db, { distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: null, resultCount: 0 }, "REJECTED", result.steps, result.error);
 		return result;
 	}
-	if (event.stage !== "verifying") {
+	if (event.stage !== "verifying" && !isRebuild) {
 		const result = fail(base, "check_stage", `Event ${input.eventId} is in stage "${event.stage}", not "verifying". Nothing to apply.`);
 		await logApply(input.db, { distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: null, resultCount: 0 }, "REJECTED", result.steps, result.error);
 		return result;
 	}
 
-	const steps: ApplyStepResult[] = [];
-	const push = (step: ApplyStepResult) => steps.push(step);
+	if (isRebuild) {
+		push({
+			step: "rebuild_mode",
+			status: "ok",
+			detail: `Full-distance rebuild requested by owner; stage gate bypassed (event ${input.eventId} is "${event.stage}").`,
+		});
+	}
 
 	// Distance-scoped rebuild (ADR-0041): like NWANA-FINAL.ps1, one apply
 	// processes EVERY event of the distance's race and every result set.
