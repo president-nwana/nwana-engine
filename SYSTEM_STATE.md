@@ -881,6 +881,16 @@ A new developer or AI must be able to continue the project from this repository 
 - Local commit only — NOT pushed, NOT deployed (parent handles).
 - Operating cost: VERIFIED $0.
 
+### AHOTU CALIBRATION — live wizard walkthrough 2026-09-27 (~16:25 EDT)
+- Owner created the free organiser account himself (owner action, complete). Muse signed in via the owner's Secure Vault credentials and mapped the REAL add-event wizard (nothing published).
+- The flow is a wizard, not one form. Screen 1 "Create event" (https://www.ahotu.com/p/organiser-events/new): Name* + name-language dropdown — REQUIRED by save validation (choose "English"); Official website; Year event started; Contact Email/Facebook/Twitter/Instagram/YouTube; Organisation dropdown. Save → edition wizard. New events auto-enter "Waiting validation"; NO publish button and NO delete control anywhere — drafts cannot be removed from the dashboard, never create test drafts.
+- Screen 2 "Create a new edition" (5 tabs): General (Date* calendar picker + "To be confirmed", Status), Descriptions (per-language tabs), Registration (URL, Starts/Ends, Max participants), Location* (venue search; Country/City auto-set), Races ("Add a race": per race Name, Activity dropdown — "Nordic walking" IS a verified option, Distance* + unit, Start Time, Hybrid/On site/Virtual, Terrain/Topography/Profile, elevation, Course URL, ...). Screen 3 "Add photos": jpeg/png/tiff, 5–15 MB landscape, no flyers/maps/text.
+- Calibration artifact: a test draft "TEST DRAFT NWANA calibration DO NOT PUBLISH" (event ID 145484) was saved to unlock the wizard and CANNOT be deleted (no delete control) — it sits in the owner's dashboard as "Waiting validation", not public, no edition/races. Reuse it for the first real submission (Edit event → rename + fill) or leave it.
+- Code updated to the calibrated form: `src/ahotu.ts` AHOTU_MANUAL_LAST_MILE rewritten as exact steps; AhotuPackage restructured (form_version "2026-09-27", race_activity="Nordic walking", name_language="English", year_started, registration_url, socials; phantom contact_name removed); AhotuRaceInput extended; caller in object-creation.ts updated.
+- Migrations 0038 (no-op — targeted the removed endpoint id) + 0039 (applies the calibrated last mile to canonical `ahotu-add-event`) applied to production; production endpoint row verified: calibrated text, account_required=1, cost VERIFIED $0.
+- Released: commit f3ba932 + d914063f → GitHub main 8ab8ee75 (via gh-push-api.py); production Worker 7820518c deployed. tsc clean; 58/58 tests pass in ahotu + object-creation + object-fanout suites.
+- Operating cost: VERIFIED $0.
+
 ## ADS OVERVIEW — LIVE GA4 STATUS 2026-09-27
 
 - Root cause of GA4 `connected:false` in the Ads overview: `getAdsOverview()` hardcoded `google_analytics: {connected:false, note:"Not set up..."}` — it never read the real GA4 state (same bug pattern as ADR-0029 for Ads).
