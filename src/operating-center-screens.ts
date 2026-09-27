@@ -20,6 +20,8 @@ import type { NormalizedCampaignIntent } from "./google-ads-intent";
 // ADR-0030: the screen is a read-only operational view of the real account:
 // live campaigns come from the Google Ads API, never from the planned spec.
 import { getGoogleAdsStatus, getGoogleAdsAccountSnapshot, GOOGLE_ADS_LIVE_CUSTOMER_ID, GOOGLE_ADS_METRICS_LABEL, type GoogleAdsEnv, type GoogleAdsLiveCampaign } from "./google-ads";
+// GA4 status in the Ads overview is a live read (was hardcoded false).
+import { getGoogleAnalyticsStatus } from "./google-analytics";
 // ADR-0032: the Ads screen shows the machine's orchestration decisions
 // (source -> required result -> candidate action -> channel) as their own
 // logical layer, separate from the live account and the machine proposals.
@@ -267,7 +269,7 @@ export interface AdsOverview {
 		error?: string;
 		note: string;
 	};
-	google_analytics: { connected: false; note: string };
+	google_analytics: { connected: boolean; note: string; property_id?: string };
 	// ADR-0030: live account snapshot from the Google Ads API (read-only).
 	// available=false when the integration is not connected; then the
 	// connection block above carries the state. error holds the real
@@ -441,6 +443,23 @@ export async function getAdsOverview(
 	);
 	const downstream = new Map(proposals.map((p) => [p.proposal_id, p.state]));
 	const orchestration = await getOrchestrationDecisions(env.nwana_engine_db, downstream);
+	// Live GA4 connection state (was a hardcoded "not set up" placeholder).
+	// Read-only: one token refresh + one property-access check, same pattern
+	// as the Ads status read above. Never throws into the overview.
+	const gaStatus = await getGoogleAnalyticsStatus(env).catch(() => null);
+	const googleAnalytics = gaStatus && gaStatus.connected
+		? {
+			connected: true as const,
+			property_id: gaStatus.property_id,
+			note: `Connected to GA4 property ${gaStatus.property_id}. Read-only; the machine never changes Analytics settings.`,
+		}
+		: {
+			connected: false as const,
+			...(gaStatus ? { property_id: gaStatus.property_id } : {}),
+			note: gaStatus?.error
+				? `Google Analytics connection error: ${gaStatus.error}`
+				: "Google Analytics is not connected. Open /integrations/google-analytics/connect as the owner to connect.",
+		};
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
@@ -453,10 +472,7 @@ export async function getAdsOverview(
 			...(status.error ? { error: status.error } : {}),
 			note,
 		},
-		google_analytics: {
-			connected: false,
-			note: "Not set up. No Analytics property is attached to the NWANA sites yet.",
-		},
+		google_analytics: googleAnalytics,
 		live_account: liveAccount,
 		planned_campaigns: spec.campaigns.map((c) => ({
 			name: c.name,
@@ -525,7 +541,7 @@ const ADS_SCRIPT = `
 				}
 				html+='</div>';
 			}
-			html+='<div class="item"><strong>Google Analytics<span class="badge-warn">Not set up</span></strong><div class="detail">'+esc(data.google_analytics.note)+'</div></div>';
+			const ga=data.google_analytics;const gaBadge=ga.connected?'<span class="badge-ok">Connected</span>':'<span class="badge-warn">Not connected</span>';html+='<div class="item"><strong>Google Analytics '+gaBadge+'</strong><div class="detail">'+esc(ga.note)+'</div></div>';
 			html+='<h3>ORCHESTRATION DECISIONS</h3><p class="meta">What the machine decided for every known source: required result, candidate action, channel. Sources with no evidence stay undecided; incomplete evidence is reported, never guessed. Read-only.</p>';
 			for(const d of (data.orchestration||[])){
 				const dBadge=d.state==='DECIDED'?'<span class="badge-ok">'+esc(d.state)+'</span>':'<span class="badge-warn">'+esc(d.state)+'</span>';
@@ -1723,7 +1739,7 @@ export function buildAdsReport(data: AdsOverview): string {
 			body += `</tbody></table>`;
 		}
 	}
-	body += `<p><strong>Google Analytics</strong> <span class="tag-warn">Not set up</span></p><p>${escHtml(data.google_analytics.note)}</p>`;
+	body += `<p><strong>Google Analytics</strong> <span class="${data.google_analytics.connected ? "tag" : "tag-warn"}">${data.google_analytics.connected ? "Connected" : "Not connected"}</span></p><p>${escHtml(data.google_analytics.note)}</p>`;
 	body += `<h2>ORCHESTRATION DECISIONS</h2>`;
 	body += `<p class="note">What the machine decided for every known source: required result, candidate action, channel. Sources with no evidence stay undecided; incomplete evidence is reported, never guessed. Read-only.</p>`;
 	for (const d of data.orchestration) {
