@@ -139,10 +139,22 @@ describe("apply payload builders", () => {
 				clock_time: "18:54",
 			},
 		]);
-		const rows = buildResultFieldRows(computed, [{ result_id: 232501676 }], 654103, 654104);
+		const rows = buildResultFieldRows(computed, [{ result_id: 232501676 }], [777], 654103, 654104);
 		expect(rows).toEqual([
 			{
 				result_id: 232501676,
+				registration_id: 777,
+				place: null,
+				bib: null,
+				first_name: null,
+				last_name: null,
+				gender: null,
+				city: null,
+				state: null,
+				country_code: null,
+				clock_time: null,
+				chip_time: null,
+				age: null,
 				"custom-field-654103": "Elite (< 20:00)",
 				"custom-field-654104": "1",
 			},
@@ -153,6 +165,6 @@ describe("apply payload builders", () => {
 		const computed = computeSeries2026Levels("3K", [
 			{ first_name: "No", last_name: "Id", gender: "M", clock_time: "18:54" },
 		]);
-		expect(() => buildResultFieldRows(computed, [{}], 1, 2)).toThrow("result_id");
+		expect(() => buildResultFieldRows(computed, [{}], [777], 1, 2)).toThrow("result_id");
 	});
 });

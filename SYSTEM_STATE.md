@@ -932,3 +932,13 @@ A new developer or AI must be able to continue the project from this repository 
 - Owner approval recorded in audit (AUDIT-4e35f211...): Albert approved in chat 2026-09-27 — TEST_WRITE + apply of the 2026-09-26 3K result (232501676, 18:54, Elite, place 1, 1000 pts), full standard lifecycle pre-approved, stop only on real exception, NWANA-FINAL.ps1 never automatic.
 - 3K state in production D1: race_lifecycle 3K write_access = 'UNKNOWN', levels_apply_log empty. PENDING: owner-key calls — (1) POST /api/operating-center/race-lifecycle/sync?distance=3K, (2) POST .../write-test {"distance":"3K","confirm":"TEST_WRITE"}, (3) POST .../apply-levels {"distance":"3K","event_id":1177636,"confirmation":"APPLY_LEVELS"}. Subagent has no owner-key access; parent to execute.
 - Operating cost: VERIFIED $0.
+
+## LEGACY PARITY — 2026-09-27 (branch feature/series-2026-legacy-parity, NOT merged, NOT deployed)
+
+- NWANA-FINAL.ps1 (684 lines, never executed in production) studied as the source of truth; ported its exact semantics into the apply path — ADR-0041.
+- Fixed the real production failure: participant mapping now reads the parallel `resultSet.registration_ids` array (index-aligned, count-validated) and resolves via `POST .../race-series-participants/add/registration-id.json` (create-or-return-existing, 1-based row mapping) instead of per-row registration_id/user_id + the BETA lookup that silently failed on manual-entry results.
+- Legacy behaviors ported: all ten scoring types ensured; all ten groups uploaded with `clear_previous_results=T` (empty groups clear stale standings); legacy scoring-type cleanup after a clean run; full-row result writes (all original fields + registration_id + preserved custom-field-*); public result-column layout (Place hidden, Performance Level + Level Place shown); legacy step order (scoring types -> participants -> standings -> custom fields -> result rows -> columns -> cleanup).
+- Kept Machine improvements explicitly: APPLY_LEVELS owner gate, TEST_WRITE write_access probe, verifying stage gate, levels_apply_log, live re-read, fail-closed.
+- Scope stays one distance/event/result set per owner-gated run (not the whole-series sweep).
+- Verification: tsc clean; new test/series-2026-legacy-parity.spec.ts (8 tests, includes the real 3K regression case 232501676 / 18:54 / Elite / 1 / 1000); updated series-2026-apply.spec.ts and race-lifecycle.spec.ts dry-run plan; full suite 489 pass + the same 4 pre-existing operating-center-cockpit failures.
+- Operating cost: VERIFIED $0.

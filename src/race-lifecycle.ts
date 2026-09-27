@@ -237,6 +237,72 @@ export function buildSeries2026LevelsWritePlan(
 			`RunSignup write access is ${input.writeAccess}; nothing was written.`,
 		steps: [
 			{
+				step: "ensure_scoring_types",
+				description:
+					"Ensure all ten per-level, per-gender non-standard scoring types exist for the race series (created only if missing).",
+				payload: {
+					endpoint: "POST /rest/v2/race-series/non-standard-scoring-types.json",
+					params: {
+						race_series_id: input.raceSeriesId,
+						race_series_year_id: input.raceSeriesYearId,
+					},
+					body: {
+						non_standard_scoring_types: scoringTypeNames.map((name) => ({
+							scoring_type_id: null,
+							scoring_type_name: name,
+						})),
+					},
+					note: "Existing types are reused by exact name (read first via GET); only missing names are created with scoring_type_id: null. Legacy parity: all ten types, not just the ones present in this event.",
+				},
+			},
+			{
+				step: "resolve_participants",
+				description:
+					"Resolve race_series_participant_id per result row via add/registration-id.json, using the registration_ids parallel array from get-results (index-aligned).",
+				payload: {
+					endpoint: "POST /rest/v2/race-series/race-series-participants/add/registration-id.json",
+					params: {
+						race_series_id: input.raceSeriesId,
+						race_series_year_id: input.raceSeriesYearId,
+						race_id: input.raceId,
+						event_id: input.eventId,
+					},
+					body: {
+						columns: ["registration_id", "user_defined_id"],
+						participants: [["<registration_id>", null]],
+					},
+					note: "Unlike the BETA lookup, add/registration-id.json creates a series participant when missing and returns the existing id otherwise. Response rows carry a 1-based row index; a count mismatch aborts the apply (legacy: 'Incomplete series participant mapping').",
+				},
+			},
+			{
+				step: "upload_standings",
+				description:
+					"Upload series points and positions for all ten scoring types with clear_previous_results=T (legacy replacement semantics: safe to re-run).",
+				payload: {
+					endpoint: "POST /rest/v2/race-series/race-series-results.json",
+					params: {
+						race_series_id: input.raceSeriesId,
+						race_series_year_id: input.raceSeriesYearId,
+						race_id: input.raceId,
+						event_id: input.eventId,
+						scoring_type_id: "<resolved per level+gender group>",
+						clear_previous_results: "T",
+					},
+					body: {
+						columns: ["race_series_participant_id", "series_points", "position"],
+						scoring_data: [["<participant_id>", "<series_points>", "<position>"]],
+					},
+					standings: input.computed.map((row) => ({
+						athlete: row.athlete,
+						level: row.level_display,
+						gender: row.gender,
+						series_points: row.points,
+						position: row.level_place,
+					})),
+					note: "One call per level+gender scoring type (ten calls); empty groups send an empty scoring_data array, clearing stale standings. Any failed_race_series_participant_id aborts the apply.",
+				},
+			},
+			{
 				step: "ensure_custom_fields",
 				description:
 					'Ensure "Performance Level" and "Level Place" string custom fields exist on the result set (created only if missing).',
@@ -259,55 +325,9 @@ export function buildSeries2026LevelsWritePlan(
 				},
 			},
 			{
-				step: "ensure_scoring_types",
-				description:
-					"Ensure per-level, per-gender non-standard scoring types exist for the race series (created only if missing).",
-				payload: {
-					endpoint: "POST /rest/v2/race-series/non-standard-scoring-types.json",
-					params: {
-						race_series_id: input.raceSeriesId,
-						race_series_year_id: input.raceSeriesYearId,
-					},
-					body: {
-						non_standard_scoring_types: scoringTypeNames.map((name) => ({
-							scoring_type_id: null,
-							scoring_type_name: name,
-						})),
-					},
-					note: "Existing types are reused by exact name (read first via GET); only missing names are created with scoring_type_id: null.",
-				},
-			},
-			{
-				step: "upload_standings",
-				description:
-					"Upload series points and positions per scoring type (requires live registration-to-participant mapping).",
-				payload: {
-					endpoint: "POST /rest/v2/race-series/race-series-results.json",
-					params: {
-						race_series_id: input.raceSeriesId,
-						race_series_year_id: input.raceSeriesYearId,
-						race_id: input.raceId,
-						event_id: input.eventId,
-						scoring_type_id: "<resolved per level+gender group>",
-					},
-					body: {
-						columns: ["race_series_participant_id", "series_points", "position"],
-						scoring_data: [["<participant_id>", "<series_points>", "<position>"]],
-					},
-					standings: input.computed.map((row) => ({
-						athlete: row.athlete,
-						level: row.level_display,
-						gender: row.gender,
-						series_points: row.points,
-						position: row.level_place,
-					})),
-					note: "One call per level+gender scoring type. Participant ids are resolved live via the BETA series-participant lookup; unmapped rows abort the apply.",
-				},
-			},
-			{
 				step: "write_result_fields",
 				description:
-					'Write "Performance Level" and "Level Place" back onto each result row.',
+					'Write full result rows (all original fields plus preserved custom-field-* values) with "Performance Level" and "Level Place" set.',
 				payload: {
 					endpoint: `POST /rest/race/${input.raceId}/results/full-results`,
 					params: {
@@ -318,12 +338,57 @@ export function buildSeries2026LevelsWritePlan(
 					body: {
 						results: input.computed.map((row) => ({
 							result_id: row.result_id,
+							registration_id: "<from registration_ids parallel array>",
+							place: "<original>",
+							bib: "<original>",
+							first_name: "<original>",
+							last_name: "<original>",
+							gender: "<original>",
+							city: "<original>",
+							state: "<original>",
+							country_code: "<original>",
+							clock_time: "<original>",
+							chip_time: "<original>",
+							age: "<original>",
 							"custom-field-<Performance Level id>": row.level_display,
 							"custom-field-<Level Place id>": String(row.level_place),
 						})),
 					},
 					rows: resultFieldWrites,
-					note: "Post Event Results contract: existing rows are edited by result_id; custom-field-<id> keys use the ids resolved in step 1.",
+					note: "Post Event Results contract: existing rows are edited by result_id; custom-field-<id> keys use the ids resolved in step 4. Legacy parity: full rows, not minimal patches.",
+				},
+			},
+			{
+				step: "set_result_columns",
+				description:
+					"Hide the standard Place column and show Performance Level + Level Place on the public result set (customize-result-set-columns).",
+				payload: {
+					endpoint: `POST /rest/race/${input.raceId}/results/customize-result-set-columns`,
+					params: {
+						event_id: input.eventId,
+						individual_result_set_id: input.resultSetId,
+						request_format: "json",
+					},
+					columns: [
+						"race_placement hidden (Place)",
+						"bib_num, name shown",
+						"field_<id> Performance Level shown",
+						"field_<id> Level Place shown",
+						"clock_time, avg_pace, gender, city, state, countrycode, age shown",
+					],
+				},
+			},
+			{
+				step: "cleanup_legacy_scoring_types",
+				description:
+					"Delete pre-v4 scoring types (same names without the '; tie: best time' suffix) via delete-non-standard-scoring-types.json.",
+				payload: {
+					endpoint: "POST /rest/v2/race-series/delete-non-standard-scoring-types.json",
+					params: {
+						race_series_id: input.raceSeriesId,
+						race_series_year_id: input.raceSeriesYearId,
+					},
+					note: "Only names matching the legacy level/gender pattern that are not in the wanted list are deleted; unrelated types are never touched.",
 				},
 			},
 		],

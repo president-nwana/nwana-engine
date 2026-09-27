@@ -131,12 +131,15 @@ describe("levels write plan (dry run only)", () => {
 		expect(plan.executed).toBe(false);
 		expect(plan.write_access).toBe("UNKNOWN");
 		expect(plan.steps.map((step) => step.step)).toEqual([
-			"ensure_custom_fields",
 			"ensure_scoring_types",
+			"resolve_participants",
 			"upload_standings",
+			"ensure_custom_fields",
 			"write_result_fields",
+			"set_result_columns",
+			"cleanup_legacy_scoring_types",
 		]);
-		const scoring = plan.steps[1].payload as {
+		const scoring = plan.steps[0].payload as {
 			body: { non_standard_scoring_types: Array<{ scoring_type_id: null; scoring_type_name: string }> };
 		};
 		const names = scoring.body.non_standard_scoring_types.map((entry) => entry.scoring_type_name);
@@ -146,14 +149,18 @@ describe("levels write plan (dry run only)", () => {
 		expect(
 			scoring.body.non_standard_scoring_types.every((entry) => entry.scoring_type_id === null),
 		).toBe(true);
-		const resultFields = plan.steps[3].payload as {
+		const resolve = plan.steps[1].payload as { endpoint: string; params: Record<string, unknown> };
+		expect(resolve.endpoint).toContain("race-series-participants/add/registration-id.json");
+		const resultFields = plan.steps[4].payload as {
 			body: { results: Array<Record<string, unknown>> };
 		};
 		expect(resultFields.body.results[0]).toMatchObject({
+			registration_id: "<from registration_ids parallel array>",
 			"custom-field-<Performance Level id>": "Elite (< 6:00)",
 			"custom-field-<Level Place id>": "1",
 		});
 		const standings = plan.steps[2].payload as {
+			params: Record<string, unknown>;
 			body: { columns: string[]; scoring_data: unknown[][] };
 		};
 		expect(standings.body.columns).toEqual([
@@ -161,6 +168,7 @@ describe("levels write plan (dry run only)", () => {
 			"series_points",
 			"position",
 		]);
+		expect(standings.params.clear_previous_results).toBe("T");
 		expect(plan.report).toContain("DRY RUN");
 		expect(plan.report).toContain("nothing was written");
 	});

@@ -110,14 +110,6 @@ function fail(result: ApplyLevelsResult, step: string, detail: string): ApplyLev
 	};
 }
 
-function scoringGender(gender: string | null): "Men" | "Women" | null {
-	switch (gender?.toUpperCase()) {
-		case "M": return "Men";
-		case "F": return "Women";
-		default: return null;
-	}
-}
-
 export function scoringTypeName(
 	distance: string,
 	level: PerformanceLevelName,
@@ -138,6 +130,11 @@ export async function readAndComputeLevels(
 	resultSetName: string | null;
 	headers: UnknownRecord;
 	rawRows: UnknownRecord[];
+	// Parallel registration_ids array from get-results, index-aligned with
+	// rawRows — the same source NWANA-FINAL.ps1 used. Rows may carry no
+	// per-row registration_id/user_id (manual entries); the parallel array
+	// is the canonical mapping source.
+	registrationIds: Array<number | null>;
 	computed: ComputedLifecycleResult[];
 }> {
 	const callEnv = { accessToken };
@@ -182,6 +179,22 @@ export async function readAndComputeLevels(
 		throw new Error(`Result set ${resultSetId} has no result rows to classify.`);
 	}
 
+	// Legacy parity: registration ids come from the parallel registration_ids
+	// array, index-aligned with results — not from per-row fields. A count
+	// mismatch is a hard error, exactly like NWANA-FINAL.ps1.
+	const registrationIdsRaw = Array.isArray(resultSet.registration_ids)
+		? resultSet.registration_ids
+		: null;
+	if (!registrationIdsRaw || registrationIdsRaw.length !== rawRows.length) {
+		throw new Error(
+			`registration_ids count does not match results for event ${eventId}.`,
+		);
+	}
+	const registrationIds = registrationIdsRaw.map((value) => {
+		const id = Number(value);
+		return Number.isInteger(id) && id > 0 ? id : null;
+	});
+
 	const computed = computeSeries2026Levels(
 		source.distance,
 		rawRows.map((row) => ({
@@ -202,6 +215,7 @@ export async function readAndComputeLevels(
 		resultSetName: text(firstSet?.individual_result_set_name),
 		headers,
 		rawRows,
+		registrationIds,
 		computed,
 	};
 }
@@ -255,24 +269,53 @@ export async function ensureLevelCustomFields(
 	return { levelFieldId, placeFieldId, created };
 }
 
-// Step 2 payload builder (pure): full-results edit rows keyed by result_id
-// with custom-field-<id> values, per the Post Event Results API contract.
+// Step payload builder (pure): full result rows keyed by result_id, exactly
+// like NWANA-FINAL.ps1 — every original field plus preserved custom-field-*
+// values, with the two NWANA fields set. Per the Post Event Results API
+// contract, custom values travel as custom-field-<id>.
 export function buildResultFieldRows(
 	computed: ComputedLifecycleResult[],
 	rawRows: readonly UnknownRecord[],
+	registrationIds: ReadonlyArray<number | null>,
 	levelFieldId: number,
 	placeFieldId: number,
 ): Array<Record<string, unknown>> {
+	if (registrationIds.length !== computed.length) {
+		throw new Error("registration_ids count does not match results.");
+	}
 	return computed.map((row, index) => {
-		const resultId = row.result_id ?? text(rawRows[index]?.result_id);
+		const raw = rawRows[index] ?? {};
+		const resultId = row.result_id ?? text(raw.result_id);
 		if (!resultId) {
 			throw new Error(`Result row ${index} has no result_id; cannot edit it.`);
 		}
-		return {
+		const registrationId = registrationIds[index];
+		if (registrationId === null) {
+			throw new Error(
+				`Result row ${index} has no registration_id; cannot map it to a series participant.`,
+			);
+		}
+		const out: Record<string, unknown> = {
 			result_id: resultId,
-			[`custom-field-${levelFieldId}`]: row.level_display,
-			[`custom-field-${placeFieldId}`]: String(row.level_place),
+			registration_id: registrationId,
+			place: raw.place ?? null,
+			bib: raw.bib ?? null,
+			first_name: text(raw.first_name),
+			last_name: text(raw.last_name),
+			gender: text(raw.gender),
+			city: text(raw.city),
+			state: text(raw.state),
+			country_code: text(raw.country_code),
+			clock_time: text(raw.clock_time),
+			chip_time: text(raw.chip_time),
+			age: raw.age ?? null,
 		};
+		for (const [key, value] of Object.entries(raw)) {
+			if (key.startsWith("custom-field-")) out[key] = value;
+		}
+		out[`custom-field-${levelFieldId}`] = row.level_display;
+		out[`custom-field-${placeFieldId}`] = String(row.level_place);
+		return out;
 	});
 }
 
@@ -290,9 +333,54 @@ export async function writeResultFields(
 	await postRunSignupForm(url, accessToken, { results: rows });
 }
 
-interface ScoringType {
-	scoring_type_id: number;
-	scoring_type_name: string;
+// All five Series 2026 levels, in legacy order.
+export const SERIES_2026_LEVELS: readonly PerformanceLevelName[] = [
+	"Elite",
+	"High Performance",
+	"Performance",
+	"Competitive",
+	"Open",
+];
+
+// Every scoring type name NWANA-FINAL.ps1 maintains per distance: all five
+// levels x Men/Women. Ensuring all ten (not just the levels present in one
+// event) matches the legacy sweep and keeps every category replaceable.
+export function allScoringTypeNames(distance: string): string[] {
+	const names: string[] = [];
+	for (const level of SERIES_2026_LEVELS) {
+		names.push(scoringTypeName(distance, level, "Men"));
+		names.push(scoringTypeName(distance, level, "Women"));
+	}
+	return names;
+}
+
+// Legacy scoring types are the same level/gender names WITHOUT the
+// "; tie: best time" suffix (pre-v4 naming). Matches NWANA-FINAL.ps1's
+// Remove-LegacyScoringTypes regex exactly.
+const LEGACY_SCORING_TYPE_RE = /^(Elite|High Performance|Performance|Competitive|Open) (Men|Women)/;
+
+export async function listScoringTypes(
+	source: Series2026Source,
+	accessToken: string,
+): Promise<Map<string, number>> {
+	const listUrl = new URL(
+		"https://api.runsignup.com/rest/v2/race-series/non-standard-scoring-types.json",
+	);
+	listUrl.searchParams.set("format", "json");
+	listUrl.searchParams.set("race_series_id", String(source.raceSeriesId));
+	listUrl.searchParams.set("race_series_year_id", String(source.raceSeriesYearId));
+	const existing = await runSignupGetJson(listUrl, { accessToken });
+	const ids = new Map<string, number>();
+	for (const value of Object.values(existing)) {
+		if (!Array.isArray(value)) continue;
+		for (const entry of value) {
+			const record = asRecord(entry);
+			const id = record ? Number(record.scoring_type_id) : NaN;
+			const name = record ? text(record.scoring_type_name) : null;
+			if (Number.isInteger(id) && name) ids.set(name, id);
+		}
+	}
+	return ids;
 }
 
 // Step 3: reuse existing non-standard scoring types by exact name; create
@@ -302,28 +390,12 @@ export async function ensureScoringTypes(
 	neededNames: readonly string[],
 	accessToken: string,
 ): Promise<{ ids: Map<string, number>; created: string[] }> {
-	const listUrl = new URL(
-		"https://api.runsignup.com/rest/v2/race-series/non-standard-scoring-types.json",
-	);
-	listUrl.searchParams.set("format", "json");
-	listUrl.searchParams.set("race_series_id", String(source.raceSeriesId));
-	listUrl.searchParams.set("race_series_year_id", String(source.raceSeriesYearId));
-	const existing = await runSignupGetJson(listUrl, { accessToken });
-	const found: ScoringType[] = [];
-	for (const value of Object.values(existing)) {
-		if (!Array.isArray(value)) continue;
-		for (const entry of value) {
-			const record = asRecord(entry);
-			const id = record ? Number(record.scoring_type_id) : NaN;
-			const name = record ? text(record.scoring_type_name) : null;
-			if (Number.isInteger(id) && name) found.push({ scoring_type_id: id, scoring_type_name: name });
-		}
-	}
+	const found = await listScoringTypes(source, accessToken);
 	const ids = new Map<string, number>();
 	const missing = neededNames.filter((name) => {
-		const hit = found.find((entry) => entry.scoring_type_name === name);
-		if (hit) ids.set(name, hit.scoring_type_id);
-		return !hit;
+		const hit = found.get(name);
+		if (hit !== undefined) ids.set(name, hit);
+		return hit === undefined;
 	});
 
 	const created: string[] = [];
@@ -359,70 +431,111 @@ export async function ensureScoringTypes(
 	return { ids, created };
 }
 
-// Step 4: resolve race_series_participant_id per result row via the BETA
-// lookup, then upload points per scoring type.
+// Participant resolution via add/registration-id.json — exactly like
+// NWANA-FINAL.ps1. Unlike the BETA lookup endpoint, this creates a series
+// participant when the registration is not one yet and returns the existing
+// id otherwise, so it never silently drops rows. Response rows carry a
+// 1-based "row" index aligned with the submitted participants array.
+export async function resolveSeriesParticipants(
+	source: Series2026Source,
+	eventId: number,
+	registrationIds: ReadonlyArray<number | null>,
+	accessToken: string,
+): Promise<number[]> {
+	for (const id of registrationIds) {
+		if (id === null) {
+			// Legacy parity: NWANA-FINAL.ps1 would send 0 and fail the
+			// mapping below; failing here is the same outcome, explicit.
+			throw new Error("Incomplete series participant mapping");
+		}
+	}
+	const url =
+		`https://api.runsignup.com/rest/v2/race-series/race-series-participants/add/registration-id.json` +
+		`?race_series_id=${source.raceSeriesId}&race_series_year_id=${source.raceSeriesYearId}` +
+		`&race_id=${source.raceId}&event_id=${eventId}`;
+	const answer = await postRunSignupForm(url, accessToken, {
+		columns: ["registration_id", "user_defined_id"],
+		participants: registrationIds.map((id) => [id, null]),
+	});
+	const matches = Array.isArray(answer.race_series_participants)
+		? answer.race_series_participants
+		: [];
+	if (matches.length !== registrationIds.length) {
+		throw new Error("Incomplete series participant mapping");
+	}
+	const ids: Array<number | null> = new Array(registrationIds.length).fill(null);
+	for (const entry of matches) {
+		const record = asRecord(entry);
+		const row = record ? Number(record.row) : NaN;
+		const participantId = record ? Number(record.race_series_participant_id) : NaN;
+		if (
+			!Number.isInteger(row) ||
+			row < 1 ||
+			row > ids.length ||
+			!Number.isInteger(participantId)
+		) {
+			throw new Error("Invalid series participant row");
+		}
+		ids[row - 1] = participantId;
+	}
+	if (ids.some((id) => id === null)) {
+		throw new Error("Incomplete series participant mapping");
+	}
+	return ids as number[];
+}
+
+export interface StandingsGroup {
+	name: string;
+	rows: Array<[number, number, number]>;
+}
+
+// Pure grouping for standings upload: all ten legacy level x gender groups
+// in legacy order, rows sorted by Level Place; empty groups are included so
+// the upload clears stale standings (legacy replacement semantics).
+export function groupStandingsByScoringType(
+	computed: ComputedLifecycleResult[],
+	participantIds: readonly number[],
+	distance: string,
+): StandingsGroup[] {
+	if (participantIds.length !== computed.length) {
+		throw new Error("Incomplete series participant mapping");
+	}
+	const groups: StandingsGroup[] = [];
+	for (const level of SERIES_2026_LEVELS) {
+		for (const gender of ["Men", "Women"] as const) {
+			const genderCode = gender === "Men" ? "M" : "F";
+			const rows = computed
+				.map((row, index) => ({ row, participantId: participantIds[index] }))
+				.filter(
+					(entry) =>
+						entry.row.level === level &&
+						(entry.row.gender ?? "").toUpperCase() === genderCode,
+				)
+				.sort((a, b) => a.row.level_place - b.row.level_place)
+				.map((entry) => [entry.participantId, entry.row.points, entry.row.level_place] as [number, number, number]);
+			groups.push({ name: scoringTypeName(distance, level, gender), rows });
+		}
+	}
+	return groups;
+}
+
+// Standings upload with legacy replacement semantics: every one of the ten
+// scoring types is uploaded (empty groups send an empty scoring_data array,
+// clearing stale standings), clear_previous_results=T replaces the whole
+// category/event scoring — "safe to run again". Failure detection matches
+// NWANA-FINAL.ps1: any failed_race_series_participant_id aborts.
 export async function uploadSeriesStandings(
 	source: Series2026Source,
 	eventId: number,
 	computed: ComputedLifecycleResult[],
-	rawRows: readonly UnknownRecord[],
+	participantIds: readonly number[],
 	scoringTypeIds: Map<string, number>,
 	accessToken: string,
 ): Promise<{ uploaded: number; groups: string[] }> {
-	const idColumn = rawRows.every((row) => text(row.registration_id) !== null)
-		? "registration_id"
-		: rawRows.every((row) => text(row.user_id) !== null)
-			? "user_id"
-			: null;
-	if (!idColumn) {
-		throw new Error(
-			"Result rows carry neither registration_id nor user_id; cannot map to series participants.",
-		);
-	}
-	const lookupUrl =
-		`https://api.runsignup.com/rest/v2/race-series/race-series-participants/lookup.json` +
-		`?race_series_id=${source.raceSeriesId}&race_series_year_id=${source.raceSeriesYearId}` +
-		`&race_id=${source.raceId}&event_id=${eventId}&matching_type=${idColumn}`;
-	const lookup = await postRunSignupForm(lookupUrl, accessToken, {
-		columns: [idColumn],
-		participants: rawRows.map((row) => [text(row[idColumn])]),
-	});
-	const matches = Array.isArray(lookup.race_series_participants)
-		? lookup.race_series_participants
-		: [];
-	const participantIds = matches.map((entry) => {
-		const record = asRecord(entry);
-		const id = record ? Number(record.race_series_participant_id) : NaN;
-		return Number.isInteger(id) ? id : null;
-	});
-	const unmapped = participantIds.filter((id) => id === null).length;
-	if (unmapped > 0 || participantIds.length !== computed.length) {
-		throw new Error(
-			`${unmapped} of ${computed.length} result(s) could not be mapped to a series participant; standings upload aborted.`,
-		);
-	}
-
-	const groups = new Map<string, Array<{ participantId: number; points: number; position: number }>>();
-	computed.forEach((row, index) => {
-		const gender = scoringGender(row.gender);
-		if (!gender) {
-			throw new Error(
-				`No scoring type defined for gender "${row.gender ?? "?"}"; standings upload aborted.`,
-			);
-		}
-		const name = scoringTypeName(source.distance, row.level, gender);
-		const list = groups.get(name) ?? [];
-		list.push({
-			participantId: participantIds[index] as number,
-			points: row.points,
-			position: row.level_place,
-		});
-		groups.set(name, list);
-	});
-
+	const groups = groupStandingsByScoringType(computed, participantIds, source.distance);
 	let uploaded = 0;
 	const groupNames: string[] = [];
-	for (const [name, rows] of groups) {
+	for (const { name, rows } of groups) {
 		const scoringTypeId = scoringTypeIds.get(name);
 		if (!scoringTypeId) {
 			throw new Error(`No scoring type id resolved for "${name}".`);
@@ -430,15 +543,96 @@ export async function uploadSeriesStandings(
 		const url =
 			`https://api.runsignup.com/rest/v2/race-series/race-series-results.json` +
 			`?race_series_id=${source.raceSeriesId}&race_series_year_id=${source.raceSeriesYearId}` +
-			`&race_id=${source.raceId}&event_id=${eventId}&scoring_type_id=${scoringTypeId}`;
+			`&race_id=${source.raceId}&event_id=${eventId}&scoring_type_id=${scoringTypeId}` +
+			`&clear_previous_results=T`;
 		const answer = await postRunSignupForm(url, accessToken, {
 			columns: ["race_series_participant_id", "series_points", "position"],
-			scoring_data: rows.map((row) => [row.participantId, row.points, row.position]),
+			scoring_data: rows,
 		});
+		const failed = Array.isArray(answer.failed_race_series_participant_id)
+			? answer.failed_race_series_participant_id
+			: [];
+		if (failed.length > 0) {
+			throw new Error(`Standings upload failed for ${name}`);
+		}
 		uploaded += Number(answer.num_scores_uploaded ?? 0);
 		groupNames.push(name);
 	}
 	return { uploaded, groups: groupNames };
+}
+
+// Result-set column layout, exactly like NWANA-FINAL.ps1's Set-ResultColumns:
+// the standard "Place" column is hidden (public Detailed Results show
+// Performance Level + Level Place instead), everything else is shown.
+export async function customizeResultSetColumns(
+	source: Series2026Source,
+	eventId: number,
+	resultSetId: number,
+	levelFieldId: number,
+	placeFieldId: number,
+	accessToken: string,
+): Promise<void> {
+	const url =
+		`https://api.runsignup.com/rest/race/${source.raceId}/results/customize-result-set-columns` +
+		`?format=json&event_id=${eventId}&individual_result_set_id=${resultSetId}&request_format=json`;
+	const answer = await postRunSignupForm(url, accessToken, {
+		columns: [
+			{ column_key: "race_placement", column_text: "Place", hidden: "T", hidden_in_individual_results: "T" },
+			{ column_key: "bib_num", column_text: "Bib", hidden: "F" },
+			{ column_key: "name", column_text: "Name", hidden: "F" },
+			{ column_key: `field_${levelFieldId}`, column_text: "Performance Level", hidden: "F", hidden_in_individual_results: "F" },
+			{ column_key: `field_${placeFieldId}`, column_text: "Level Place", hidden: "F", hidden_in_individual_results: "F" },
+			{ column_key: "clock_time", column_text: "Clock Time", hidden: "F" },
+			{ column_key: "avg_pace", column_text: "Pace", hidden: "F" },
+			{ column_key: "gender", column_text: "Gender", hidden: "F" },
+			{ column_key: "city", column_text: "City", hidden: "F" },
+			{ column_key: "state", column_text: "State", hidden: "F" },
+			{ column_key: "countrycode", column_text: "Country", hidden: "F" },
+			{ column_key: "age", column_text: "Age", hidden: "F" },
+		],
+	});
+	if (answer !== null && typeof answer === "object" && "success" in answer && !answer.success) {
+		throw new Error("Column customization failed");
+	}
+}
+
+// Pure: ids of pre-v4 scoring types among the existing ones — names matching
+// the legacy level/gender pattern that are NOT in the wanted list. Mirrors
+// NWANA-FINAL.ps1's Remove-LegacyScoringTypes.
+export function legacyScoringTypeIds(
+	existing: Map<string, number>,
+	distance: string,
+): number[] {
+	const wanted = new Set(allScoringTypeNames(distance));
+	return [...existing.entries()]
+		.filter(([name]) => LEGACY_SCORING_TYPE_RE.test(name) && !wanted.has(name))
+		.map(([, id]) => id)
+		.sort((a, b) => a - b);
+}
+
+// Deletes pre-v4 scoring types (same level/gender names without the
+// "; tie: best time" suffix), exactly like NWANA-FINAL.ps1's
+// Remove-LegacyScoringTypes. Unrelated scoring types are never touched.
+export async function removeLegacyScoringTypes(
+	source: Series2026Source,
+	distance: string,
+	accessToken: string,
+): Promise<{ deleted: number[] }> {
+	const existing = await listScoringTypes(source, accessToken);
+	const legacyIds = legacyScoringTypeIds(existing, distance);
+	if (legacyIds.length === 0) {
+		return { deleted: [] };
+	}
+	const url =
+		`https://api.runsignup.com/rest/v2/race-series/delete-non-standard-scoring-types.json` +
+		`?race_series_id=${source.raceSeriesId}&race_series_year_id=${source.raceSeriesYearId}`;
+	const answer = await postRunSignupForm(url, accessToken, {
+		deleted_non_standard_scoring_type_ids: legacyIds,
+	});
+	if (answer !== null && typeof answer === "object" && "error" in answer) {
+		throw new Error("Could not delete legacy scoring types");
+	}
+	return { deleted: legacyIds };
 }
 
 async function logApply(
@@ -543,6 +737,33 @@ export async function applySeries2026Levels(
 			detail: `${live.computed.length} result(s) from set ${live.resultSetId} (${live.resultSetName ?? "unnamed"}); levels computed.`,
 		});
 
+		const scoring = await ensureScoringTypes(source, allScoringTypeNames(input.distance), input.accessToken);
+		push({
+			step: "ensure_scoring_types",
+			status: scoring.created.length > 0 ? "ok" : "skipped",
+			detail: scoring.created.length > 0
+				? `Created: ${scoring.created.join("; ")}.`
+				: "All ten scoring types already existed; nothing created.",
+		});
+
+		const participantIds = await resolveSeriesParticipants(
+			source, input.eventId, live.registrationIds, input.accessToken,
+		);
+		push({
+			step: "resolve_participants",
+			status: "ok",
+			detail: `${participantIds.length} result(s) mapped to series participants.`,
+		});
+
+		const standings = await uploadSeriesStandings(
+			source, input.eventId, live.computed, participantIds, scoring.ids, input.accessToken,
+		);
+		push({
+			step: "upload_standings",
+			status: "ok",
+			detail: `${standings.uploaded} score(s) uploaded across ${standings.groups.length} scoring group(s) (cleared and replaced).`,
+		});
+
 		const fields = await ensureLevelCustomFields(
 			source, input.eventId, live.resultSetId, live.headers, input.accessToken,
 		);
@@ -554,7 +775,9 @@ export async function applySeries2026Levels(
 				: "Both fields already existed; nothing created.",
 		});
 
-		const rows = buildResultFieldRows(live.computed, live.rawRows, fields.levelFieldId, fields.placeFieldId);
+		const rows = buildResultFieldRows(
+			live.computed, live.rawRows, live.registrationIds, fields.levelFieldId, fields.placeFieldId,
+		);
 		await writeResultFields(source, input.eventId, live.resultSetId, rows, input.accessToken);
 		push({
 			step: "write_result_fields",
@@ -562,27 +785,26 @@ export async function applySeries2026Levels(
 			detail: `${rows.length} result row(s) updated with Performance Level and Level Place.`,
 		});
 
-		const neededNames = [...new Set(live.computed.map((entry) => {
-			const gender = scoringGender(entry.gender);
-			if (!gender) throw new Error(`No scoring type defined for gender "${entry.gender ?? "?"}".`);
-			return scoringTypeName(source.distance, entry.level, gender);
-		}))];
-		const scoring = await ensureScoringTypes(source, neededNames, input.accessToken);
-		push({
-			step: "ensure_scoring_types",
-			status: scoring.created.length > 0 ? "ok" : "skipped",
-			detail: scoring.created.length > 0
-				? `Created: ${scoring.created.join("; ")}.`
-				: "All needed scoring types already existed; nothing created.",
-		});
-
-		const standings = await uploadSeriesStandings(
-			source, input.eventId, live.computed, live.rawRows, scoring.ids, input.accessToken,
+		await customizeResultSetColumns(
+			source, input.eventId, live.resultSetId, fields.levelFieldId, fields.placeFieldId, input.accessToken,
 		);
 		push({
-			step: "upload_standings",
+			step: "set_result_columns",
 			status: "ok",
-			detail: `${standings.uploaded} score(s) uploaded across ${standings.groups.length} scoring group(s): ${standings.groups.join("; ")}.`,
+			detail: "Standard Place hidden; Performance Level + Level Place shown.",
+		});
+
+		// Legacy parity: NWANA-FINAL.ps1 cleans up pre-v4 scoring type names
+		// only when the distance processed without errors. Inside the
+		// owner-gated single-event apply, reaching this point means exactly
+		// that.
+		const cleanup = await removeLegacyScoringTypes(source, input.distance, input.accessToken);
+		push({
+			step: "cleanup_legacy_scoring_types",
+			status: cleanup.deleted.length > 0 ? "ok" : "skipped",
+			detail: cleanup.deleted.length > 0
+				? `Deleted legacy scoring type ids: ${cleanup.deleted.join(", ")}.`
+				: "No legacy scoring types found; nothing deleted.",
 		});
 	} catch (error) {
 		const result = fail(base, "apply", error instanceof Error ? error.message : String(error));
