@@ -22,6 +22,7 @@ import { applySeries2026Levels } from "./series-2026-apply";
 import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
+import { SEP_26_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-26-2026-3k-result-card";
 import {
         getConversionActions,
         getGoogleAdsStatus,
@@ -5333,10 +5334,15 @@ async function getSeries2026ResultCard(
 		}, 409);
 	}
 	if (
-		format === "jpeg" &&
-		publicationKey === "runsignup:series-2026:210000:1178567:666098"
+		format === "jpeg" && (
+			publicationKey === "runsignup:series-2026:210000:1178567:666098" ||
+			publicationKey === "runsignup:series-2026:210000:1177636:664979"
+		)
 	) {
-		const binary = atob(SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64);
+		const jpegBase64 = publicationKey === "runsignup:series-2026:210000:1177636:664979"
+			? SEP_26_2026_3K_RESULT_CARD_JPEG_BASE64
+			: SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64;
+		const binary = atob(jpegBase64);
 		const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
 
 		return new Response(bytes, {
