@@ -182,6 +182,16 @@ Read before making changes:
 - The encrypted refresh token is stored in remote D1; OAuth client ID, client secret, and encryption key are Worker secrets.
 - Google Ads connection setup is complete. Campaign creation and mutation remain disabled until an owner-approved workflow is implemented.
 
+## YOUTUBE DATA API V3 — CODE DEPLOYED 2026-09-27, OWNER CONSENT PENDING
+
+- Merged to main and deployed live (Worker version `822c3f13-dc0c-4cd0-aabd-c8769985bcdc`, 2026-09-27).
+- Reuses the existing Google OAuth web client ("NWANA Engine Google Ads", project 440660818183): client id/secret/token key fall back to the GOOGLE_ADS_* Worker secrets; scope `youtube.upload`, offline access, HMAC-signed state, refresh token AES-GCM encrypted in D1 (provider `YOUTUBE`).
+- Endpoints: `/integrations/youtube/{connect,callback,status}`, `POST /api/operating-center/youtube/upload` and `/youtube/publish` (owner-key gated). Uploads are always created UNLISTED; only the publish endpoint (explicit `PUBLISH` confirmation + confirm dialog in UI) flips a video to PUBLIC. Nothing publishes automatically.
+- `/operating-center/social` has a YouTube panel: connection status, unlisted upload form, public publish form. Production `/integrations/youtube/status` returns `{ok:true, connected:false, configured:true}` — the expected pre-consent state.
+- Worker-limits hardening (2026-09-27): streaming upload accumulator made linear (the old merge-per-read loop risked the 10 ms CPU budget on Workers Free); buffered fallback cap lowered 512 MB -> 96 MB (128 MB isolate memory limit); practical per-upload ceiling on the Free plan is ~360 MB (50 subrequests/invocation, 8 MB chunks). Transient chunk failures abort the upload (no persisted resumable session yet); owner retries manually.
+- REMAINING OWNER-ONLY STEPS (not done): (1) in Google Cloud Console, project 440660818183, add authorized redirect URI `https://nwana-engine.nwana-engine.workers.dev/integrations/youtube/callback` to the OAuth web client and enable YouTube Data API v3; (2) open `/integrations/youtube/connect` and complete Google consent as admin@nwaofna.org. No video has been uploaded or published.
+- Operating cost: VERIFIED $0 (no new billable resources; YouTube Data API is free within quota).
+
 ## CURRENT OPERATING DIRECTIVE — 2026-09-18
 
 The next action is not more speculative backend construction and not more Series 2026 polishing.
