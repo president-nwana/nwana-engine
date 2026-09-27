@@ -22,6 +22,7 @@ import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RE
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
 import {
+        getConversionActions,
         getGoogleAdsStatus,
         googleAdsAuthorizationUrl,
         handleGoogleAdsCallback,
@@ -6658,6 +6659,11 @@ export default {
 		if (request.method === "GET" && url.pathname === "/integrations/google-ads/status") {
 			const status = await getGoogleAdsStatus(env);
 			return json(status, status.ok ? 200 : status.configured ? 502 : 503);
+		}
+
+		if (request.method === "GET" && url.pathname === "/integrations/google-ads/conversion-actions") {
+			const result = await getConversionActions(env);
+			return json(result, result.ok ? 200 : 502);
 		}
 
 		if (request.method === "GET" && url.pathname === "/integrations/google-ads/connect") {

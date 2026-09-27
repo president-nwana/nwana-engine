@@ -381,6 +381,111 @@ export interface GoogleAdsAccountSnapshot {
 	error?: string;
 }
 
+export interface GoogleAdsConversionAction {
+	id: string;
+	name: string;
+	type: string;
+	category: string;
+	status: string;
+	primary_for_goal: boolean;
+}
+
+export async function getConversionActions(
+	env: GoogleAdsEnv,
+	customerId: string = GOOGLE_ADS_LIVE_CUSTOMER_ID,
+): Promise<{
+	ok: boolean;
+	customer_id: string;
+	conversion_actions: GoogleAdsConversionAction[];
+	error?: string;
+}> {
+	const missing = missingConfiguration(env);
+	if (missing.length > 0) {
+		return {
+			ok: false,
+			customer_id: customerId,
+			conversion_actions: [],
+			error: `Not connected: ${missing.join(", ")} missing.`,
+		};
+	}
+	const credential = await env.nwana_engine_db.prepare(`
+		SELECT encrypted_refresh_token, iv
+		FROM integration_credentials
+		WHERE provider = ?
+		LIMIT 1
+	`).bind(PROVIDER).first<{
+		encrypted_refresh_token: string;
+		iv: string;
+	}>();
+	if (!credential) {
+		return {
+			ok: false,
+			customer_id: customerId,
+			conversion_actions: [],
+			error: "Not connected: no OAuth credential stored yet.",
+		};
+	}
+	try {
+		const refreshToken = await decryptRefreshToken(
+			credential.encrypted_refresh_token,
+			credential.iv,
+			env.GOOGLE_ADS_TOKEN_KEY!,
+		);
+		const accessToken = await refreshAccessToken(refreshToken, env);
+		const query =
+			"SELECT conversion_action.id, conversion_action.name, conversion_action.type, " +
+			"conversion_action.category, conversion_action.status, conversion_action.primary_for_goal " +
+			"FROM conversion_action WHERE conversion_action.status != 'REMOVED' " +
+			"ORDER BY conversion_action.name";
+		const response = await fetch(
+			`https://googleads.googleapis.com/${API_VERSION}/customers/${customerId}/googleAds:search`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${accessToken}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ query }),
+			},
+		);
+		const payload = await response.json() as {
+			results?: Array<{
+				conversionAction?: {
+					id?: string;
+					name?: string;
+					type?: string;
+					category?: string;
+					status?: string;
+					primaryForGoal?: boolean;
+				};
+			}>;
+			error?: { message?: string };
+		};
+		if (!response.ok) {
+			throw new Error(payload.error?.message ?? `Google Ads request failed (${response.status})`);
+		}
+		return {
+			ok: true,
+			customer_id: customerId,
+			conversion_actions: (payload.results ?? []).map((row) => ({
+				id: row.conversionAction?.id ?? "",
+				name: row.conversionAction?.name ?? "",
+				type: row.conversionAction?.type ?? "UNKNOWN",
+				category: row.conversionAction?.category ?? "UNKNOWN",
+				status: row.conversionAction?.status ?? "UNKNOWN",
+				primary_for_goal: row.conversionAction?.primaryForGoal ?? false,
+			})),
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			customer_id: customerId,
+			conversion_actions: [],
+			error: error instanceof Error ? error.message : "Google Ads conversion actions read failed",
+		};
+	}
+}
+
 export function buildLiveCampaignsQuery(): string {
 	return [
 		"SELECT campaign.id, campaign.name, campaign.status,",
