@@ -21,6 +21,7 @@ import {
 	getPartnersOverview,
 	updateSellerStage,
 	updatePartnerStage,
+	buildGrantsCompliance,
 	getFundraisingOverview,
 	getGroupsOverview,
 	getMeetingsOverview,
@@ -620,6 +621,26 @@ function makeStageDb(rows: Array<Record<string, unknown>>) {
 	};
 	return { prepare: (_sql: string) => api } as never;
 }
+
+	it("grants compliance: snapshot math is honest", () => {
+		const base = { available: true, date_range: "2026-09-20 to 2026-09-27", campaigns: [] };
+		const empty = buildGrantsCompliance(base);
+		expect(empty.status).toBe("unavailable");
+		const ok = buildGrantsCompliance({ ...base, campaigns: [
+			{ id: "1", name: "A", impressions: 1000, clicks: 60 },
+			{ id: "2", name: "B", impressions: 1000, clicks: 40 },
+		] });
+		expect(ok.status).toBe("ok");
+		expect(ok.account_ctr).toBeCloseTo(0.05, 5);
+		expect(ok.campaigns[1].below_threshold).toBe(true);
+		const risk = buildGrantsCompliance({ ...base, campaigns: [
+			{ id: "1", name: "A", impressions: 1000, clicks: 20 },
+		] });
+		expect(risk.status).toBe("at_risk");
+		const notAvail = buildGrantsCompliance({ ...base, available: false });
+		expect(notAvail.status).toBe("unavailable");
+		expect(notAvail.note).toMatch(/no live campaign data/i);
+	});
 
 	it("sellers: stage update writes through to D1", async () => {
 		const rows = SELLER_SEED.map((r) => ({ ...r }));

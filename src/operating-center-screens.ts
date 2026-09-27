@@ -282,9 +282,77 @@ export interface AdsOverview {
 	// candidate action -> channel decision). The machine's own logical
 	// layer, separate from the live account and the machine proposals.
 	orchestration: OrchestrationDecision[];
+	// Ad Grants compliance snapshot (read-only). The Grants program requires
+	// >=5% account CTR; two consecutive months below risks deactivation.
+	// This is a snapshot over the live date range, not month-over-month
+	// history: it flags the current position, it never declares compliance.
+	grants_compliance: {
+		available: boolean;
+		date_range: string;
+		threshold: number;
+		account_ctr: number | null;
+		status: "ok" | "watch" | "at_risk" | "unavailable";
+		note: string;
+		campaigns: Array<{
+			id: string;
+			name: string;
+			impressions: number;
+			clicks: number;
+			ctr: number | null;
+			below_threshold: boolean;
+		}>;
+	};
 	// What the screen currently shows (real connection state plus the
 	// planned spec). Google Analytics is deliberately untouched here.
 	capabilities: string[];
+}
+
+/**
+ * Ad Grants CTR compliance snapshot from the live account campaigns.
+ * Pure function over the snapshot; no month-over-month history is claimed.
+ */
+export function buildGrantsCompliance(
+	live: Pick<AdsOverview["live_account"], "available" | "date_range" | "campaigns">,
+): AdsOverview["grants_compliance"] {
+	const THRESHOLD = 0.05;
+	const base = {
+		available: false,
+		date_range: live.date_range,
+		threshold: THRESHOLD,
+		account_ctr: null as number | null,
+		status: "unavailable" as const,
+		note: "",
+		campaigns: [] as AdsOverview["grants_compliance"]["campaigns"],
+	};
+	if (!live.available || live.campaigns.length === 0) {
+		return { ...base, note: "No live campaign data to evaluate." };
+	}
+	const campaigns = live.campaigns.map((c) => {
+		const ctr = c.impressions > 0 ? c.clicks / c.impressions : null;
+		return {
+			id: c.id,
+			name: c.name,
+			impressions: c.impressions,
+			clicks: c.clicks,
+			ctr,
+			below_threshold: ctr !== null && ctr < THRESHOLD,
+		};
+	});
+	const impressions = campaigns.reduce((s, c) => s + c.impressions, 0);
+	const clicks = campaigns.reduce((s, c) => s + c.clicks, 0);
+	if (impressions === 0) {
+		return { ...base, campaigns, note: "Campaigns have no impressions in this range." };
+	}
+	const accountCtr = clicks / impressions;
+	const status = accountCtr >= THRESHOLD ? "ok" : accountCtr >= 0.03 ? "watch" : "at_risk";
+	const pct = (accountCtr * 100).toFixed(2) + "%";
+	const note =
+		status === "ok"
+			? `Account CTR ${pct} is at or above the 5% Ad Grants threshold for this range.`
+			: status === "watch"
+				? `Account CTR ${pct} is below the 5% Ad Grants threshold for this range. Two consecutive months below 5% risks deactivation — review keywords and ads.`
+				: `Account CTR ${pct} is well below the 5% Ad Grants threshold for this range. Two consecutive months below 5% risks deactivation — act on keywords and ads now.`;
+	return { ...base, available: true, account_ctr: accountCtr, status, note, campaigns };
 }
 
 type AdsStatusReader = typeof getGoogleAdsStatus;
@@ -389,6 +457,7 @@ export async function getAdsOverview(
 		// ADR-0032: orchestration decisions are their own logical layer,
 		// separate from the live account and the machine proposals.
 		orchestration,
+		grants_compliance: buildGrantsCompliance(liveAccount),
 		capabilities: [
 			"Real Google Ads connection state (connected or the actual error)",
 			"Access level and accessible customer account(s)",
@@ -396,6 +465,7 @@ export async function getAdsOverview(
 			"Live campaign data from the connected account (read-only)",
 			"Orchestration decisions: source, required result, candidate action, channel (read-only)",
 			"Machine campaign proposals (owner review required)",
+			"Ad Grants CTR compliance snapshot (read-only, snapshot only)",
 		],
 	};
 }
@@ -429,6 +499,17 @@ const ADS_SCRIPT = `
 							+'</div>';
 					}
 				}
+			}
+			const gc=data.grants_compliance;
+			if(gc&&gc.available){
+				const gcBadge=gc.status==='ok'?'<span class="badge-ok">OK</span>':gc.status==='watch'?'<span class="badge-warn">WATCH</span>':'<span class="badge-warn">AT RISK</span>';
+				html+='<h3>AD GRANTS COMPLIANCE</h3><p class="meta">Snapshot over '+esc(gc.date_range)+'. Grants requires &ge;5% account CTR; two consecutive months below risks deactivation. Snapshot only, not month-over-month history.</p>';
+				html+='<div class="item"><strong>Account CTR '+(gc.account_ctr!=null?(gc.account_ctr*100).toFixed(2)+'%':'n/a')+' '+gcBadge+'</strong><div class="detail">'+esc(gc.note)+'</div>';
+				for(const c of (gc.campaigns||[])){
+					const cb=c.below_threshold?'<span class="badge-warn">below 5%</span>':'<span class="badge-ok">ok</span>';
+					html+='<div class="meta">'+esc(c.name)+': '+(c.ctr!=null?(c.ctr*100).toFixed(2)+'%':'n/a')+' CTR '+cb+'</div>';
+				}
+				html+='</div>';
 			}
 			html+='<div class="item"><strong>Google Analytics<span class="badge-warn">Not set up</span></strong><div class="detail">'+esc(data.google_analytics.note)+'</div></div>';
 			html+='<h3>ORCHESTRATION DECISIONS</h3><p class="meta">What the machine decided for every known source: required result, candidate action, channel. Sources with no evidence stay undecided; incomplete evidence is reported, never guessed. Read-only.</p>';

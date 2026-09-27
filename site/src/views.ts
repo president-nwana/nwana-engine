@@ -340,6 +340,22 @@ export function layout(title: string, active: string, content: string, descripti
 ${description ? `<meta name="description" content="${esc(description)}">` : ""}
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-8RYTY6M2KD"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','G-8RYTY6M2KD');</script>
+<script>
+// Meaningful-conversion click tracking for Google Ad Grants compliance.
+// donate_click: any outbound click to the donation page (sport.nwaofna.org/Race/Donate/...).
+// registration_click: any outbound click to a RunSignup race registration page.
+// Mark both as conversions in Google Ads (owner action in the Ads UI).
+document.addEventListener('click',function(e){
+	var a=e.target&&e.target.closest?e.target.closest('a[href]'):null;
+	if(!a||typeof gtag!=='function')return;
+	var href=a.getAttribute('href')||'';
+	if(/donate/i.test(href)){
+		gtag('event','donate_click',{event_category:'conversion',event_label:href,transport_type:'beacon'});
+	}else if(href.indexOf('runsignup.com/Race/')!==-1){
+		gtag('event','registration_click',{event_category:'conversion',event_label:href,transport_type:'beacon'});
+	}
+},true);
+</script>
 <style>${CSS}</style>
 </head>
 <body>
