@@ -58,6 +58,7 @@ function makeFanoutDb() {
 	const audit: Array<Record<string, unknown>> = [];
 	const news: Array<Record<string, unknown>> = [];
 	const assets: Array<Record<string, unknown>> = [];
+	const ahotuQueue: Array<Record<string, unknown>> = [];
 	const now = () => new Date().toISOString();
 	const db = {
 		prepare(rawSql: string) {
@@ -196,13 +197,27 @@ function makeFanoutDb() {
 						});
 						return {};
 					}
+					if (sql.startsWith("INSERT INTO ahotu_queue")) {
+						// Ahotu lane (src/ahotu.ts): ON CONFLICT(object_id) DO NOTHING.
+						if (!ahotuQueue.some((q) => q.object_id === args[0])) {
+							ahotuQueue.push({
+								id: ahotuQueue.length + 1,
+								object_id: args[0] as string,
+								kind: args[1] as string,
+								status: "queued",
+								package_json: args[2] as string,
+								notes: args[3] as string,
+							});
+						}
+						return {};
+					}
 					throw new Error(`unexpected run(): ${sql}`);
 				},
 			};
 			return stmt;
 		},
 	};
-	return { db: db as unknown as D1Database, objects, relationships, calendar, audit, news, assets };
+	return { db: db as unknown as D1Database, objects, relationships, calendar, audit, news, assets, ahotuQueue };
 }
 
 const jsonResponse = (payload: unknown, status = 200) =>
@@ -381,8 +396,7 @@ describe("idempotency", () => {
 	});
 });
 
-describe("creation workflow safety is unchanged", () => {
-	it("packets still default to dry-run with UNKNOWN write access", async () => {
+describe("creation workflow safety is unchanged", () => {	it("packets still default to dry-run with UNKNOWN write access", async () => {
 		const { db } = makeFanoutDb();
 		const packet = await createCreationPacket(db, { kind: "race", title: "Safe" });
 		const plan = buildWritePlan(packet);
@@ -398,5 +412,46 @@ describe("creation workflow safety is unchanged", () => {
 		await expect(
 			applyCreationStep({ db, accessToken: "tok", packetId: packet.packet_id, stepId: "set_race_description", confirm: "yes" }),
 		).rejects.toThrow(APPLY_STEP_CONFIRM);
+	});
+});
+
+describe("ahotu lane auto-enqueue", () => {
+	it("linking a race packet enqueues one Ahotu row", async () => {
+		const { db, ahotuQueue } = makeFanoutDb();
+		await linkPacket(
+			db,
+			{ kind: "race", title: "5K Orlando", event_date: "2026-12-05", distance: "5K" },
+			909,
+			"Race 909",
+		);
+		expect(ahotuQueue).toHaveLength(1);
+		expect(ahotuQueue[0].object_id).toBe("RUNSIGNUP-RACE-909");
+		expect(ahotuQueue[0].kind).toBe("race");
+		expect(ahotuQueue[0].status).toBe("queued");
+		const pkg = JSON.parse(ahotuQueue[0].package_json as string);
+		expect(pkg.edition_date).toBe("2026-12-05");
+		expect(pkg.distances).toEqual(["5K"]);
+		expect(pkg.sport_category).toBe("Nordic walking");
+	});
+
+	it("re-linking does not duplicate the Ahotu row", async () => {
+		const { db, ahotuQueue } = makeFanoutDb();
+		const input = { kind: "race" as const, title: "Quiet Race" };
+		const packet = await createCreationPacket(db, input);
+		vi.stubGlobal("fetch", raceFetch(910, "Quiet"));
+		await linkRunSignupRace({ db, accessToken: "tok", packetId: packet.packet_id, raceId: 910 });
+		await linkRunSignupRace({ db, accessToken: "tok", packetId: packet.packet_id, raceId: 910 });
+		expect(ahotuQueue).toHaveLength(1);
+	});
+
+	it("linking a challenge never touches the Ahotu queue", async () => {
+		const { db, ahotuQueue } = makeFanoutDb();
+		await linkPacket(
+			db,
+			{ kind: "challenge", title: "30K Challenge", event_date: "2026-11-01" },
+			911,
+			"Challenge Race",
+		);
+		expect(ahotuQueue).toHaveLength(0);
 	});
 });

@@ -42,6 +42,7 @@ import {
 	type RunSignupWriteAccess,
 } from "./race-lifecycle";
 import { fanoutLinkedObject, type FanoutSummary } from "./object-fanout";
+import { enqueueAhotuForObject } from "./ahotu";
 
 export type { FanoutSummary };
 export type { RunSignupWriteAccess };
@@ -1084,6 +1085,25 @@ export async function linkRunSignupRace(
 	// Idempotent: re-linking re-materializes the same rows.
 	const fanout = await fanoutLinkedObject(input.db, packet, runsignupObjectId);
 	packet.meta.fanout = fanout;
+
+	// Ahotu queue: every eligible new competition object (race, series,
+	// championship) automatically enters the Ahotu lane queue with a
+	// submission package. Challenges are excluded: Ahotu requires an edition
+	// date + race/distance (verified 2026-09-27, no challenge format).
+	// Own-D1 write only, same no-extra-confirmation rationale as fanout;
+	// the organiser-dashboard submission stays a human last mile.
+	await enqueueAhotuForObject(input.db, runsignupObjectId, packet.meta.kind, {
+		name: raceName ?? packet.title,
+		editionDate: packet.meta.event_date,
+		city: null,
+		country: null,
+		distances: packet.meta.distance ? [packet.meta.distance] : [],
+		websiteUrl: packet.meta.external_race_url,
+		contactName: null,
+		contactEmail: null,
+		description: packet.meta.description,
+	});
+
 	await savePacketMeta(input.db, packet.packet_id, packet.meta);
 
 	return { ok: true, packet_id: packet.packet_id, race_id: input.raceId, race_name: raceName, fanout };

@@ -154,6 +154,11 @@ function makeCreationDb() {
 					if (sql.startsWith("INSERT INTO sponsorship_assets")) {
 						return { success: true };
 					}
+					// Ahotu lane (src/ahotu.ts): the legacy stub only needs to
+					// accept the idempotent enqueue write.
+					if (sql.startsWith("INSERT INTO ahotu_queue")) {
+						return { success: true };
+					}
 					throw new Error(`unexpected run(): ${sql}`);
 				},
 			};
