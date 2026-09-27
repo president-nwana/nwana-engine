@@ -311,7 +311,6 @@ export async function aboutPage(): Promise<string> {
         <div class="board-photo"><img src="/board/liene-visocka-sq.jpg" alt="Liene Visocka"></div>
         <h3>Liene Visocka</h3>
         <p class="role">Board Member for Sports</p>
-        <p>Certified Nordic walking trainer with about ten years in the sport. She coaches individuals and groups on technique, functional movement, and long-term health, and works to keep Nordic walking accessible across ages, fitness levels, and goals.</p>
         <p class="email"><a href="mailto:lv@nwaofna.org">lv@nwaofna.org</a></p>
         <p><a href="/board/liene-visocka">Full profile</a></p>
       </div>
@@ -319,7 +318,6 @@ export async function aboutPage(): Promise<string> {
         <div class="board-photo"><img src="https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/18/13/824/460f6d1b-7fc7-4172-ad9c-a83f72e3d5d6-bQnj7l.png" alt="Maris Vainovskis"></div>
         <h3>Maris Vainovskis</h3>
         <p class="role">Board Director, NWANA</p>
-        <p>Partner at an international law firm in Latvia with over 25 years in banking, capital markets, and international transactions, and a top executive of the World DanceSport Federation. A former DanceSport athlete, he discovered Nordic walking about five years ago, reached podiums at the Latvian national championships, won a world title at 10 km, and completed 107 km ultra-distance walks in full Nordic walking technique.</p>
         <p class="email"><a href="mailto:mv@nwaofna.org">mv@nwaofna.org</a></p>
         <p><a href="/board/maris-vainovskis">Full profile</a></p>
       </div>
@@ -327,7 +325,6 @@ export async function aboutPage(): Promise<string> {
         <div class="board-photo"><img src="https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/30/13/824/7d38b8df-7030-45ad-a7b1-2e66b49af94d-bQrckk.png" alt="Leonids Reinholds"></div>
         <h3>Leonids Reinholds</h3>
         <p class="role">Board Director, NWANA</p>
-        <p>His Nordic walking journey began in 2022 with a goal of well-being, not medals: within eighteen months he lost 15 kg and found competition. After representing Latvia at the Lahti 2024 World Championships, he won European Championship bronze at 5 km, silver at 21 km, and team gold in 2025. On the board he focuses on strategic development and systems that make sport and health accessible to all.</p>
         <p class="email"><a href="mailto:leonids.reinholds@nwaofna.org">leonids.reinholds@nwaofna.org</a></p>
         <p><a href="/board/leonids-reinholds">Full profile</a></p>
       </div>
