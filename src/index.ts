@@ -5923,13 +5923,23 @@ export default {
 		}
 		// Manual last mile distribution packs: read-only, owner-key gated by
 		// the operatingCenterApiRoute gate above. Builds copy-ready packs
-		// for one creation packet; nothing is published anywhere.
+		// for one creation packet — or, with type=news_item, for an existing
+		// news item identified by its canonical URL (no packet id needed,
+		// nothing is recreated). Nothing is published anywhere.
 		if (request.method === "GET" && url.pathname === "/api/operating-center/distribution/packs") {
 			return json(
 				await getDistributionPacks(env.nwana_engine_db, {
 					id: url.searchParams.get("id"),
 					type: url.searchParams.get("type"),
 					channel: url.searchParams.get("channel"),
+					title: url.searchParams.get("title"),
+					description: url.searchParams.get("description"),
+					canonical_url: url.searchParams.get("canonical_url"),
+					news_kind: url.searchParams.get("news_kind"),
+					person_name: url.searchParams.get("person_name"),
+					person_profile_url: url.searchParams.get("person_profile_url"),
+					achievement: url.searchParams.get("achievement"),
+					news_date: url.searchParams.get("news_date"),
 				}),
 			);
 		}

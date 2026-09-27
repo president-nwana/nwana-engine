@@ -28,12 +28,13 @@ const FULL_EVENT: PackObjectData = {
 };
 
 describe("manual-distribution-packs", () => {
-	it("exposes the four object types and six channels", () => {
+	it("exposes the five object types and six channels", () => {
 		expect(PACK_OBJECT_TYPES).toEqual([
 			"series_results",
 			"competition_event",
 			"championship",
 			"challenge",
+			"news_item",
 		]);
 		expect(PACK_CHANNELS).toEqual([
 			"threads",
@@ -127,5 +128,87 @@ describe("manual-distribution-packs", () => {
 			expect(all[ch].channel).toBe(ch);
 			expect(all[ch].missingFields).toEqual([]);
 		}
+	});
+
+	// --- news_item / ELITE_ATHLETE_JOINED ---------------------------------
+
+	const SVEN_NEWS: PackObjectData = {
+		title: "Sven Thorslund joins the NWANA Elite Athletes Club",
+		canonicalUrl: "https://www.nwaofna.org/news/sven-thorslund-joins-elite-athletes-club",
+		newsKind: "elite_athlete_joined",
+		personName: "Sven Thorslund",
+		personProfileUrl: "https://www.nwaofna.org/elite/sven-thorslund",
+		achievement:
+			"Silver medal, M55 10K, Nordic Walking World Championships, Lahti 2026 · 7th, 5K · selected for the U.S. 5K Relay Team",
+		newsDate: "September 26, 2026",
+	};
+
+	it("news_item elite_athlete_joined: congratulatory threads pack with canonical link", () => {
+		const pack = buildPack("news_item", SVEN_NEWS, "threads");
+		expect(pack.text.length).toBeLessThanOrEqual(500);
+		expect(pack.truncated).toBe(false);
+		expect(pack.text).toContain("Sven Thorslund");
+		expect(pack.text).toContain("Elite Athletes Club");
+		expect(pack.text).toContain("Silver medal, M55 10K");
+		expect(pack.text).toContain("https://www.nwaofna.org/news/sven-thorslund-joins-elite-athletes-club");
+		expect(pack.text).toContain("#EliteAthletes");
+		expect(pack.text).toContain("#NWANA");
+		expect(pack.targetUrl).toBe(SVEN_NEWS.canonicalUrl);
+		expect(pack.imageSpec.kind).toBe("announcement");
+		expect(pack.imageSpec.headline).toBe("Sven Thorslund");
+		expect(pack.missingFields).toEqual([]);
+	});
+
+	it("news_item linkedin pack carries the B2B growth intro", () => {
+		const pack = buildPack("news_item", SVEN_NEWS, "linkedin");
+		expect(pack.text).toContain("Elite Athletes Club is growing");
+		expect(pack.text).toContain("Sven Thorslund");
+		expect(pack.text.length).toBeLessThanOrEqual(3000);
+	});
+
+	it("news_item youtube pack has a length-limited title", () => {
+		const pack = buildPack("news_item", SVEN_NEWS, "youtube");
+		expect(pack.title).not.toBeNull();
+		expect(pack.title!.length).toBeLessThanOrEqual(100);
+		expect(pack.title).toContain("Sven Thorslund");
+	});
+
+	it("news_item generic pack links the full story and the athlete profile", () => {
+		const pack = buildPack("news_item", SVEN_NEWS, "generic");
+		expect(pack.text).toContain("https://www.nwaofna.org/news/sven-thorslund-joins-elite-athletes-club");
+		expect(pack.text).toContain("https://www.nwaofna.org/elite/sven-thorslund");
+	});
+
+	it("buildAllPacks skips eventbrite for news_item (a news item is not an event)", () => {
+		const all = buildAllPacks("news_item", SVEN_NEWS);
+		expect(Object.keys(all).sort()).toEqual(["generic", "linkedin", "threads", "youtube"]);
+	});
+
+	it("news_item with an unknown kind falls back to the generic news frame", () => {
+		const pack = buildPack(
+			"news_item",
+			{
+				title: "NWANA Academy opens new cohort",
+				canonicalUrl: "https://www.nwaofna.org/news/academy-cohort",
+				newsKind: "academy_update",
+			},
+			"threads",
+		);
+		expect(pack.text).toContain("NWANA Academy opens new cohort");
+		expect(pack.text).toContain("https://www.nwaofna.org/news/academy-cohort");
+		expect(pack.text).not.toContain("#EliteAthletes");
+		expect(pack.missingFields).toEqual([]);
+	});
+
+	it("news_item never invents facts: missing data becomes [NEEDS: …] placeholders", () => {
+		const pack = buildPack("news_item", { newsKind: "elite_athlete_joined" }, "generic");
+		expect(pack.missingFields.length).toBeGreaterThan(0);
+		// The headline is registered as missing (the congratulatory line
+		// replaces it in the elite frame); the URL and athlete name show as
+		// inline placeholders.
+		expect(pack.missingFields).toContain("news headline");
+		expect(pack.text).toContain("[NEEDS: canonical news URL]");
+		expect(pack.text).toContain("[NEEDS: athlete name]");
+		expect(pack.text).not.toMatch(/Sven|Thorslund|Lahti|silver/i);
 	});
 });

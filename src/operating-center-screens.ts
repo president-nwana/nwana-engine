@@ -888,12 +888,18 @@ const SOCIAL_SCRIPT = `
 		const msg=document.querySelector('#pack-message');
 		if(!idEl||!box)return;
 		const id=idEl.value.trim();
-		if(!id){box.innerHTML='<div class="unavailable">Enter a creation packet id.</div>';return;}
+		const typeVal=typeEl&&typeEl.value?typeEl.value:'';
+		const isNews=typeVal==='news_item';
+		// A news item is identified by its canonical URL, not a packet id.
+		// Fields the URL alone cannot supply show as [NEEDS: …] — never invented.
+		if(!id&&!isNews){box.innerHTML='<div class="unavailable">Enter a creation packet id.</div>';return;}
 		if(msg)msg.textContent='Building packs…';
 		box.innerHTML='';
 		try{
-			const params=new URLSearchParams({id:id,channel:chEl?chEl.value:'all'});
-			if(typeEl&&typeEl.value)params.set('type',typeEl.value);
+			const params=new URLSearchParams({channel:chEl?chEl.value:'all'});
+			if(typeVal)params.set('type',typeVal);
+			if(isNews){params.set('canonical_url',id);}
+			else{params.set('id',id);}
 			const data=await api('/api/operating-center/distribution/packs?'+params.toString());
 			let html='<div class="detail"><strong>Packet:</strong> '+esc(data.packet.title)+'<span class="badge">'+esc(data.objectTypeLabel)+'</span></div>';
 			const order=['threads','linkedin','youtube','eventbrite','generic'];
@@ -1020,7 +1026,7 @@ export function renderSocialHtml(): string {
 			<h2>Distribution packs (manual last mile)</h2>
 			<p class="meta">Copy-ready text per channel for one creation packet. The machine prepares; you post manually. Data the packet does not carry shows as [NEEDS: …] — never invented.</p>
 			<label for="pack-id">Creation packet id</label>
-			<input id="pack-id" placeholder="e.g. pkt_…" autocomplete="off">
+			<input id="pack-id" placeholder="e.g. pkt_… (for NWANA news: paste the canonical news URL)" autocomplete="off">
 			<label for="pack-type">Object type</label>
 			<select id="pack-type" style="font:inherit;border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%">
 				<option value="">Auto (from packet kind)</option>
@@ -1028,6 +1034,7 @@ export function renderSocialHtml(): string {
 				<option value="competition_event">Competition event</option>
 				<option value="championship">Championship</option>
 				<option value="challenge">Challenge</option>
+				<option value="news_item">NWANA news</option>
 			</select>
 			<label for="pack-channel">Channel</label>
 			<select id="pack-channel" style="font:inherit;border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%">
@@ -1100,17 +1107,23 @@ export interface DistributionPacksResult {
  */
 export async function getDistributionPacks(
 	db: D1Database,
-	params: { id?: string | null; type?: string | null; channel?: string | null },
+	params: {
+		id?: string | null;
+		type?: string | null;
+		channel?: string | null;
+		// news_item fields: supplied by the machine from the canonical news
+		// object (existing page URL). No packet id is required for news.
+		title?: string | null;
+		description?: string | null;
+		canonical_url?: string | null;
+		news_kind?: string | null;
+		person_name?: string | null;
+		person_profile_url?: string | null;
+		achievement?: string | null;
+		news_date?: string | null;
+	},
 ): Promise<DistributionPacksResult | { ok: false; error: string }> {
-	const id = (params.id ?? "").trim();
-	if (!id) {
-		return { ok: false, error: "Missing required query parameter: id (creation packet id)." };
-	}
-	const packet = await getCreationPacket(db, id);
-	if (!packet) {
-		return { ok: false, error: `Creation packet not found: ${id}` };
-	}
-	let objectType: PackObjectType;
+	let objectType: PackObjectType | null = null;
 	const typeParam = (params.type ?? "").trim();
 	if (typeParam) {
 		if (!(PACK_OBJECT_TYPES as readonly string[]).includes(typeParam)) {
@@ -1120,19 +1133,61 @@ export async function getDistributionPacks(
 			};
 		}
 		objectType = typeParam as PackObjectType;
+	}
+	let data: PackObjectData;
+	let packetId = "";
+	let packetTitle = "";
+	let packetKind = "";
+	if (objectType === "news_item") {
+		// A news item is not a creation packet: the canonical news page
+		// already exists, so the machine passes its verified fields
+		// directly. Nothing is recreated; the owner re-enters nothing.
+		data = {
+			title: params.title ?? null,
+			description: params.description ?? null,
+			canonicalUrl: params.canonical_url ?? null,
+			newsKind: params.news_kind ?? null,
+			personName: params.person_name ?? null,
+			personProfileUrl: params.person_profile_url ?? null,
+			achievement: params.achievement ?? null,
+			newsDate: params.news_date ?? null,
+		};
+		// The canonical URL IS the object identity: no duplicate object,
+		// no recreation. The id is derived, never invented.
+		packetId = `news:${(params.canonical_url ?? "").trim()}`;
+		packetTitle = (params.title ?? "").trim();
+		packetKind = "news";
 	} else {
-		const mapped = PACKET_KIND_TO_PACK_TYPE[packet.meta.kind];
-		if (!mapped) {
-			return {
-				ok: false,
-				error: `Packet kind "${packet.meta.kind}" has no distribution pack mapping.`,
-			};
+		const id = (params.id ?? "").trim();
+		if (!id) {
+			return { ok: false, error: "Missing required query parameter: id (creation packet id)." };
 		}
-		objectType = mapped;
+		const packet = await getCreationPacket(db, id);
+		if (!packet) {
+			return { ok: false, error: `Creation packet not found: ${id}` };
+		}
+		if (!typeParam) {
+			const mapped = PACKET_KIND_TO_PACK_TYPE[packet.meta.kind];
+			if (!mapped) {
+				return {
+					ok: false,
+					error: `Packet kind "${packet.meta.kind}" has no distribution pack mapping.`,
+				};
+			}
+			objectType = mapped;
+		}
+		data = packetToPackData(packet);
+		packetId = packet.packet_id;
+		packetTitle = packet.title;
+		packetKind = packet.meta.kind;
+	}
+	// After the branches above, objectType is always resolved: either from
+	// the explicit type param, or from the packet kind mapping.
+	if (!objectType) {
+		return { ok: false, error: "Unable to resolve pack object type." };
 	}
 	const channelParam = (params.channel ?? "all").trim();
 	const packs: Partial<Record<PackChannel, DistributionPack>> = {};
-	const data = packetToPackData(packet);
 	if (channelParam === "all") {
 		Object.assign(packs, buildAllPacks(objectType, data));
 	} else {
@@ -1148,7 +1203,7 @@ export async function getDistributionPacks(
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
-		packet: { packet_id: packet.packet_id, title: packet.title, kind: packet.meta.kind },
+		packet: { packet_id: packetId, title: packetTitle, kind: packetKind },
 		objectType,
 		objectTypeLabel: packObjectTypeLabel(objectType),
 		packs,

@@ -12,7 +12,15 @@ export type PackObjectType =
 	| "series_results"
 	| "competition_event"
 	| "championship"
-	| "challenge";
+	| "challenge"
+	| "news_item";
+
+/**
+ * News sub-kind. "elite_athlete_joined" shapes the congratulatory frame;
+ * any other value falls back to the generic NWANA news frame. The kind is
+ * a caller-supplied label — the machine never derives it from a URL.
+ */
+export type NewsKind = "elite_athlete_joined" | string;
 
 export type PackChannel =
 	| "threads"
@@ -39,6 +47,19 @@ export interface PackObjectData {
 	deadline?: string | null;
 	mechanics?: string | null;
 	selectionNote?: string | null;
+	// --- news_item fields -------------------------------------------------
+	/** Canonical URL of the already-published news item. Never recreated. */
+	canonicalUrl?: string | null;
+	/** News sub-kind, e.g. "elite_athlete_joined". */
+	newsKind?: string | null;
+	/** Person the news is about (elite_athlete_joined). */
+	personName?: string | null;
+	/** Link to the person's profile page, if one exists. */
+	personProfileUrl?: string | null;
+	/** One-line factual achievement summary (verified, caller-supplied). */
+	achievement?: string | null;
+	/** Publication date of the news item, display form. */
+	newsDate?: string | null;
 }
 
 export interface PackImageSpec {
@@ -69,6 +90,12 @@ const TYPE_HASHTAGS: Record<PackObjectType, string[]> = {
 	competition_event: ["#OpenSeries"],
 	championship: ["#Championships"],
 	challenge: ["#Challenge"],
+	news_item: [],
+};
+
+/** Extra hashtags per news sub-kind. */
+const NEWS_KIND_HASHTAGS: Record<string, string[]> = {
+	elite_athlete_joined: ["#EliteAthletes"],
 };
 
 const OBJECT_TYPE_LABEL: Record<PackObjectType, string> = {
@@ -76,6 +103,7 @@ const OBJECT_TYPE_LABEL: Record<PackObjectType, string> = {
 	competition_event: "Competition event",
 	championship: "Championship",
 	challenge: "Challenge",
+	news_item: "NWANA news",
 };
 
 // Max characters for the full post text (body + hashtags), per channel.
@@ -139,12 +167,14 @@ function buildBody(
 			return bodyChampionship(channel, data, b);
 		case "challenge":
 			return bodyChallenge(channel, data, b);
+		case "news_item":
+			return bodyNewsItem(channel, data, b);
 	}
 	// Unreachable: exhaustive switch over PackObjectType.
 	throw new Error(`Unknown pack object type: ${objectType}`);
 }
 
-function introFor(channel: PackChannel, objectType: PackObjectType): string | null {
+function introFor(channel: PackChannel, objectType: PackObjectType, newsKind?: string | null): string | null {
 	// LinkedIn is the B2B channel (sponsors, insurers, cities, partners);
 	// give it an angle the athlete-facing channels do not need.
 	if (channel !== "linkedin") return null;
@@ -157,6 +187,10 @@ function introFor(channel: PackChannel, objectType: PackObjectType): string | nu
 			return "North America is getting its own Nordic Walking championship infrastructure.";
 		case "challenge":
 			return "NWANA Challenges turn everyday walkers into committed participants.";
+		case "news_item":
+			return newsKind === "elite_athlete_joined"
+				? "World-class athletes keep choosing NWANA — our Elite Athletes Club is growing."
+				: "NWANA news: one more step for Nordic Walking in North America.";
 	}
 }
 
@@ -273,6 +307,50 @@ function bodyChallenge(channel: PackChannel, data: PackObjectData, b: Builder): 
 	};
 }
 
+/**
+ * NWANA news item. The canonical news page already exists (site or
+ * site_news); the pack points at its canonical URL and never recreates it.
+ * Copy is congratulatory, factual only: every dynamic value comes from the
+ * caller-supplied PackObjectData. Missing values become "[NEEDS: …]"
+ * placeholders, never invented achievements.
+ */
+function bodyNewsItem(channel: PackChannel, data: PackObjectData, b: Builder): BodyParts {
+	const title = need(b, data.title, "news headline");
+	const canonicalUrl = need(b, data.canonicalUrl, "canonical news URL");
+	const lines: string[] = [];
+	const intro = introFor(channel, "news_item", data.newsKind);
+	if (intro) lines.push(intro, "");
+	const kind = (data.newsKind ?? "").trim();
+	if (kind === "elite_athlete_joined") {
+		const person = need(b, data.personName, "athlete name");
+		const achievement = optional(data.achievement);
+		lines.push(`🎉 ${person} joins the NWANA Elite Athletes Club!`, "");
+		if (achievement) lines.push(achievement, "");
+		const profile = optional(data.personProfileUrl);
+		if (profile) lines.push(`Athlete profile: ${profile}`, "");
+		lines.push(`Full story: ${canonicalUrl}`);
+		return {
+			lines,
+			imageKind: "announcement",
+			imageHeadline: person,
+			imageSubline: "NWANA Elite Athletes Club",
+			targetUrl: optional(data.canonicalUrl),
+		};
+	}
+	// Generic NWANA news frame.
+	const desc = optional(data.description);
+	lines.push(`📰 ${title}`, "");
+	if (desc) lines.push(desc, "");
+	lines.push(`Read more: ${canonicalUrl}`);
+	return {
+		lines,
+		imageKind: "announcement",
+		imageHeadline: title,
+		imageSubline: "NWANA news",
+		targetUrl: optional(data.canonicalUrl),
+	};
+}
+
 function buildTitle(
 	channel: PackChannel,
 	data: PackObjectData,
@@ -296,7 +374,11 @@ export function buildPack(
 ): DistributionPack {
 	const b: Builder = { missing: new Set<string>() };
 	const body = buildBody(objectType, channel, data, b);
-	const hashtags = [...BASE_HASHTAGS, ...TYPE_HASHTAGS[objectType]];
+	const hashtags = [
+		...BASE_HASHTAGS,
+		...TYPE_HASHTAGS[objectType],
+		...(NEWS_KIND_HASHTAGS[(data.newsKind ?? "").trim()] ?? []),
+	];
 	const rawText = body.lines.join("\n") + "\n\n" + hashtags.join(" ");
 	const fitted = fit(rawText, TEXT_LIMIT[channel]);
 	return {
@@ -319,13 +401,17 @@ export function buildPack(
 
 /**
  * Build packs for every channel for one object. Convenience wrapper for
- * the owner UI; still pure.
+ * the owner UI; still pure. A news item is not an event listing, so the
+ * eventbrite channel is skipped for news_item.
  */
 export function buildAllPacks(
 	objectType: PackObjectType,
 	data: PackObjectData,
 ): Record<PackChannel, DistributionPack> {
-	const channels: PackChannel[] = ["threads", "linkedin", "youtube", "eventbrite", "generic"];
+	const channels: PackChannel[] =
+		objectType === "news_item"
+			? ["threads", "linkedin", "youtube", "generic"]
+			: ["threads", "linkedin", "youtube", "eventbrite", "generic"];
 	const out = {} as Record<PackChannel, DistributionPack>;
 	for (const channel of channels) out[channel] = buildPack(objectType, data, channel);
 	return out;
@@ -348,4 +434,5 @@ export const PACK_OBJECT_TYPES: readonly PackObjectType[] = [
 	"competition_event",
 	"championship",
 	"challenge",
+	"news_item",
 ];
