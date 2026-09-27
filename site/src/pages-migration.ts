@@ -1062,7 +1062,7 @@ export async function albertTazetdinovPage(): Promise<string> {
 		photo: "https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/18/13/824/306a42b5-fb70-4478-85b4-28f2c2aa014d-bQnkcj.png",
 		paragraphs: [
 			"Albert Tazetdinov serves as the Chief Executive Officer of the Nordic Walking Association of North America, leading the organization's day-to-day operations as it builds the continental federation for Nordic walking.",
-			"Earlier in his life, Albert was a competitive athlete, with victories at national and international level. That experience as a competitor still shapes how he leads NWANA's day-to-day work: focus on the result, respect for athletes, and no excuses.",
+			"Before leading NWANA, Albert Tazetdinov was a competitive Olympic weightlifter at national junior level, earning a bronze medal at the junior championship along with multiple regional titles and cup victories. A university-educated weightlifting and strength coach, he brings a competitor's mindset to NWANA's day-to-day work: focus on the result, respect for athletes, and no excuses.",
 		],
 	});
 }
