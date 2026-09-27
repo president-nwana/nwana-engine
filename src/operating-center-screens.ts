@@ -28,6 +28,20 @@ import type { OrchestrationDecision } from "./orchestration";
 // Operational queue: owner-facing presentation mapping over the existing
 // orchestration decisions and proposal states. No new business facts.
 import { buildOperationalQueue, type OperationalQueue } from "./operational-queue";
+// Manual last mile distribution packs: pure pack builders over creation
+// packet data. The machine prepares copy-ready text; the owner posts.
+import { getCreationPacket, type CreationPacket } from "./object-creation";
+import {
+	buildAllPacks,
+	buildPack,
+	PACK_CHANNELS,
+	PACK_OBJECT_TYPES,
+	packObjectTypeLabel,
+	type DistributionPack,
+	type PackChannel,
+	type PackObjectData,
+	type PackObjectType,
+} from "./manual-distribution-packs";
 
 export type ReportScreenId =
 	| "sites"
@@ -849,6 +863,53 @@ const SOCIAL_SCRIPT = `
 			box.innerHTML=html;
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
+
+	async function buildPacks(){
+		const idEl=document.querySelector('#pack-id');
+		const typeEl=document.querySelector('#pack-type');
+		const chEl=document.querySelector('#pack-channel');
+		const box=document.querySelector('#pack-list');
+		const msg=document.querySelector('#pack-message');
+		if(!idEl||!box)return;
+		const id=idEl.value.trim();
+		if(!id){box.innerHTML='<div class="unavailable">Enter a creation packet id.</div>';return;}
+		if(msg)msg.textContent='Building packs…';
+		box.innerHTML='';
+		try{
+			const params=new URLSearchParams({id:id,channel:chEl?chEl.value:'all'});
+			if(typeEl&&typeEl.value)params.set('type',typeEl.value);
+			const data=await api('/api/operating-center/distribution/packs?'+params.toString());
+			let html='<div class="detail"><strong>Packet:</strong> '+esc(data.packet.title)+'<span class="badge">'+esc(data.objectTypeLabel)+'</span></div>';
+			const order=['threads','linkedin','youtube','eventbrite','strava','generic'];
+			for(const ch of order){
+				const pk=(data.packs||{})[ch];
+				if(!pk)continue;
+				html+='<div class="item"><strong>'+esc(ch.toUpperCase())+'</strong>';
+				if(pk.title)html+='<div class="detail"><strong>Title:</strong> '+esc(pk.title)+'</div>';
+				html+='<div class="detail"><button type="button" class="secondary" data-copy="'+esc(ch)+'">Copy text</button>'
+					+(pk.truncated?'<span class="badge-warn">truncated to channel limit</span>':'')
+					+'</div>';
+				html+='<pre id="pack-text-'+esc(ch)+'" style="white-space:pre-wrap;background:#f5f7f5;border:1px solid #dce4df;border-radius:9px;padding:12px;font:14px/1.5 system-ui,sans-serif">'+esc(pk.text)+'</pre>';
+				html+='<div class="meta">Target: '+(pk.targetUrl?'<a href="'+esc(pk.targetUrl)+'" target="_blank" rel="noopener">'+esc(pk.targetUrl)+'</a>':'none')+'</div>';
+				html+='<div class="meta">Image: '+esc(pk.imageSpec.kind)+' — '+esc(pk.imageSpec.headline)+' / '+esc(pk.imageSpec.subline)+'</div>';
+				if((pk.missingFields||[]).length)html+='<div class="detail unavailable">Missing data (fill in the packet, then rebuild): '+pk.missingFields.map(esc).join(', ')+'</div>';
+				html+='</div>';
+			}
+			box.innerHTML=html;
+			box.querySelectorAll('button[data-copy]').forEach(function(btn){
+				btn.addEventListener('click',function(){
+					const t=document.querySelector('#pack-text-'+btn.getAttribute('data-copy'));
+					if(t&&navigator.clipboard){navigator.clipboard.writeText(t.textContent).catch(function(){});}
+				});
+			});
+			if(msg)msg.textContent='Packs ready. Copy the text and post manually on each channel.';
+		}catch(err){
+			if(msg)msg.textContent='';
+			box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>';
+		}
+	}
+	const packBtn=document.querySelector('#pack-build');
+	if(packBtn)packBtn.addEventListener('click',buildPacks);
 `;
 
 export function renderSocialHtml(): string {
@@ -859,10 +920,145 @@ export function renderSocialHtml(): string {
 		panelsHtml: `<section class="panel">
 			<h2>Accounts</h2>
 			<div id="social-list">Loading…</div>
+		</section>
+		<section class="panel">
+			<h2>Distribution packs (manual last mile)</h2>
+			<p class="meta">Copy-ready text per channel for one creation packet. The machine prepares; you post manually. Data the packet does not carry shows as [NEEDS: …] — never invented.</p>
+			<label for="pack-id">Creation packet id</label>
+			<input id="pack-id" placeholder="e.g. pkt_…" autocomplete="off">
+			<label for="pack-type">Object type</label>
+			<select id="pack-type" style="font:inherit;border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%">
+				<option value="">Auto (from packet kind)</option>
+				<option value="series_results">Series results</option>
+				<option value="competition_event">Competition event</option>
+				<option value="championship">Championship</option>
+				<option value="challenge">Challenge</option>
+			</select>
+			<label for="pack-channel">Channel</label>
+			<select id="pack-channel" style="font:inherit;border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%">
+				<option value="all">All channels</option>
+				<option value="threads">Threads</option>
+				<option value="linkedin">LinkedIn</option>
+				<option value="youtube">YouTube</option>
+				<option value="eventbrite">Eventbrite</option>
+				<option value="strava">Strava</option>
+				<option value="generic">Generic</option>
+			</select>
+			<button type="button" id="pack-build">Build packs</button>
+			<div class="message" id="pack-message" aria-live="polite"></div>
+			<div id="pack-list"></div>
 		</section>`,
 		script: SOCIAL_SCRIPT,
 		reportId: "social",
 	});
+}
+
+// ---------------------------------------------------------------------------
+// 3b. Distribution packs (manual last mile; read-only, pure builders)
+// ---------------------------------------------------------------------------
+
+/** Creation packet kind -> distribution pack object type. */
+const PACKET_KIND_TO_PACK_TYPE: Record<string, PackObjectType> = {
+	challenge: "challenge",
+	series: "series_results",
+	championship: "championship",
+	race: "competition_event",
+};
+
+/**
+ * Adapt a creation packet to pack input data. Every field comes from the
+ * packet; fields the packet does not carry (location, top-3, mechanics,
+ * deadlines, selection notes) are left null so the builder emits honest
+ * "[NEEDS: …]" placeholders instead of invented facts.
+ */
+function packetToPackData(packet: CreationPacket): PackObjectData {
+	const m = packet.meta;
+	return {
+		title: packet.title,
+		description: m.description,
+		eventDate: m.event_date,
+		location: null,
+		distance: m.distance,
+		format: m.format,
+		registrationUrl: m.external_race_url,
+		resultsUrl: m.external_results_url,
+		top3: null,
+		deadline: null,
+		mechanics: null,
+		selectionNote: null,
+	};
+}
+
+export interface DistributionPacksResult {
+	ok: true;
+	generated_at: string;
+	packet: { packet_id: string; title: string; kind: string };
+	objectType: PackObjectType;
+	objectTypeLabel: string;
+	packs: Partial<Record<PackChannel, DistributionPack>>;
+}
+
+/**
+ * Build manual last mile packs for one creation packet. Read-only: one D1
+ * read of the packet, then pure pack builders. Missing packet fields
+ * surface as "[NEEDS: …]" placeholders in the pack text and in
+ * missingFields — never as invented copy.
+ */
+export async function getDistributionPacks(
+	db: D1Database,
+	params: { id?: string | null; type?: string | null; channel?: string | null },
+): Promise<DistributionPacksResult | { ok: false; error: string }> {
+	const id = (params.id ?? "").trim();
+	if (!id) {
+		return { ok: false, error: "Missing required query parameter: id (creation packet id)." };
+	}
+	const packet = await getCreationPacket(db, id);
+	if (!packet) {
+		return { ok: false, error: `Creation packet not found: ${id}` };
+	}
+	let objectType: PackObjectType;
+	const typeParam = (params.type ?? "").trim();
+	if (typeParam) {
+		if (!(PACK_OBJECT_TYPES as readonly string[]).includes(typeParam)) {
+			return {
+				ok: false,
+				error: `Unknown pack type: ${typeParam}. Valid: ${PACK_OBJECT_TYPES.join(", ")}`,
+			};
+		}
+		objectType = typeParam as PackObjectType;
+	} else {
+		const mapped = PACKET_KIND_TO_PACK_TYPE[packet.meta.kind];
+		if (!mapped) {
+			return {
+				ok: false,
+				error: `Packet kind "${packet.meta.kind}" has no distribution pack mapping.`,
+			};
+		}
+		objectType = mapped;
+	}
+	const channelParam = (params.channel ?? "all").trim();
+	const packs: Partial<Record<PackChannel, DistributionPack>> = {};
+	const data = packetToPackData(packet);
+	if (channelParam === "all") {
+		Object.assign(packs, buildAllPacks(objectType, data));
+	} else {
+		if (!(PACK_CHANNELS as readonly string[]).includes(channelParam)) {
+			return {
+				ok: false,
+				error: `Unknown channel: ${channelParam}. Valid: all, ${PACK_CHANNELS.join(", ")}`,
+			};
+		}
+		const channel = channelParam as PackChannel;
+		packs[channel] = buildPack(objectType, data, channel);
+	}
+	return {
+		ok: true,
+		generated_at: new Date().toISOString(),
+		packet: { packet_id: packet.packet_id, title: packet.title, kind: packet.meta.kind },
+		objectType,
+		objectTypeLabel: packObjectTypeLabel(objectType),
+		packs,
+	};
 }
 
 // ---------------------------------------------------------------------------

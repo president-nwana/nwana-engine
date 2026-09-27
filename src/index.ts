@@ -101,6 +101,7 @@ import {
 	renderGroupsHtml,
 	getSitesOverview,
 	getSocialOverview,
+	getDistributionPacks,
 	getAdsOverview,
 	getSellersOverview,
 	getPartnersOverview,
@@ -5907,6 +5908,18 @@ export default {
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/social/overview") {
 			return json(getSocialOverview());
+		}
+		// Manual last mile distribution packs: read-only, owner-key gated by
+		// the operatingCenterApiRoute gate above. Builds copy-ready packs
+		// for one creation packet; nothing is published anywhere.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/distribution/packs") {
+			return json(
+				await getDistributionPacks(env.nwana_engine_db, {
+					id: url.searchParams.get("id"),
+					type: url.searchParams.get("type"),
+					channel: url.searchParams.get("channel"),
+				}),
+			);
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/ads/overview") {
 			return json(await getAdsOverview(env));
