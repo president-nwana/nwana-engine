@@ -910,6 +910,62 @@ const SOCIAL_SCRIPT = `
 	}
 	const packBtn=document.querySelector('#pack-build');
 	if(packBtn)packBtn.addEventListener('click',buildPacks);
+
+	async function loadYouTubeStatus(){
+		const box=document.querySelector('#yt-status');
+		if(!box)return;
+		try{
+			const st=await api('/integrations/youtube/status');
+			if(st.connected){
+				box.innerHTML='<div class="item"><strong>YouTube <span class="badge-ok">connected</span></strong><div class="detail">Channel: '+esc(st.channel_title||st.channel_id||'')+'</div></div>';
+			}else{
+				box.innerHTML='<div class="item"><strong>YouTube <span class="badge-warn">not connected</span></strong><div class="detail">'+esc(st.error||'No OAuth credential stored yet.')+'</div><div class="detail"><a href="/integrations/youtube/connect" target="_blank" rel="noopener">Connect the NWANA channel (owner Google consent)</a></div></div>';
+			}
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+
+	async function youTubeUpload(){
+		const srcEl=document.querySelector('#yt-source');
+		const titleEl=document.querySelector('#yt-title');
+		const descEl=document.querySelector('#yt-description');
+		const tagsEl=document.querySelector('#yt-tags');
+		const msg=document.querySelector('#yt-upload-message');
+		const box=document.querySelector('#yt-upload-result');
+		if(!srcEl||!titleEl||!box)return;
+		const sourceUrl=srcEl.value.trim();
+		const title=titleEl.value.trim();
+		if(!sourceUrl||!title){if(msg)msg.textContent='Source URL and title are required.';return;}
+		const tags=(tagsEl&&tagsEl.value||'').split(',').map(function(t){return t.trim()}).filter(Boolean);
+		if(msg)msg.textContent='Uploading as unlisted draft…';
+		box.innerHTML='';
+		try{
+			const r=await api('/api/operating-center/youtube/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sourceUrl:sourceUrl,title:title,description:descEl?descEl.value:'',tags:tags})});
+			box.innerHTML='<div class="item"><strong>Uploaded <span class="badge">unlisted</span></strong><div class="detail">Video ID: '+esc(r.video_id)+'</div><div class="detail"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.url)+'</a></div><div class="meta">Nothing was published to public. Use Publish below for an explicit public release.</div></div>';
+			const vidEl=document.querySelector('#yt-video-id');
+			if(vidEl)vidEl.value=r.video_id;
+			if(msg)msg.textContent='Upload complete.';
+		}catch(err){if(msg)msg.textContent='';box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+
+	async function youTubePublish(){
+		const vidEl=document.querySelector('#yt-video-id');
+		const msg=document.querySelector('#yt-publish-message');
+		if(!vidEl)return;
+		const videoId=vidEl.value.trim();
+		if(!videoId){if(msg)msg.textContent='Enter a video ID.';return;}
+		if(!confirm('Publish video '+videoId+' to PUBLIC on the NWANA YouTube channel?'))return;
+		if(msg)msg.textContent='Publishing…';
+		try{
+			const r=await api('/api/operating-center/youtube/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({videoId:videoId,confirmation:'PUBLISH'})});
+			if(msg)msg.textContent='Video '+r.video_id+' is now '+r.privacy_status+'.';
+		}catch(err){if(msg)msg.textContent='';else{alert(err.message)}}
+	}
+
+	const ytUploadBtn=document.querySelector('#yt-upload');
+	if(ytUploadBtn)ytUploadBtn.addEventListener('click',youTubeUpload);
+	const ytPublishBtn=document.querySelector('#yt-publish');
+	if(ytPublishBtn)ytPublishBtn.addEventListener('click',youTubePublish);
+	loadYouTubeStatus();
 `;
 
 export function renderSocialHtml(): string {
@@ -920,6 +976,29 @@ export function renderSocialHtml(): string {
 		panelsHtml: `<section class="panel">
 			<h2>Accounts</h2>
 			<div id="social-list">Loading…</div>
+		</section>
+		<section class="panel">
+			<h2>YouTube</h2>
+			<p class="meta">Uploads to the official NWANA channel are created as <strong>unlisted drafts</strong>. A video goes <strong>public only</strong> through the separate Publish step below with your explicit confirmation — never automatically.</p>
+			<div id="yt-status">Loading…</div>
+			<h3>Upload (unlisted draft)</h3>
+			<label for="yt-source">Source video URL</label>
+			<input id="yt-source" placeholder="https://…" autocomplete="off">
+			<label for="yt-title">Title (max 100 characters)</label>
+			<input id="yt-title" maxlength="100" autocomplete="off">
+			<label for="yt-description">Description</label>
+			<textarea id="yt-description" rows="3" style="font:inherit;border:1px solid #bfcac4;border-radius:9px;padding:10px;width:100%"></textarea>
+			<label for="yt-tags">Tags (comma separated)</label>
+			<input id="yt-tags" placeholder="NordicWalking, NWANA" autocomplete="off">
+			<button type="button" id="yt-upload">Upload as unlisted</button>
+			<div class="message" id="yt-upload-message" aria-live="polite"></div>
+			<div id="yt-upload-result"></div>
+			<h3>Publish to public</h3>
+			<p class="meta">Explicit owner confirmation required. This is the only action that makes a video public.</p>
+			<label for="yt-video-id">Video ID</label>
+			<input id="yt-video-id" placeholder="e.g. dQw4w9WgXcQ" autocomplete="off">
+			<button type="button" id="yt-publish">Publish to public</button>
+			<div class="message" id="yt-publish-message" aria-live="polite"></div>
 		</section>
 		<section class="panel">
 			<h2>Distribution packs (manual last mile)</h2>

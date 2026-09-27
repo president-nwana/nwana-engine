@@ -27,6 +27,13 @@ import {
         handleGoogleAdsCallback,
 } from "./google-ads";
 import {
+        getYouTubeStatus,
+        youTubeAuthorizationUrl,
+        handleYouTubeCallback,
+        uploadVideo,
+        publishVideo,
+} from "./youtube";
+import {
         getGoogleAnalyticsStatus,
         googleAnalyticsAuthorizationUrl,
         handleGoogleAnalyticsCallback,
@@ -157,6 +164,10 @@ interface Env {
 	GOOGLE_ADS_CLIENT_ID?: string;
 	GOOGLE_ADS_CLIENT_SECRET?: string;
 	GOOGLE_ADS_TOKEN_KEY?: string;
+	GOOGLE_YOUTUBE_CLIENT_ID?: string;
+	GOOGLE_YOUTUBE_CLIENT_SECRET?: string;
+	GOOGLE_YOUTUBE_TOKEN_KEY?: string;
+	GOOGLE_YOUTUBE_REDIRECT_URI?: string;
 	OPERATING_CENTER_ENABLED?: string;
 	OPERATING_CENTER_KEY?: string;
 	IMAGES: ImagesBinding;
@@ -6674,6 +6685,82 @@ export default {
 					connected: false,
 					error: error instanceof Error ? error.message : "Google Ads authorization failed",
 				}, 400);
+			}
+		}
+
+		// ADR-0034: YouTube Data API v3 for the official NWANA channel.
+		// Same public connect/callback shape as Google Ads; uploads land
+		// as UNLISTED drafts, and only the explicit owner-confirmed
+		// publish endpoint flips a video to PUBLIC.
+		if (request.method === "GET" && url.pathname === "/integrations/youtube/status") {
+			const status = await getYouTubeStatus(env);
+			return json(status, status.ok ? 200 : status.configured ? 502 : 503);
+		}
+
+		if (request.method === "GET" && url.pathname === "/integrations/youtube/connect") {
+			try {
+				return Response.redirect(await youTubeAuthorizationUrl(env), 302);
+			} catch (error) {
+				return json({
+					ok: false,
+					connected: false,
+					error: error instanceof Error ? error.message : "YouTube connection could not start",
+				}, 503);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/integrations/youtube/callback") {
+			try {
+				const channel = await handleYouTubeCallback(url, env);
+				return new Response(
+					`<!doctype html><html lang="en"><meta charset="utf-8"><title>NWANA YouTube connected</title><body style="font:20px system-ui;max-width:720px;margin:80px auto;padding:24px"><h1>YouTube connected</h1><p>NWANA Engine can upload to channel: ${channel.channel_title}.</p><p>Uploads are created as unlisted drafts; nothing is published to public without your explicit confirmation. You may close this tab.</p></body></html>`,
+					{ headers: { "content-type": "text/html; charset=utf-8" } },
+				);
+			} catch (error) {
+				return json({
+					ok: false,
+					connected: false,
+					error: error instanceof Error ? error.message : "YouTube authorization failed",
+				}, 400);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/youtube/upload") {
+			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
+				return json({ ok: false, error: "Unauthorized" }, 401);
+			}
+			try {
+				const body = await request.json() as {
+					sourceUrl?: string;
+					title?: string;
+					description?: string;
+					tags?: string[];
+				};
+				const result = await uploadVideo(env, {
+					sourceUrl: body.sourceUrl ?? "",
+					title: body.title ?? "",
+					description: body.description,
+					tags: body.tags,
+				});
+				return json({ ok: true, ...result });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "YouTube upload failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/youtube/publish") {
+			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
+				return json({ ok: false, error: "Unauthorized" }, 401);
+			}
+			try {
+				const body = await request.json() as { videoId?: string; confirmation?: string };
+				if (body.confirmation !== "PUBLISH") {
+					return json({ ok: false, error: "Explicit PUBLISH confirmation is required" }, 400);
+				}
+				const result = await publishVideo(env, body.videoId ?? "");
+				return json({ ok: true, ...result });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "YouTube publish failed" }, 500);
 			}
 		}
 
