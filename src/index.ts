@@ -18,6 +18,7 @@ import {
 	syncRaceLifecycleDistance,
 	testSeries2026WriteAccess,
 } from "./race-lifecycle";
+import { applySeries2026Levels } from "./series-2026-apply";
 import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
@@ -6374,6 +6375,32 @@ export default {
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Write test failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/race-lifecycle/apply-levels") {
+			try {
+				const body = await request.json() as { distance?: string; event_id?: number; confirmation?: string };
+				if (!body.distance) {
+					return json({ ok: false, error: "distance is required" }, 400);
+				}
+				if (!Number.isInteger(body.event_id)) {
+					return json({ ok: false, error: "event_id is required" }, 400);
+				}
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const result = await applySeries2026Levels({
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					distance: body.distance,
+					eventId: body.event_id as number,
+					confirmation: body.confirmation ?? "",
+				});
+				return json(result, result.ok ? 200 : 422);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Levels apply failed" }, 500);
 			}
 		}
 

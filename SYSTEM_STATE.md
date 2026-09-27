@@ -910,3 +910,14 @@ A new developer or AI must be able to continue the project from this repository 
 - Advances the operating loop OBJECT -> DISTRIBUTION: findCandidateEndpoints(db, {categories, geography, accepts}) gives the owner a ranked, verification-flagged submission list; recordDistributionAttempt tracks prepared->covered lifecycle; coverage table holds publication URLs for analytics.
 - Nothing sent, published, or registered; no accounts created. Owner approvals still required: any external send/submission, first use of search_verified/third_party endpoints, RESEARCHED_COLD->RELATIONSHIP moves.
 - Operating cost: VERIFIED $0.
+
+## SERIES 2026 LEVELS APPLY PATH — 2026-09-27 (feature/series-2026-levels-apply-path, local commit only)
+
+- Real 2026-09-26 3K result (RunSignup read-only): ALBERT FATIKHOV, result 232501676, chip_time "" (empty, not null), clock_time 18:54. Machine computed locally: Elite (< 20:00), Level Place 1, 1000 points, stage "verifying" (Performance Level / Level Place not yet written).
+- Bug found in production code: `result.chip_time ?? result.clock_time` never fell back on "" — threw "Missing or invalid time" on the real result shape. Fixed to treat blank strings as missing; regression test uses the exact 2026-09-26 result shape.
+- New `src/series-2026-apply.ts`: owner-approved apply executing the four verified RunSignup writes (custom-fields ensure; full-results edit by result_id with custom-field-<id>; non-standard scoring types add/edit by exact name; race-series-results standings with live participant mapping). Payload shapes verified against the published RunSignup API catalog (Post Event Results + 3 BETA v2 endpoints, all OAuth, director/timer-gated). Dry-run plan payloads in race-lifecycle.ts updated to mirror those contracts exactly.
+- Gates (fail closed): exact confirmation "APPLY_LEVELS"; D1 race_lifecycle.write_access = "CONFIRMED" (set only by the TEST_WRITE probe); event in "verifying" stage. Every attempt logged to new levels_apply_log (migration 0040); stage is never flipped here — the next owner-triggered sync derives it from platform facts (ADR-0008).
+- New endpoint POST /api/operating-center/race-lifecycle/apply-levels (owner-key gated). No TEST_WRITE and no apply executed: actual write-access proof and the apply itself still need the owner's separate approvals.
+- Local verification: tsc clean; 50/50 targeted tests (8 new apply gate/builder tests); full suite 481 pass + the same 4 pre-existing operating-center-cockpit failures (unrelated).
+- Advances the operating loop Competition -> Results -> Rankings -> Next Race: the Engine can now finalize a verifying event itself (legacy NWANA-FINAL.ps1 writes, owner-gated) instead of leaving results stuck in "verifying".
+- Operating cost: VERIFIED $0.

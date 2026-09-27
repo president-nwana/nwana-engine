@@ -106,6 +106,7 @@ export interface LifecycleResultInput {
 }
 
 export interface ComputedLifecycleResult {
+	result_id: string | number | null;
 	athlete: string;
 	gender: string | null;
 	time: string | null;
@@ -126,13 +127,21 @@ export function computeSeries2026Levels(
 		const athlete = [result.first_name, result.last_name]
 			.filter((part) => part !== null && part !== undefined && String(part).trim() !== "")
 			.join(" ");
-		const time = result.chip_time ?? result.clock_time ?? null;
+		// RunSignup returns "" (not null) for a missing chip_time; an empty
+		// string must fall back to clock_time instead of throwing.
+		const nonBlank = (value: string | null | undefined): string | null => {
+			if (value === null || value === undefined) return null;
+			const trimmed = String(value).trim();
+			return trimmed === "" ? null : trimmed;
+		};
+		const time = nonBlank(result.chip_time) ?? nonBlank(result.clock_time) ?? null;
 		const seconds = parseNwanaTime(time);
 		if (seconds === null) {
 			throw new Error(`Missing or invalid time for result: ${athlete || "unknown athlete"}`);
 		}
 		const level = classifySeries2026Level(distance, seconds);
 		return {
+			result_id: result.result_id ?? null,
 			athlete,
 			gender: result.gender ?? null,
 			time,
@@ -188,8 +197,11 @@ export interface LevelsWritePlan {
 
 // Builds the exact write payloads the NWANA-FINAL.ps1 pipeline would send
 // (custom fields, scoring types, standings), but never executes them.
-// executed is always false: there is no apply path until write access is
-// verified and the owner approves it.
+// executed is always false: the actual writes happen only in
+// src/series-2026-apply.ts, which requires the owner's explicit
+// "APPLY_LEVELS" confirmation. Payload shapes below mirror the verified
+// RunSignup API contracts so the dry run previews exactly what the owner
+// is about to approve.
 export function buildSeries2026LevelsWritePlan(
 	input: LevelsWritePlanInput,
 ): LevelsWritePlan {
@@ -208,6 +220,7 @@ export function buildSeries2026LevelsWritePlan(
 	}
 
 	const resultFieldWrites = input.computed.map((row) => ({
+		result_id: row.result_id,
 		athlete: row.athlete,
 		"Performance Level": row.level_display,
 		"Level Place": String(row.level_place),
@@ -232,8 +245,17 @@ export function buildSeries2026LevelsWritePlan(
 					params: {
 						event_id: input.eventId,
 						individual_result_set_id: input.resultSetId,
+						request_format: "json",
 					},
-					fields: ["Performance Level", "Level Place"],
+					body: {
+						custom_fields: ["Performance Level", "Level Place"].map((name) => ({
+							custom_field_id: null,
+							custom_field_name: name,
+							custom_field_short_name: name,
+							custom_field_data_type: "string",
+						})),
+					},
+					note: "Field ids are resolved from the result-set headers; only missing fields are created, and the new ids come from the API response.",
 				},
 			},
 			{
@@ -246,7 +268,13 @@ export function buildSeries2026LevelsWritePlan(
 						race_series_id: input.raceSeriesId,
 						race_series_year_id: input.raceSeriesYearId,
 					},
-					scoring_type_names: scoringTypeNames,
+					body: {
+						non_standard_scoring_types: scoringTypeNames.map((name) => ({
+							scoring_type_id: null,
+							scoring_type_name: name,
+						})),
+					},
+					note: "Existing types are reused by exact name (read first via GET); only missing names are created with scoring_type_id: null.",
 				},
 			},
 			{
@@ -255,7 +283,17 @@ export function buildSeries2026LevelsWritePlan(
 					"Upload series points and positions per scoring type (requires live registration-to-participant mapping).",
 				payload: {
 					endpoint: "POST /rest/v2/race-series/race-series-results.json",
-					note: "Points and Level Place are computed; participant IDs are resolved live at apply time.",
+					params: {
+						race_series_id: input.raceSeriesId,
+						race_series_year_id: input.raceSeriesYearId,
+						race_id: input.raceId,
+						event_id: input.eventId,
+						scoring_type_id: "<resolved per level+gender group>",
+					},
+					body: {
+						columns: ["race_series_participant_id", "series_points", "position"],
+						scoring_data: [["<participant_id>", "<series_points>", "<position>"]],
+					},
 					standings: input.computed.map((row) => ({
 						athlete: row.athlete,
 						level: row.level_display,
@@ -263,6 +301,7 @@ export function buildSeries2026LevelsWritePlan(
 						series_points: row.points,
 						position: row.level_place,
 					})),
+					note: "One call per level+gender scoring type. Participant ids are resolved live via the BETA series-participant lookup; unmapped rows abort the apply.",
 				},
 			},
 			{
@@ -274,8 +313,17 @@ export function buildSeries2026LevelsWritePlan(
 					params: {
 						event_id: input.eventId,
 						individual_result_set_id: input.resultSetId,
+						request_format: "json",
+					},
+					body: {
+						results: input.computed.map((row) => ({
+							result_id: row.result_id,
+							"custom-field-<Performance Level id>": row.level_display,
+							"custom-field-<Level Place id>": String(row.level_place),
+						})),
 					},
 					rows: resultFieldWrites,
+					note: "Post Event Results contract: existing rows are edited by result_id; custom-field-<id> keys use the ids resolved in step 1.",
 				},
 			},
 		],

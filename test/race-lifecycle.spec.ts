@@ -92,6 +92,23 @@ describe("Series 2026 level classification (NWANA-FINAL.ps1 parity)", () => {
 			computeSeries2026Levels("1K", [{ first_name: "No", last_name: "Time", gender: "M" }]),
 		).toThrow("Missing or invalid time");
 	});
+
+	it("falls back to clock_time when RunSignup returns an empty chip_time", () => {
+		// Real 2026-09-26 3K result shape: chip_time "" with clock_time set.
+		const computed = computeSeries2026Levels("3K", [
+			{ first_name: "ALBERT", last_name: "FATIKHOV", gender: "M", chip_time: "", clock_time: "18:54" },
+		]);
+		expect(computed).toHaveLength(1);
+		expect(computed[0]).toMatchObject({
+			athlete: "ALBERT FATIKHOV",
+			time: "18:54",
+			time_seconds: 1134,
+			level: "Elite",
+			level_display: "Elite (< 20:00)",
+			level_place: 1,
+			points: 1000,
+		});
+	});
 });
 
 describe("levels write plan (dry run only)", () => {
@@ -119,14 +136,31 @@ describe("levels write plan (dry run only)", () => {
 			"upload_standings",
 			"write_result_fields",
 		]);
-		const scoring = plan.steps[1].payload as { scoring_type_names: string[] };
-		expect(scoring.scoring_type_names).toContain(
-			"Elite Men (Elite (< 6:00); tie: best time)",
-		);
-		expect(scoring.scoring_type_names).toContain(
-			"Open Women (Open (7:30+); tie: best time)",
-		);
-		expect(scoring.scoring_type_names).toHaveLength(10);
+		const scoring = plan.steps[1].payload as {
+			body: { non_standard_scoring_types: Array<{ scoring_type_id: null; scoring_type_name: string }> };
+		};
+		const names = scoring.body.non_standard_scoring_types.map((entry) => entry.scoring_type_name);
+		expect(names).toContain("Elite Men (Elite (< 6:00); tie: best time)");
+		expect(names).toContain("Open Women (Open (7:30+); tie: best time)");
+		expect(names).toHaveLength(10);
+		expect(
+			scoring.body.non_standard_scoring_types.every((entry) => entry.scoring_type_id === null),
+		).toBe(true);
+		const resultFields = plan.steps[3].payload as {
+			body: { results: Array<Record<string, unknown>> };
+		};
+		expect(resultFields.body.results[0]).toMatchObject({
+			"custom-field-<Performance Level id>": "Elite (< 6:00)",
+			"custom-field-<Level Place id>": "1",
+		});
+		const standings = plan.steps[2].payload as {
+			body: { columns: string[]; scoring_data: unknown[][] };
+		};
+		expect(standings.body.columns).toEqual([
+			"race_series_participant_id",
+			"series_points",
+			"position",
+		]);
 		expect(plan.report).toContain("DRY RUN");
 		expect(plan.report).toContain("nothing was written");
 	});
