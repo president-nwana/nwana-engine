@@ -6386,7 +6386,7 @@ export default {
 
 		if (request.method === "POST" && url.pathname === "/api/operating-center/race-lifecycle/apply-levels") {
 			try {
-				const body = await request.json() as { distance?: string; event_id?: number; confirmation?: string };
+				const body = await request.json() as { distance?: string; event_id?: number; confirmation?: string; event_limit?: number; reset_rebuild?: boolean };
 				if (!body.distance) {
 					return json({ ok: false, error: "distance is required" }, 400);
 				}
@@ -6402,6 +6402,8 @@ export default {
 					distance: body.distance,
 					eventId: body.event_id as number,
 					confirmation: body.confirmation ?? "",
+					eventLimit: body.event_limit,
+					resetRebuild: body.reset_rebuild,
 				});
 				return json(result, result.ok ? 200 : 422);
 			} catch (error) {

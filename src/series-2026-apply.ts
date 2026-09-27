@@ -63,6 +63,11 @@ export interface ApplyLevelsInput {
 	distance: string;
 	eventId: number;
 	confirmation: string;
+	// Chunked rebuild controls (REBUILD_DISTANCE only). The Free plan caps
+	// external subrequests at 50/invocation, so a full distance is rebuilt
+	// in chunks; progress is tracked in series_rebuild_progress.
+	eventLimit?: number;
+	resetRebuild?: boolean;
 }
 
 export interface ApplyLevelsResult {
@@ -74,6 +79,15 @@ export interface ApplyLevelsResult {
 	computed: ComputedLifecycleResult[];
 	steps: ApplyStepResult[];
 	error?: string;
+	rebuild?: {
+		chunk_events: number[];
+		cursor: number;
+		remaining: number;
+		total_events: number;
+		chunk_errors: number;
+		total_errors: number;
+		complete: boolean;
+	};
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -780,7 +794,7 @@ export async function removeLegacyScoringTypes(
 async function logApply(
 	db: D1Database,
 	input: { distance: string; raceId: number; eventId: number; resultSetId: number | null; resultCount: number },
-	status: "COMPLETED" | "FAILED" | "REJECTED",
+	status: "COMPLETED" | "FAILED" | "REJECTED" | "CHUNK_COMPLETED",
 	steps: ApplyStepResult[],
 	error?: string,
 ): Promise<void> {
@@ -901,7 +915,42 @@ export async function applySeries2026Levels(
 			detail: `${distanceEvents.length} event(s) in ${input.distance} race ${source.raceId}; rebuilding all.`,
 		});
 
-		for (const distanceEvent of distanceEvents) {
+		// Chunked sweep: the Free plan caps external subrequests at
+		// 50/invocation (measured 2026-09-27), so a distance with more than
+		// ~3 events is rebuilt across several calls. Progress (cursor +
+		// cumulative errors) lives in D1; the legacy cleanup runs only after
+		// the final chunk of a fully clean rebuild.
+		const CHUNK_LIMIT = Math.max(
+			1,
+			Math.min(3, Math.trunc(input.eventLimit ?? 2)),
+		);
+		let cursor = 0;
+		let priorErrors = 0;
+		if (input.resetRebuild !== true) {
+			const progress = await input.db
+				.prepare(
+					`SELECT cursor, errors, status FROM series_rebuild_progress WHERE series = ? AND distance = ?`,
+				)
+				.bind(RACE_LIFECYCLE_SERIES, input.distance)
+				.first<{ cursor: number; errors: number; status: string }>();
+			if (progress && progress.status === "IN_PROGRESS") {
+				cursor = Math.max(0, Math.trunc(progress.cursor));
+				priorErrors = Math.max(0, Math.trunc(progress.errors));
+			}
+		}
+		if (cursor >= distanceEvents.length) {
+			cursor = 0;
+			priorErrors = 0;
+		}
+		const chunk = distanceEvents.slice(cursor, cursor + CHUNK_LIMIT);
+		const chunkEventIds = chunk.map((entry) => entry.event_id);
+		push({
+			step: "rebuild_chunk",
+			status: "ok",
+			detail: `Chunk: event(s) ${chunkEventIds.join(", ") || "none"} (cursor ${cursor}/${distanceEvents.length}, limit ${CHUNK_LIMIT}).`,
+		});
+
+		for (const distanceEvent of chunk) {
 			const eventId = distanceEvent.event_id;
 			let sets: Array<{ result_set_id: number; result_set_name: string | null }>;
 			try {
@@ -948,26 +997,71 @@ export async function applySeries2026Levels(
 			}
 		}
 
+		const totalErrors = priorErrors + eventErrors;
+		const nextCursor = cursor + chunk.length;
+		const remaining = Math.max(0, distanceEvents.length - nextCursor);
+		const isFinalChunk = remaining === 0;
+
 		// Legacy parity: NWANA-FINAL.ps1 cleans up pre-v4 scoring type names
 		// only when the distance processed without errors. The cleanup is
-		// safe here because the sweep above rebuilt the full history into
-		// the current types first.
-		if (eventErrors === 0) {
+		// safe here because the sweep rebuilt the full history into the
+		// current types first. In chunked mode it runs only after the FINAL
+		// chunk of a fully clean rebuild.
+		let cleanupDetail = "";
+		if (isFinalChunk && totalErrors === 0) {
 			const cleanup = await removeLegacyScoringTypes(source, input.distance, input.accessToken);
+			cleanupDetail = cleanup.deleted.length > 0
+				? `Deleted legacy scoring type ids: ${cleanup.deleted.join(", ")}.`
+				: "No legacy scoring types found; nothing deleted.";
 			push({
 				step: "cleanup_legacy_scoring_types",
 				status: cleanup.deleted.length > 0 ? "ok" : "skipped",
-				detail: cleanup.deleted.length > 0
-					? `Deleted legacy scoring type ids: ${cleanup.deleted.join(", ")}.`
-					: "No legacy scoring types found; nothing deleted.",
+				detail: cleanupDetail,
 			});
 		} else {
 			push({
 				step: "cleanup_legacy_scoring_types",
 				status: "skipped",
-				detail: `${eventErrors} event error(s); legacy cleanup skipped until the distance rebuilds clean.`,
+				detail: isFinalChunk
+					? `${totalErrors} event error(s) across all chunks; legacy cleanup skipped until the distance rebuilds clean.`
+					: `Not the final chunk (${remaining} event(s) remaining); cleanup deferred.`,
 			});
 		}
+
+		await input.db
+			.prepare(
+				`INSERT INTO series_rebuild_progress (series, distance, cursor, errors, status, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?)
+				 ON CONFLICT (series, distance) DO UPDATE SET
+				   cursor = excluded.cursor,
+				   errors = excluded.errors,
+				   status = excluded.status,
+				   updated_at = excluded.updated_at`,
+			)
+			.bind(
+				RACE_LIFECYCLE_SERIES,
+				input.distance,
+				nextCursor,
+				totalErrors,
+				isFinalChunk ? (totalErrors === 0 ? "COMPLETE" : "FAILED") : "IN_PROGRESS",
+				new Date().toISOString(),
+			)
+			.run();
+		push({
+			step: "rebuild_progress",
+			status: "ok",
+			detail: `Progress saved: cursor ${nextCursor}/${distanceEvents.length}, ${remaining} remaining, ${totalErrors} total error(s).`,
+		});
+
+		base.rebuild = {
+			chunk_events: chunkEventIds,
+			cursor: nextCursor,
+			remaining,
+			total_events: distanceEvents.length,
+			chunk_errors: eventErrors,
+			total_errors: totalErrors,
+			complete: isFinalChunk,
+		};
 	} catch (error) {
 		const result = fail(base, "apply", error instanceof Error ? error.message : String(error));
 		result.steps = steps.concat(result.steps);
@@ -981,8 +1075,9 @@ export async function applySeries2026Levels(
 		return result;
 	}
 
+	const rebuild = base.rebuild;
 	const result: ApplyLevelsResult = { ...base, ok: true, steps };
-	if (eventErrors > 0) {
+	if (rebuild && rebuild.complete && rebuild.total_errors > 0) {
 		// Fail closed: the sweep continued past per-event errors (legacy:
 		// $errors++ and continue), but the apply as a whole is FAILED so the
 		// owner sees exactly which events need attention. Events that
@@ -990,7 +1085,7 @@ export async function applySeries2026Levels(
 		const failed = fail(
 			result,
 			"distance_rebuild",
-			`${eventErrors} event(s) failed during the ${input.distance} rebuild; see event_error steps. Successful events were rebuilt; rerun after fixing the failures.`,
+			`${rebuild.total_errors} event(s) failed during the ${input.distance} rebuild; see event_error steps. Successful events were rebuilt; rerun with reset to retry the failures.`,
 		);
 		await logApply(
 			input.db,
@@ -1004,7 +1099,7 @@ export async function applySeries2026Levels(
 	await logApply(
 		input.db,
 		{ distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: base.result_set_id, resultCount: base.result_count },
-		"COMPLETED",
+		rebuild && !rebuild.complete ? "CHUNK_COMPLETED" : "COMPLETED",
 		steps,
 	);
 	return result;
