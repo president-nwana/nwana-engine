@@ -1099,8 +1099,13 @@ export async function linkRunSignupRace(
 		country: null,
 		distances: packet.meta.distance ? [packet.meta.distance] : [],
 		websiteUrl: packet.meta.external_race_url,
-		contactName: null,
+		registrationUrl: null,
+		yearStarted: null,
 		contactEmail: null,
+		facebook: null,
+		twitter: null,
+		instagram: null,
+		youtube: null,
 		description: packet.meta.description,
 	});
 

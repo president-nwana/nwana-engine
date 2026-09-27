@@ -1,16 +1,44 @@
 // Ahotu lane — Media Distribution System.
 //
-// Verified live 2026-09-27. Ahotu (https://ahotu.com, World's Sports Group)
-// is a global endurance race calendar; "Nordic walking" is an official sport
-// category: https://www.ahotu.com/sport/nordic-walking
+// Calibrated live 2026-09-27 against the real organiser-dashboard form
+// (signed in with the owner's organiser account; full wizard mapped,
+// nothing published). Ahotu (https://www.ahotu.com, World's Sports Group)
+// is a global endurance race calendar.
 //
 // Verified facts encoded here:
-// - No NWANA events are listed; no NWANA organiser account exists.
-// - An organiser account is REQUIRED and FREE. Registration:
+// - An organiser account is REQUIRED and FREE. The owner created NWANA's
+//   organiser account on 2026-09-27. Registration:
 //   https://www.ahotu.com/members/registration/organiser
 //   Account creation is an OWNER action — the Machine never creates it.
 // - NO API, NO bulk/CSV import: manual per-event entry only, inside the
 //   organiser dashboard.
+// - The add-event flow is a wizard, not a single form:
+//   Screen 1 "Create event" (https://www.ahotu.com/p/organiser-events/new):
+//     Name* (+ name-language dropdown — REQUIRED by save validation,
+//     choose "English"), Translated names (optional), Official website,
+//     Year event started, Contact: Email / Facebook / Twitter / Instagram /
+//     YouTube, Organisation dropdown. Save -> the edition wizard opens.
+//     New events automatically enter "Waiting validation" status; there is
+//     NO visible publish button and NO delete control — drafts cannot be
+//     removed from the dashboard, so never create test drafts.
+//   Screen 2 "Create a new edition" (5 tabs, Cancel/Save on each):
+//     General: Date* (calendar picker; "To be confirmed" checkbox), Status
+//       dropdown (Ok/Cancelled/Postponed/...).
+//     Descriptions: per-language tabs ("Add description"), plain textarea.
+//     Registration: URL, Starts/Ends date pickers, Max participants.
+//     Location*: venue/city search; Country and City auto-set; Lat/Lng.
+//     Races: "Add a race" per race — Name, Activity dropdown ("Nordic
+//       walking" IS a verified option), second format dropdown (Standard,
+//       Time trial, ...), Charity checkbox, Location radio Hybrid/On
+//       site/Virtual, Start Time, Status/Participation/Selection/
+//       Restrictions radios, Min/Max age, Field size, Distance* (number +
+//       unit: Kilometer/Meter/Mile/Feet/Step/Story/Yard/Hour/Day/Minute;
+//       Marathon/Half Marathon shortcuts; Certified course, Timed),
+//       Elevation/Elevation drop/Min/Max altitude, Course URL, Terrain
+//       (Road/Mixed/Trail/Track/Urban trail/Indoor), Topography, Profile,
+//       Environment checkboxes, # aid stations.
+//   Screen 3 "Add photos": jpeg/png/tiff, 5-15 MB landscape preferred;
+//     no flyers, course maps, or images with text.
 // - REQUIRED for listing: an edition date AND at least one race/distance,
 //   otherwise the event is NOT listed.
 // - Ahotu deletes duplicates: always check the event is not already listed.
@@ -34,17 +62,21 @@ export const AHOTU_HELP_ADD_EVENT_URL =
 	"https://help.ahotu.com/article/22-how-can-i-add-an-event-to-ahotu";
 
 /**
- * The exact human last mile for the Ahotu organiser dashboard (official
- * flow, verified 2026-09-27). Duplicated verbatim into the migration's
- * media_submission_endpoints.manual_last_mile.
+ * The exact human last mile for the Ahotu organiser dashboard (wizard flow,
+ * calibrated live 2026-09-27 against the real form). Duplicated verbatim
+ * into the migration's media_submission_endpoints.manual_last_mile.
  */
-export const AHOTU_MANUAL_LAST_MILE = `EXACT MANUAL LAST MILE — AHOTU (verified live 2026-09-27). A person performs every step; the Machine never submits.
-1. If the free NWANA organiser account does not exist yet, create it (OWNER action, one-time): ${AHOTU_ORGANISER_REGISTRATION_URL} — sign up as an organiser. Listing an event is free.
-2. Sign in to the organiser dashboard, open "My events" -> "+ Add event".
-3. FIRST check the event is not already listed (Ahotu deletes duplicates): ${AHOTU_NORDIC_WALKING_URL}
-4. Enter the event name + contact details -> Save.
-5. Add the edition date AND at least one race/distance via the left-hand menu -> Save. REQUIRED: without a date + distance the event is NOT listed.
-6. When the event is live on ahotu.com, record its URL in ahotu_queue (markAhotuListed) and in media_distributions.external_url.
+export const AHOTU_MANUAL_LAST_MILE = `EXACT MANUAL LAST MILE — AHOTU (wizard calibrated live 2026-09-27). A person performs every step; the Machine never submits.
+0. FIRST check the event is not already listed (Ahotu deletes duplicates): ${AHOTU_NORDIC_WALKING_URL}
+1. Sign in to the organiser dashboard (owner's free organiser account): https://www.ahotu.com/p/profile/organiser — open "My events" -> "+ Add event".
+2. SCREEN "Create event": Name* = the prepared event name, and in the name-language dropdown choose "English" (save validation rejects the form without a language). Official website = prepared URL. Year event started = prepared year. Contact: Email / Facebook / Twitter / Instagram / YouTube = prepared values. Organisation: leave "-" unless told otherwise. Click "Save" -> the edition wizard opens.
+3. EDITION wizard, tab "General": Date* = the prepared edition date (calendar picker; tick "To be confirmed" only if the date is not final). Status: leave "Ok".
+4. Tab "Descriptions": "Add description" -> language "English" -> paste the prepared description.
+5. Tab "Registration": URL = prepared registration URL (Starts/Ends/Max participants only if prepared).
+6. Tab "Location": Location* = type the prepared venue/city and pick the match from the search (Country/City set automatically); verify they are right.
+7. Tab "Races": "Add a race" -> for each prepared race: Name = race name; Activity = "Nordic walking" (dropdown option, verified); Distance* = value + unit (Kilometer/Mile/...); Start Time if prepared; Location: On site (or Hybrid/Virtual if prepared); Terrain/Topography/Profile if prepared. Repeat "Add a race" for every distance.
+8. Save the edition. New events enter "Waiting validation" automatically; Ahotu reviews before the event goes public. There is no delete control — never create test drafts.
+9. When the event is live on ahotu.com, record its URL in ahotu_queue (markAhotuListed) and in media_distributions.external_url.
 Official instructions: ${AHOTU_HELP_ADD_EVENT_URL}`;
 
 export const AHOTU_QUEUE_STATUSES = [
@@ -57,6 +89,9 @@ export const AHOTU_QUEUE_STATUSES = [
 ] as const;
 export type AhotuQueueStatus = (typeof AHOTU_QUEUE_STATUSES)[number];
 
+/** Calibrated form version: the live add-event wizard as mapped 2026-09-27. */
+export const AHOTU_FORM_VERSION = "2026-09-27";
+
 export interface AhotuRaceInput {
 	name: string;
 	/** Edition date, e.g. "2027-03-14". REQUIRED by Ahotu. */
@@ -66,21 +101,37 @@ export interface AhotuRaceInput {
 	/** At least one race/distance, e.g. ["10K", "5K"]. REQUIRED by Ahotu. */
 	distances: string[];
 	websiteUrl?: string | null;
-	contactName?: string | null;
+	registrationUrl?: string | null;
+	yearStarted?: string | null;
 	contactEmail?: string | null;
+	facebook?: string | null;
+	twitter?: string | null;
+	instagram?: string | null;
+	youtube?: string | null;
 	description?: string | null;
 }
 
 export interface AhotuPackage {
-	sport_category: typeof AHOTU_SPORT_CATEGORY;
+	form_version: typeof AHOTU_FORM_VERSION;
+	/** "Nordic walking" — the per-race Activity dropdown option (verified). */
+	race_activity: typeof AHOTU_SPORT_CATEGORY;
 	event_name: string;
+	/** REQUIRED by save validation next to the name — always "English". */
+	name_language: "English";
+	year_started: string | null;
 	edition_date: string;
 	city: string | null;
 	country: string | null;
 	distances: string[];
 	website_url: string | null;
-	contact_name: string | null;
+	registration_url: string | null;
 	contact_email: string | null;
+	socials: {
+		facebook: string | null;
+		twitter: string | null;
+		instagram: string | null;
+		youtube: string | null;
+	};
 	description: string | null;
 	manual_last_mile: string;
 }
@@ -113,15 +164,24 @@ function requiredFields(input: AhotuRaceInput): { distances: string[] } {
 export function buildAhotuPackage(input: AhotuRaceInput): AhotuPackage {
 	const { distances } = requiredFields(input);
 	return {
-		sport_category: AHOTU_SPORT_CATEGORY,
+		form_version: AHOTU_FORM_VERSION,
+		race_activity: AHOTU_SPORT_CATEGORY,
 		event_name: input.name.trim(),
+		name_language: "English",
+		year_started: input.yearStarted?.trim() || null,
 		edition_date: (input.editionDate as string).trim(),
 		city: input.city?.trim() || null,
 		country: input.country?.trim() || null,
 		distances,
 		website_url: input.websiteUrl?.trim() || null,
-		contact_name: input.contactName?.trim() || null,
+		registration_url: input.registrationUrl?.trim() || null,
 		contact_email: input.contactEmail?.trim() || null,
+		socials: {
+			facebook: input.facebook?.trim() || null,
+			twitter: input.twitter?.trim() || null,
+			instagram: input.instagram?.trim() || null,
+			youtube: input.youtube?.trim() || null,
+		},
 		description: input.description?.trim() || null,
 		manual_last_mile: AHOTU_MANUAL_LAST_MILE,
 	};
@@ -139,7 +199,8 @@ export function describeAhotuGaps(input: AhotuRaceInput): string[] {
 	if (!input.city?.trim()) gaps.push("city");
 	if (!input.country?.trim()) gaps.push("country");
 	if (!input.websiteUrl?.trim()) gaps.push("website URL");
-	if (!input.contactName?.trim()) gaps.push("contact name");
+	if (!input.registrationUrl?.trim()) gaps.push("registration URL");
+	if (!input.yearStarted?.trim()) gaps.push("year event started");
 	if (!input.contactEmail?.trim()) gaps.push("contact email");
 	if (!input.description?.trim()) gaps.push("description");
 	return gaps;
@@ -203,15 +264,24 @@ export async function enqueueAhotuForObject(
 		packageJson = JSON.stringify({
 			partial: true,
 			missing_fields: gaps,
-			sport_category: AHOTU_SPORT_CATEGORY,
+			form_version: AHOTU_FORM_VERSION,
+			race_activity: AHOTU_SPORT_CATEGORY,
 			event_name: raceInput.name,
+			name_language: "English",
+			year_started: raceInput.yearStarted ?? null,
 			edition_date: raceInput.editionDate,
 			city: raceInput.city ?? null,
 			country: raceInput.country ?? null,
 			distances: raceInput.distances ?? [],
 			website_url: raceInput.websiteUrl ?? null,
-			contact_name: raceInput.contactName ?? null,
+			registration_url: raceInput.registrationUrl ?? null,
 			contact_email: raceInput.contactEmail ?? null,
+			socials: {
+				facebook: raceInput.facebook ?? null,
+				twitter: raceInput.twitter ?? null,
+				instagram: raceInput.instagram ?? null,
+				youtube: raceInput.youtube ?? null,
+			},
 			description: raceInput.description ?? null,
 			manual_last_mile: AHOTU_MANUAL_LAST_MILE,
 		});

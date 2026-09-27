@@ -431,7 +431,7 @@ describe("ahotu lane auto-enqueue", () => {
 		const pkg = JSON.parse(ahotuQueue[0].package_json as string);
 		expect(pkg.edition_date).toBe("2026-12-05");
 		expect(pkg.distances).toEqual(["5K"]);
-		expect(pkg.sport_category).toBe("Nordic walking");
+		expect(pkg.race_activity).toBe("Nordic walking");
 	});
 
 	it("re-linking does not duplicate the Ahotu row", async () => {

@@ -1,16 +1,21 @@
 // Ahotu lane tests: submission package building, eligibility, the
 // auto-enqueue rule, queue lifecycle, and the manual last mile text.
 //
-// Verified facts encoded (live 2026-09-27):
+// Verified facts encoded (wizard calibrated live 2026-09-27):
 // - no API, no bulk import -> the machine prepares; a person submits
 // - edition date + at least one race/distance REQUIRED for listing
 // - challenges NOT supported (no challenge format on Ahotu)
-// - organiser account required, free, created by the owner
+// - organiser account required, free, created by the owner 2026-09-27
+// - add-event is a wizard: Create event (Name* + language required) ->
+//   edition (Date*, Descriptions, Registration, Location*, Races with
+//   Activity="Nordic walking" option) -> photos
 
 import { describe, expect, it } from "vitest";
 import {
 	AHOTU_ELIGIBLE_KINDS,
+	AHOTU_FORM_VERSION,
 	AHOTU_MANUAL_LAST_MILE,
+	AHOTU_NORDIC_WALKING_URL,
 	AHOTU_ORGANISER_REGISTRATION_URL,
 	AHOTU_SPORT_CATEGORY,
 	buildAhotuPackage,
@@ -117,20 +122,31 @@ const fullInput = (): AhotuRaceInput => ({
 	country: "USA",
 	distances: ["10K", "5K"],
 	websiteUrl: "https://nwaofna.org/races/florida-open",
-	contactName: "Albert Fatikhov",
+	registrationUrl: "https://runsignup.com/nwana-florida-open",
+	yearStarted: "2024",
 	contactEmail: "president@nwaofna.org",
+	facebook: "https://facebook.com/nwana",
+	twitter: null,
+	instagram: "https://instagram.com/nwana.official",
+	youtube: "https://youtube.com/@NWANA.Official",
 	description: "NWANA competition event",
 });
 
 describe("buildAhotuPackage", () => {
-	it("produces a complete package with edition date, distances, and the Nordic walking category", () => {
+	it("produces a complete package matching the calibrated wizard fields", () => {
 		const pkg = buildAhotuPackage(fullInput());
-		expect(pkg.sport_category).toBe("Nordic walking");
-		expect(pkg.sport_category).toBe(AHOTU_SPORT_CATEGORY);
+		expect(pkg.form_version).toBe(AHOTU_FORM_VERSION);
+		expect(pkg.race_activity).toBe("Nordic walking");
+		expect(pkg.race_activity).toBe(AHOTU_SPORT_CATEGORY);
+		expect(pkg.name_language).toBe("English");
 		expect(pkg.edition_date).toBe("2027-03-14");
 		expect(pkg.distances).toEqual(["10K", "5K"]);
 		expect(pkg.event_name).toBe("NWANA Florida Open 10K");
-		expect(pkg.manual_last_mile).toContain(AHOTU_ORGANISER_REGISTRATION_URL);
+		expect(pkg.year_started).toBe("2024");
+		expect(pkg.registration_url).toBe("https://runsignup.com/nwana-florida-open");
+		expect(pkg.socials.facebook).toBe("https://facebook.com/nwana");
+		expect(pkg.socials.instagram).toBe("https://instagram.com/nwana.official");
+		expect(pkg.manual_last_mile).toContain("Nordic walking");
 	});
 
 	it("throws when the edition date is missing", () => {
@@ -248,11 +264,15 @@ describe("queue lifecycle", () => {
 });
 
 describe("manual last mile", () => {
-	it("contains the organiser registration URL (owner-created account step)", () => {
-		expect(AHOTU_MANUAL_LAST_MILE).toContain(AHOTU_ORGANISER_REGISTRATION_URL);
+	it("walks the calibrated wizard: duplicate check, event screen, edition tabs, races", () => {
+		expect(AHOTU_MANUAL_LAST_MILE).toContain(AHOTU_NORDIC_WALKING_URL);
 		expect(AHOTU_MANUAL_LAST_MILE).toContain("My events");
 		expect(AHOTU_MANUAL_LAST_MILE).toContain("Add event");
 		expect(AHOTU_MANUAL_LAST_MILE).toMatch(/edition date/i);
 		expect(AHOTU_MANUAL_LAST_MILE).toMatch(/duplicate/i);
+		expect(AHOTU_MANUAL_LAST_MILE).toContain("Nordic walking");
+		expect(AHOTU_MANUAL_LAST_MILE).toContain("Add a race");
+		expect(AHOTU_MANUAL_LAST_MILE).toMatch(/waiting validation/i);
+		expect(AHOTU_MANUAL_LAST_MILE).toContain("https://www.ahotu.com/p/profile/organiser");
 	});
 });
