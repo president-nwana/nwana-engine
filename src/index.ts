@@ -5284,7 +5284,7 @@ async function getSeries2026ResultPublicationPreview(
 ): Promise<Response> {
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
-		{ distance, apiCallerToken: env.RUNSIGNUP_API_REG, apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET },
+		{ distance },
 	);
 	const history = await env.nwana_engine_db
 		.prepare(`
@@ -5597,7 +5597,7 @@ async function publishSeries2026Result(
 	}
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
-		{ raceId, apiCallerToken: env.RUNSIGNUP_API_REG, apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET },
+		{ raceId },
 	);
 	const draft = preview.drafts.find((value) => value.publication_key === body.publication_key);
 	if (!draft || !draft.ready_for_editorial_review || !draft.editorial_draft.ready_for_approval) {
