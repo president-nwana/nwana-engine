@@ -5352,7 +5352,7 @@ async function getSeries2026ResultCard(
 	}
 	const preview = await previewSeries2026ResultPublications(
 		env.RUNSIGNUP_ACCESS_TOKEN,
-		{ raceId, apiCallerToken: env.RUNSIGNUP_API_REG, apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET },
+		{ raceId },
 	);
 	const draft = preview.drafts.find(
 		(value) => value.publication_key === publicationKey,
