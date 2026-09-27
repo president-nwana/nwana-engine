@@ -866,3 +866,21 @@ A new developer or AI must be able to continue the project from this repository 
 - Social screen (`/operating-center/social`): new "Distribution packs" panel — packet id + type + channel form, copy buttons per channel, imageSpec, missingFields warnings, truncation badges.
 - Commit `54048ef` on branch `feature/verified-zero-priorities` (NOT pushed, NOT deployed — parent handles). tsc clean, 10 new tests pass; 4 pre-existing cockpit failures unchanged.
 - Advances the operating loop OBJECT -> DISTRIBUTION: owner gets copy-ready manual posts from a normal control page, no terminal/chat needed.
+
+## ADS OVERVIEW — LIVE GA4 STATUS 2026-09-27
+
+- Root cause of GA4 `connected:false` in the Ads overview: `getAdsOverview()` hardcoded `google_analytics: {connected:false, note:"Not set up..."}` — it never read the real GA4 state (same bug pattern as ADR-0029 for Ads).
+- Fix (commit `ccad3b5`, pushed as `7dc8b1ec`, deployed engine version `5e2aee21-858c-4742-ab38-59f8fc6ab2a5`): overview now calls `getGoogleAnalyticsStatus(env)` (read-only, bounded, same pattern as the Ads status read) and renders Connected/Not connected with the real note + property id. Screen badge and downloadable report badge both fixed.
+- No Measurement ID or tracking config changed — zero double-count risk.
+- Production `/integrations/google-analytics/status` → connected:true, property 534556675, so the overview now shows Connected. tsc clean, 101/101 tests pass (the existing overview test still asserts `connected:false` for an unconfigured env, which now meaningfully exercises the live read).
+
+## MEDIA DISTRIBUTION SYSTEM — DATA LAYER 2026-09-27
+
+- Verified media registry (migrations 0034 + 0035, spec docs/media-distribution-system.md, helper src/media-registry.ts + test/media-registry.spec.ts 6/6). Local commit only — NOT pushed, NOT deployed (parent handles).
+- 0034: media_outlets, media_contacts (consent_class OPTED_IN/RELATIONSHIP/RESEARCHED_COLD), media_submission_endpoints (verification_level, manual_last_mile), media_content_variants, media_followups, media_coverage; extends media_distributions with variant_id/endpoint_id/contact_id/status/external_url. 0035 seed is INSERT OR IGNORE (re-runnable).
+- 0035 seed: 68 outlets, 51 endpoints, 48 contacts from the 2026-09-27 research catalog (14 categories) + verified free press platforms (PRLog unlimited free, PR.com free basic, OpenPR 1/30d, PRFree, 1888PressRelease, FreePressRelease.io, CircleActs nonprofit). verification_level: 8 opened / 44 search_verified / 16 third_party — only 'opened' cleared for immediate use. No URLs invented; all contacts RESEARCHED_COLD (individual outreach only, never Email V2 bulk).
+- Architectural boundary encoded: Email V2 mass layer = OPTED_IN/RELATIONSHIP only (RunSignup API has no email methods — verified; dashboard-only last mile); Gmail = individual pitches drafted by machine, sent by a person; no Gmail API per Email Integration Boundary. No submission API on any free platform — manual web forms everywhere.
+- Local verification: sqlite apply of 0034+0035 clean, FK check passes, seed re-run idempotent (68 outlets stable); tsc clean; new spec 6/6.
+- Advances the operating loop OBJECT -> DISTRIBUTION: findCandidateEndpoints(db, {categories, geography, accepts}) gives the owner a ranked, verification-flagged submission list; recordDistributionAttempt tracks prepared->covered lifecycle; coverage table holds publication URLs for analytics.
+- Nothing sent, published, or registered; no accounts created. Owner approvals still required: any external send/submission, first use of search_verified/third_party endpoints, RESEARCHED_COLD->RELATIONSHIP moves.
+- Operating cost: VERIFIED $0.
