@@ -1,7 +1,16 @@
 # ADR-0041 — Legacy parity: port NWANA-FINAL.ps1 result-processing semantics into the Series 2026 apply path
 
 Date: 2026-09-27
-Status: Implemented on feature branch `feature/series-2026-legacy-parity`. NOT merged to main. NOT deployed.
+Status: UPDATED. The first apply after this ADR (Event 1177636, 2026-09-27)
+uploaded ONLY the new event's standings with `clear_previous_results=T` and
+destroyed the historical 3K series standings — the "single event per run"
+scope reduction below was WRONG. Superseded by the distance-scoped rebuild
+on branch `feature/series-2026-standings-rebuild`: one owner-confirmed apply
+now rebuilds the WHOLE distance (every event, every result set), exactly like
+the legacy sweep. Hard rule: `clear_previous_results=T` is only ever executed
+inside a full-scope rebuild; a single-event clear+upload without rebuilding
+the scope is forbidden. Regression gate: multi-event rebuild test +
+idempotency test (`test/series-2026-standings-rebuild.spec.ts`).
 
 ## Context
 
@@ -44,8 +53,13 @@ these exact divergences:
 8. **Order**: legacy — scoring types, results, compute, participants,
    standings, custom fields, result writes, columns, cleanup. The Machine —
    custom fields, result writes, scoring types, standings.
-9. **Scope**: legacy processes all distances/events/result sets per run; the
-   Machine's owner-gated apply covers one distance/event/result set per run.
+9. **Scope**: legacy processes all events/result sets of the distance per run
+   (the outer loop is the distance; the sweep re-reads every event before
+   any standings replacement). The Machine's owner-gated apply covered one
+   event/result set per run. On 2026-09-27 the Machine's first real apply
+   therefore loaded only Event 1177636 with `clear_previous_results=T` and
+   destroyed the historical 3K series standings (root cause, discovered
+   ~19:00 EDT the same day).
 
 ## Decision
 
@@ -73,6 +87,17 @@ first, improving only explicitly**:
 8. Apply order now: read_and_compute -> ensure_scoring_types ->
    resolve_participants -> upload_standings -> ensure_custom_fields ->
    write_result_fields -> set_result_columns -> cleanup_legacy_scoring_types.
+9. NEW (2026-09-27, after the standings-destruction incident): the apply is a
+   DISTANCE-SCOPED REBUILD. `listDistanceEvents` reads the race's live event
+   list (Bearer-only, like the legacy script); `applyEventResultSet` runs the
+   full inner body per (event, result set) — compute -> participants ->
+   standings (all ten groups, clear=T per event) -> custom fields ->
+   full rows -> columns. Per-event failures are collected and the sweep
+   continues (legacy: `$errors++` and continue); legacy cleanup runs only
+   when the whole distance rebuilds without errors. The trigger event's
+   computed result is returned for the response. A run with any event error
+   is reported FAILED (fail closed) so the owner sees exactly which events
+   need attention.
 
 ## Deliberate Machine improvements KEPT (not legacy, kept explicitly)
 
@@ -83,20 +108,33 @@ first, improving only explicitly**:
 - Live re-read immediately before apply; recompute on the same live payload.
 - Fail-closed: any error stops the apply and leaves the event at `verifying`.
 
-## Deliberate scope reduction (not legacy, intentional)
+## Scope (corrected 2026-09-27)
 
-- The Machine apply covers one distance/event/result set per run (owner-gated),
-  not the whole series sweep. Legacy runs all distances/events/result sets.
+- The Machine apply covers ONE DISTANCE per run (owner-gated), but the whole
+  distance: every event of the distance's race, every result set — exactly
+  the legacy sweep. The "single event per run" reduction was the direct cause
+  of the 2026-09-27 standings destruction and is retired.
+- HARD RULE: `clear_previous_results=T` is permitted only inside a
+  full-scope rebuild, after the full scope has been read and computed.
+  Clearing is never executed on a partial scope.
 - The Machine always replaces (`clear_previous_results=T`); legacy had a
   `-Clear` switch — we keep the always-replace mode only.
 
-## Regression case
+## Regression cases
 
 Albert's 2026-09-26 3K result (232501676 / 210000 / 1177636 / 664979):
 clock_time 18:54 (chip_time blank), no registration_id/user_id in the row,
 registration id from the parallel `registration_ids` array. Expected:
 Elite (<20:00), Level Place 1, 1000 points, mapping resolves via
 add/registration-id.json.
+
+NEW 2026-09-27: `test/series-2026-standings-rebuild.spec.ts` runs the apply
+against a fake two-event RunSignup API (2026-09-12 event with legacy
+standings in pre-v4 types + the 2026-09-26 18:54 trigger event) and proves:
+old event standings are rebuilt into the v4 types (not orphaned), the new
+event is added, cumulative totals match legacy math (2000 for Albert in
+Elite Men), legacy types are deleted only after a clean sweep, and a second
+identical run changes nothing (idempotency).
 
 ## Operating cost
 

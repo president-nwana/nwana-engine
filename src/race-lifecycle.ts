@@ -234,7 +234,11 @@ export function buildSeries2026LevelsWritePlan(
 		report:
 			`DRY RUN: ${input.computed.length} result(s) classified for ` +
 			`${input.distance} event ${input.eventId} (result set ${input.resultSetId}). ` +
-			`RunSignup write access is ${input.writeAccess}; nothing was written.`,
+			`RunSignup write access is ${input.writeAccess}; nothing was written. ` +
+			`On confirmation the apply rebuilds the WHOLE ${input.distance} distance ` +
+			`(every event of race ${input.raceId}, every result set) before any ` +
+			`standings replacement — clear_previous_results=T never runs outside ` +
+			`a full-scope rebuild (ADR-0041).`,
 		steps: [
 			{
 				step: "ensure_scoring_types",
@@ -277,14 +281,14 @@ export function buildSeries2026LevelsWritePlan(
 			{
 				step: "upload_standings",
 				description:
-					"Upload series points and positions for all ten scoring types with clear_previous_results=T (legacy replacement semantics: safe to re-run).",
+					"Rebuild the whole distance: for EVERY event of the distance's race (not just the new one), upload series points and positions for all ten scoring types with clear_previous_results=T (per-event replacement; legacy: 'safe to run again').",
 				payload: {
 					endpoint: "POST /rest/v2/race-series/race-series-results.json",
 					params: {
 						race_series_id: input.raceSeriesId,
 						race_series_year_id: input.raceSeriesYearId,
 						race_id: input.raceId,
-						event_id: input.eventId,
+						event_id: "<each event of the distance>",
 						scoring_type_id: "<resolved per level+gender group>",
 						clear_previous_results: "T",
 					},
@@ -299,7 +303,7 @@ export function buildSeries2026LevelsWritePlan(
 						series_points: row.points,
 						position: row.level_place,
 					})),
-					note: "One call per level+gender scoring type (ten calls); empty groups send an empty scoring_data array, clearing stale standings. Any failed_race_series_participant_id aborts the apply.",
+					note: "One call per level+gender scoring type per event (ten calls per event); empty groups send an empty scoring_data array, clearing stale standings for that event. Points are per-event (1000/999/... within the event's level+gender group); RunSignup's series standings accumulate them across events natively. The legacy cleanup of pre-v4 scoring types runs only after the whole distance rebuilds without errors. Any failed_race_series_participant_id aborts that event's processing; other events continue.",
 				},
 			},
 			{

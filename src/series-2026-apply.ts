@@ -2,14 +2,22 @@
 //
 // The dry-run write plan (buildSeries2026LevelsWritePlan) prepares what the
 // legacy NWANA-FINAL.ps1 pipeline did by hand. This module is the Machine's
-// own apply path for that plan: it executes the four verified RunSignup
-// writes for one verifying event after the owner explicitly confirms.
+// own apply path for that plan.
+//
+// SCOPE (ADR-0041): one owner-confirmed apply rebuilds the whole DISTANCE —
+// every event of the distance's race and every result set — exactly like the
+// legacy sweep. Standings replacement (clear_previous_results=T) is only ever
+// executed inside such a full-scope rebuild; a single-event clear+upload
+// without rebuilding the scope is forbidden, because it destroys the other
+// events' series standings.
 //
 // Gates (all fail closed):
 // - confirmation must be exactly "APPLY_LEVELS";
 // - D1 race_lifecycle.write_access must be "CONFIRMED" for the distance
 //   (set only by the TEST_WRITE probe the owner runs once);
-// - the event must be in the "verifying" stage in the last synced state.
+// - the trigger event must be in the "verifying" stage in the last synced
+//   state. The trigger event selects the distance; the rebuild covers all
+//   of the distance's events.
 //
 // Step formats are verified against the published RunSignup API catalog:
 // - POST /rest/race/:race_id/results/custom-fields          (field ensure)
@@ -118,15 +126,66 @@ export function scoringTypeName(
 	return `${level} ${gender} (${series2026LevelDisplayName(distance, level)}; tie: best time)`;
 }
 
-// Reads the verifying event's live results and computes levels. Pure except
-// for the two RunSignup reads; shared by the endpoint and by tests via the
-// exported payload builders below.
-export async function readAndComputeLevels(
+// Legacy parity: the NWANA-FINAL.ps1 sweep reads the race's live event list
+// (not a cached copy) and processes every event in order. Bearer-only auth,
+// exactly like the legacy script.
+export async function listDistanceEvents(
+	source: Series2026Source,
+	accessToken: string,
+): Promise<Array<{ event_id: number; event_name: string | null }>> {
+	const raceUrl = new URL(`https://api.runsignup.com/rest/race/${source.raceId}`);
+	raceUrl.searchParams.set("format", "json");
+	raceUrl.searchParams.set("events", "T");
+	const raceData = await runSignupGetJson(raceUrl, { accessToken });
+	const race = asRecord(raceData.race);
+	const rawEvents = race && Array.isArray(race.events) ? race.events : [];
+	const events: Array<{ event_id: number; event_name: string | null }> = [];
+	for (const raw of rawEvents) {
+		const record = asRecord(raw);
+		const eventId = record ? Number(record.event_id) : NaN;
+		if (Number.isInteger(eventId)) {
+			events.push({ event_id: eventId, event_name: text(record?.event_name) });
+		}
+	}
+	return events;
+}
+
+// All result sets of one event, in API order.
+export async function listEventResultSets(
 	source: Series2026Source,
 	eventId: number,
 	accessToken: string,
+): Promise<Array<{ result_set_id: number; result_set_name: string | null }>> {
+	const setsUrl = new URL(
+		`https://api.runsignup.com/rest/race/${source.raceId}/results/get-result-sets`,
+	);
+	setsUrl.searchParams.set("format", "json");
+	setsUrl.searchParams.set("event_id", String(eventId));
+	const setsData = await runSignupGetJson(setsUrl, { accessToken });
+	const sets = Array.isArray(setsData.individual_results_sets)
+		? setsData.individual_results_sets
+		: [];
+	const out: Array<{ result_set_id: number; result_set_name: string | null }> = [];
+	for (const entry of sets) {
+		const record = asRecord(entry);
+		const id = record ? Number(record.individual_result_set_id) : NaN;
+		if (Number.isInteger(id)) {
+			out.push({ result_set_id: id, result_set_name: text(record?.individual_result_set_name) });
+		}
+	}
+	return out;
+}
+
+// Reads one event + result set and computes levels. Pure except for the
+// RunSignup read. Throws when the set has no rows (the caller skips it,
+// like NWANA-FINAL.ps1) or when registration_ids do not align (hard error,
+// like NWANA-FINAL.ps1).
+export async function readEventResultSet(
+	source: Series2026Source,
+	eventId: number,
+	resultSetId: number,
+	accessToken: string,
 ): Promise<{
-	resultSetId: number;
 	resultSetName: string | null;
 	headers: UnknownRecord;
 	rawRows: UnknownRecord[];
@@ -137,25 +196,6 @@ export async function readAndComputeLevels(
 	registrationIds: Array<number | null>;
 	computed: ComputedLifecycleResult[];
 }> {
-	const callEnv = { accessToken };
-	const setsUrl = new URL(
-		`https://api.runsignup.com/rest/race/${source.raceId}/results/get-result-sets`,
-	);
-	setsUrl.searchParams.set("format", "json");
-	setsUrl.searchParams.set("event_id", String(eventId));
-	const setsData = await runSignupGetJson(setsUrl, callEnv);
-	const sets = Array.isArray(setsData.individual_results_sets)
-		? setsData.individual_results_sets
-		: [];
-	const firstSet = asRecord(sets.find((entry) => {
-		const record = asRecord(entry);
-		return record !== null && Number.isInteger(Number(record.individual_result_set_id));
-	}));
-	const resultSetId = firstSet ? Number(firstSet.individual_result_set_id) : NaN;
-	if (!Number.isInteger(resultSetId)) {
-		throw new Error(`No result set found for event ${eventId}.`);
-	}
-
 	const resultsUrl = new URL(
 		`https://api.runsignup.com/rest/race/${source.raceId}/results/get-results`,
 	);
@@ -163,7 +203,7 @@ export async function readAndComputeLevels(
 	resultsUrl.searchParams.set("event_id", String(eventId));
 	resultsUrl.searchParams.set("individual_result_set_id", String(resultSetId));
 	resultsUrl.searchParams.set("results_per_page", "1000");
-	const resultsData = await runSignupGetJson(resultsUrl, callEnv);
+	const resultsData = await runSignupGetJson(resultsUrl, { accessToken });
 	const resultSets = Array.isArray(resultsData.individual_results_sets)
 		? resultsData.individual_results_sets
 		: [];
@@ -211,12 +251,40 @@ export async function readAndComputeLevels(
 	);
 
 	return {
-		resultSetId,
-		resultSetName: text(firstSet?.individual_result_set_name),
+		resultSetName: text(resultSet.individual_result_set_name),
 		headers,
 		rawRows,
 		registrationIds,
 		computed,
+	};
+}
+
+// Reads the verifying event's live results and computes levels. Kept as a
+// thin wrapper for the single-set case; the distance rebuild iterates all
+// sets via listEventResultSets + readEventResultSet.
+export async function readAndComputeLevels(
+	source: Series2026Source,
+	eventId: number,
+	accessToken: string,
+): Promise<{
+	resultSetId: number;
+	resultSetName: string | null;
+	headers: UnknownRecord;
+	rawRows: UnknownRecord[];
+	registrationIds: Array<number | null>;
+	computed: ComputedLifecycleResult[];
+}> {
+	const sets = await listEventResultSets(source, eventId, accessToken);
+	const firstSet = sets[0];
+	if (!firstSet) {
+		throw new Error(`No result set found for event ${eventId}.`);
+	}
+	const read = await readEventResultSet(source, eventId, firstSet.result_set_id, accessToken);
+	const { resultSetName: _ignored, ...rest } = read;
+	return {
+		resultSetId: firstSet.result_set_id,
+		resultSetName: firstSet.result_set_name ?? read.resultSetName,
+		...rest,
 	};
 }
 
@@ -352,6 +420,76 @@ export function allScoringTypeNames(distance: string): string[] {
 		names.push(scoringTypeName(distance, level, "Women"));
 	}
 	return names;
+}
+
+// One (event, result set), exactly the NWANA-FINAL.ps1 inner body: compute
+// levels -> resolve participants -> upload standings (all ten groups, per
+// event replacement) -> ensure custom fields -> write full result rows ->
+// set columns. Throws on any failure; the caller decides per-event handling.
+export async function applyEventResultSet(
+	source: Series2026Source,
+	eventId: number,
+	resultSetId: number,
+	scoringIds: Map<string, number>,
+	accessToken: string,
+	push: (step: ApplyStepResult) => void,
+): Promise<{ computed: ComputedLifecycleResult[]; resultCount: number }> {
+	const live = await readEventResultSet(source, eventId, resultSetId, accessToken);
+	push({
+		step: "read_and_compute",
+		status: "ok",
+		detail: `${live.computed.length} result(s) from set ${resultSetId} (event ${eventId}); levels computed.`,
+	});
+
+	const participantIds = await resolveSeriesParticipants(
+		source, eventId, live.registrationIds, accessToken,
+	);
+	push({
+		step: "resolve_participants",
+		status: "ok",
+		detail: `${participantIds.length} result(s) mapped to series participants (event ${eventId}).`,
+	});
+
+	const standings = await uploadSeriesStandings(
+		source, eventId, live.computed, participantIds, scoringIds, accessToken,
+	);
+	push({
+		step: "upload_standings",
+		status: "ok",
+		detail: `${standings.uploaded} score(s) uploaded across ${standings.groups.length} scoring group(s) for event ${eventId} (cleared and replaced).`,
+	});
+
+	const fields = await ensureLevelCustomFields(
+		source, eventId, resultSetId, live.headers, accessToken,
+	);
+	push({
+		step: "ensure_custom_fields",
+		status: fields.created.length > 0 ? "ok" : "skipped",
+		detail: fields.created.length > 0
+			? `Created: ${fields.created.join(", ")}.`
+			: `Both fields already existed on set ${resultSetId}; nothing created.`,
+	});
+
+	const rows = buildResultFieldRows(
+		live.computed, live.rawRows, live.registrationIds, fields.levelFieldId, fields.placeFieldId,
+	);
+	await writeResultFields(source, eventId, resultSetId, rows, accessToken);
+	push({
+		step: "write_result_fields",
+		status: "ok",
+		detail: `${rows.length} result row(s) updated with Performance Level and Level Place (event ${eventId}, set ${resultSetId}).`,
+	});
+
+	await customizeResultSetColumns(
+		source, eventId, resultSetId, fields.levelFieldId, fields.placeFieldId, accessToken,
+	);
+	push({
+		step: "set_result_columns",
+		status: "ok",
+		detail: `Standard Place hidden; Performance Level + Level Place shown (event ${eventId}, set ${resultSetId}).`,
+	});
+
+	return { computed: live.computed, resultCount: live.computed.length };
 }
 
 // Legacy scoring types are the same level/gender names WITHOUT the
@@ -726,17 +864,15 @@ export async function applySeries2026Levels(
 	const steps: ApplyStepResult[] = [];
 	const push = (step: ApplyStepResult) => steps.push(step);
 
-	try {
-		const live = await readAndComputeLevels(source, input.eventId, input.accessToken);
-		base.result_set_id = live.resultSetId;
-		base.result_count = live.computed.length;
-		base.computed = live.computed;
-		push({
-			step: "read_and_compute",
-			status: "ok",
-			detail: `${live.computed.length} result(s) from set ${live.resultSetId} (${live.resultSetName ?? "unnamed"}); levels computed.`,
-		});
+	// Distance-scoped rebuild (ADR-0041): like NWANA-FINAL.ps1, one apply
+	// processes EVERY event of the distance's race and every result set.
+	// Standings replacement (clear_previous_results=T) is only ever executed
+	// inside this full-scope rebuild, so no event's series standings can be
+	// orphaned. Per-event failures are collected (legacy: $errors++ and
+	// continue); legacy cleanup runs only when the whole distance is clean.
+	let eventErrors = 0;
 
+	try {
 		const scoring = await ensureScoringTypes(source, allScoringTypeNames(input.distance), input.accessToken);
 		push({
 			step: "ensure_scoring_types",
@@ -746,66 +882,80 @@ export async function applySeries2026Levels(
 				: "All ten scoring types already existed; nothing created.",
 		});
 
-		const participantIds = await resolveSeriesParticipants(
-			source, input.eventId, live.registrationIds, input.accessToken,
-		);
+		const distanceEvents = await listDistanceEvents(source, input.accessToken);
 		push({
-			step: "resolve_participants",
+			step: "enumerate_events",
 			status: "ok",
-			detail: `${participantIds.length} result(s) mapped to series participants.`,
+			detail: `${distanceEvents.length} event(s) in ${input.distance} race ${source.raceId}; rebuilding all.`,
 		});
 
-		const standings = await uploadSeriesStandings(
-			source, input.eventId, live.computed, participantIds, scoring.ids, input.accessToken,
-		);
-		push({
-			step: "upload_standings",
-			status: "ok",
-			detail: `${standings.uploaded} score(s) uploaded across ${standings.groups.length} scoring group(s) (cleared and replaced).`,
-		});
-
-		const fields = await ensureLevelCustomFields(
-			source, input.eventId, live.resultSetId, live.headers, input.accessToken,
-		);
-		push({
-			step: "ensure_custom_fields",
-			status: fields.created.length > 0 ? "ok" : "skipped",
-			detail: fields.created.length > 0
-				? `Created: ${fields.created.join(", ")}.`
-				: "Both fields already existed; nothing created.",
-		});
-
-		const rows = buildResultFieldRows(
-			live.computed, live.rawRows, live.registrationIds, fields.levelFieldId, fields.placeFieldId,
-		);
-		await writeResultFields(source, input.eventId, live.resultSetId, rows, input.accessToken);
-		push({
-			step: "write_result_fields",
-			status: "ok",
-			detail: `${rows.length} result row(s) updated with Performance Level and Level Place.`,
-		});
-
-		await customizeResultSetColumns(
-			source, input.eventId, live.resultSetId, fields.levelFieldId, fields.placeFieldId, input.accessToken,
-		);
-		push({
-			step: "set_result_columns",
-			status: "ok",
-			detail: "Standard Place hidden; Performance Level + Level Place shown.",
-		});
+		for (const distanceEvent of distanceEvents) {
+			const eventId = distanceEvent.event_id;
+			let sets: Array<{ result_set_id: number; result_set_name: string | null }>;
+			try {
+				sets = await listEventResultSets(source, eventId, input.accessToken);
+			} catch (error) {
+				eventErrors++;
+				push({
+					step: "event_error",
+					status: "failed",
+					detail: `Event ${eventId}: cannot list result sets — ${error instanceof Error ? error.message : String(error)}. Continuing with other events.`,
+				});
+				continue;
+			}
+			for (const set of sets) {
+				try {
+					const applied = await applyEventResultSet(
+						source, eventId, set.result_set_id, scoring.ids, input.accessToken, push,
+					);
+					if (eventId === input.eventId) {
+						base.result_set_id = set.result_set_id;
+						base.result_count = applied.resultCount;
+						base.computed = applied.computed;
+					}
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					// Legacy parity: an empty result set is skipped silently;
+					// anything else is a per-event error, and the sweep
+					// continues with the remaining events.
+					if (/has no result rows to classify/.test(message)) {
+						push({
+							step: "skip_empty_set",
+							status: "skipped",
+							detail: `Event ${eventId}, set ${set.result_set_id}: no result rows; skipped.`,
+						});
+						continue;
+					}
+					eventErrors++;
+					push({
+						step: "event_error",
+						status: "failed",
+						detail: `Event ${eventId}, set ${set.result_set_id}: ${message}. Continuing with other events.`,
+					});
+				}
+			}
+		}
 
 		// Legacy parity: NWANA-FINAL.ps1 cleans up pre-v4 scoring type names
-		// only when the distance processed without errors. Inside the
-		// owner-gated single-event apply, reaching this point means exactly
-		// that.
-		const cleanup = await removeLegacyScoringTypes(source, input.distance, input.accessToken);
-		push({
-			step: "cleanup_legacy_scoring_types",
-			status: cleanup.deleted.length > 0 ? "ok" : "skipped",
-			detail: cleanup.deleted.length > 0
-				? `Deleted legacy scoring type ids: ${cleanup.deleted.join(", ")}.`
-				: "No legacy scoring types found; nothing deleted.",
-		});
+		// only when the distance processed without errors. The cleanup is
+		// safe here because the sweep above rebuilt the full history into
+		// the current types first.
+		if (eventErrors === 0) {
+			const cleanup = await removeLegacyScoringTypes(source, input.distance, input.accessToken);
+			push({
+				step: "cleanup_legacy_scoring_types",
+				status: cleanup.deleted.length > 0 ? "ok" : "skipped",
+				detail: cleanup.deleted.length > 0
+					? `Deleted legacy scoring type ids: ${cleanup.deleted.join(", ")}.`
+					: "No legacy scoring types found; nothing deleted.",
+			});
+		} else {
+			push({
+				step: "cleanup_legacy_scoring_types",
+				status: "skipped",
+				detail: `${eventErrors} event error(s); legacy cleanup skipped until the distance rebuilds clean.`,
+			});
+		}
 	} catch (error) {
 		const result = fail(base, "apply", error instanceof Error ? error.message : String(error));
 		result.steps = steps.concat(result.steps);
@@ -820,6 +970,25 @@ export async function applySeries2026Levels(
 	}
 
 	const result: ApplyLevelsResult = { ...base, ok: true, steps };
+	if (eventErrors > 0) {
+		// Fail closed: the sweep continued past per-event errors (legacy:
+		// $errors++ and continue), but the apply as a whole is FAILED so the
+		// owner sees exactly which events need attention. Events that
+		// succeeded keep their rebuilt state; nothing is half-hidden.
+		const failed = fail(
+			result,
+			"distance_rebuild",
+			`${eventErrors} event(s) failed during the ${input.distance} rebuild; see event_error steps. Successful events were rebuilt; rerun after fixing the failures.`,
+		);
+		await logApply(
+			input.db,
+			{ distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: base.result_set_id, resultCount: base.result_count },
+			"FAILED",
+			failed.steps,
+			failed.error,
+		);
+		return failed;
+	}
 	await logApply(
 		input.db,
 		{ distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: base.result_set_id, resultCount: base.result_count },
