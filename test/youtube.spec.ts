@@ -159,6 +159,62 @@ describe("uploadVideo", () => {
 		// The public videos endpoint must never be called during upload.
 		expect(calls.some((c) => c.url.startsWith("https://www.googleapis.com/youtube/v3/videos"))).toBe(false);
 	});
+
+	it("streams the source in order when the length is known, carrying bytes across reads", async () => {
+		const env = await envWithCredential();
+		const original = new Uint8Array(20).map((_, i) => i);
+		const putRanges: (string | null)[] = [];
+		const putBodies: Uint8Array[] = [];
+		stubFetch((url, init) => {
+			if (url === "https://oauth2.googleapis.com/token") {
+				return jsonResponse({ access_token: "access-token" });
+			}
+			if (url === "https://videos.example.com/stream.mp4") {
+				if (init?.method === "HEAD") {
+					return new Response(null, {
+						status: 200,
+						headers: { "content-length": "20" },
+					});
+				}
+				// Deliver the body in 7+7+6 byte reads to force carry-over.
+				const stream = new ReadableStream<Uint8Array>({
+					start(controller) {
+						controller.enqueue(original.subarray(0, 7));
+						controller.enqueue(original.subarray(7, 14));
+						controller.enqueue(original.subarray(14, 20));
+						controller.close();
+					},
+				});
+				return new Response(stream, {
+					status: 200,
+					headers: { "content-type": "video/mp4" },
+				});
+			}
+			if (url.startsWith("https://www.googleapis.com/upload/youtube/v3/videos")) {
+				return new Response(null, {
+					status: 200,
+					headers: { location: "https://upload.example.com/session/xyz" },
+				});
+			}
+			if (url === "https://upload.example.com/session/xyz") {
+				putRanges.push(new Headers(init?.headers).get("content-range"));
+				putBodies.push(init?.body as Uint8Array);
+				return jsonResponse({ id: "vidStream" });
+			}
+			throw new Error(`unexpected fetch: ${url}`);
+		});
+
+		const result = await uploadVideo(env, {
+			sourceUrl: "https://videos.example.com/stream.mp4",
+			title: "Stream test",
+		});
+
+		expect(result.video_id).toBe("vidStream");
+		expect(result.privacy_status).toBe("unlisted");
+		expect(putRanges).toEqual(["bytes 0-19/20"]);
+		expect(putBodies).toHaveLength(1);
+		expect(Array.from(putBodies[0])).toEqual(Array.from(original));
+	});
 });
 
 describe("publishVideo", () => {

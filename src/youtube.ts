@@ -33,7 +33,8 @@ export const GOOGLE_YOUTUBE_DEFAULT_REDIRECT_URI =
 // memory bounded while streaming the source through the Worker.
 export const YOUTUBE_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 // Safety cap when the source length is unknown and must be buffered.
-const MAX_BUFFERED_BYTES = 512 * 1024 * 1024;
+// Kept well under the 128 MB Worker isolate memory limit.
+const MAX_BUFFERED_BYTES = 96 * 1024 * 1024;
 // YouTube category "Sports".
 const YOUTUBE_CATEGORY_SPORTS = "17";
 
@@ -580,35 +581,45 @@ export async function uploadVideo(
 			}
 		}
 	} else {
-		let pending = new Uint8Array(0);
-		let rangeIndex = 0;
+		// Streaming path: pull exactly one chunk at a time from the reader,
+		// carrying over at most one read's worth of bytes. Per-byte CPU work
+		// stays linear — important because Workers Free allows only 10 ms of
+		// CPU per request (network wait does not count, byte copies do).
 		const reader = streamReader!;
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (value) {
-				const merged = new Uint8Array(pending.byteLength + value.byteLength);
-				merged.set(pending, 0);
-				merged.set(value, pending.byteLength);
-				pending = merged;
+		let carry: Uint8Array | null = null;
+		const readChunkBytes = async (need: number): Promise<Uint8Array> => {
+			const out = new Uint8Array(need);
+			let offset = 0;
+			const takeFrom = (src: Uint8Array): void => {
+				const n = Math.min(src.byteLength, need - offset);
+				out.set(src.subarray(0, n), offset);
+				offset += n;
+				carry = n < src.byteLength ? src.subarray(n) : null;
+			};
+			if (carry) takeFrom(carry);
+			while (offset < need) {
+				const { done, value } = await reader.read();
+				if (value && value.byteLength > 0) takeFrom(value);
+				if (done) break;
 			}
-			while (rangeIndex < ranges.length) {
-				const [start, end] = ranges[rangeIndex];
-				const need = end - start + 1;
-				const isLast = rangeIndex === ranges.length - 1;
-				if (pending.byteLength < need && !(done && isLast)) break;
-				const chunk = pending.subarray(0, need);
-				const result = await putChunk(sessionUri, chunk, start, end, total, contentType);
-				pending = pending.subarray(need);
-				rangeIndex += 1;
-				if (result.done) {
-					return {
-						video_id: result.videoId!,
-						url: `https://www.youtube.com/watch?v=${result.videoId}`,
-						privacy_status: "unlisted",
-					};
-				}
+			return offset === need ? out : out.subarray(0, offset);
+		};
+		for (const [start, end] of ranges) {
+			const need = end - start + 1;
+			const chunk = await readChunkBytes(need);
+			if (chunk.byteLength < need) {
+				throw new Error(
+					`Source video ended early: expected ${total} bytes, the stream stopped mid-upload`,
+				);
 			}
-			if (done) break;
+			const result = await putChunk(sessionUri, chunk, start, end, total, contentType);
+			if (result.done) {
+				return {
+					video_id: result.videoId!,
+					url: `https://www.youtube.com/watch?v=${result.videoId}`,
+					privacy_status: "unlisted",
+				};
+			}
 		}
 	}
 	throw new Error("YouTube upload ended without a completed video resource");
