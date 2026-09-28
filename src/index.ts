@@ -94,6 +94,8 @@ import { renderCreationHtml, renderCreationPacketHtml } from "./operating-center
 // 7-section Operating Center rebuild (2026-09-28): one renderer per section.
 import { renderOverviewSectionHtml } from "./oc-overview";
 import { renderMarketingSectionHtml } from "./oc-marketing";
+import { OC_ICON_1024_BASE64 } from "./assets/oc-icon-1024";
+import { OC_ICON_180_BASE64 } from "./assets/oc-icon-180";
 import { renderGrowthSectionHtml } from "./oc-growth";
 import { renderSportSectionHtml } from "./oc-sport";
 import { renderAcademySectionHtml } from "./oc-academy";
@@ -243,6 +245,19 @@ function json(data: unknown, status = 200): Response {
 			"access-control-allow-origin": "*",
 			"access-control-allow-headers": "content-type",
 			"access-control-allow-methods": "GET, POST, OPTIONS",
+		},
+	});
+}
+
+/** Serve a base64-encoded PNG (app icon / favicon). Static, public, cacheable. */
+function pngFromBase64(b64: string): Response {
+	const bin = atob(b64);
+	const bytes = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+	return new Response(bytes, {
+		headers: {
+			"content-type": "image/png",
+			"cache-control": "public, max-age=86400",
 		},
 	});
 }
@@ -5784,13 +5799,13 @@ export default {
 			const legacyTop: Record<string, string> = {
 				"/results": "/operating-center/sport#results",
 				"/funds": "/operating-center/growth#funds",
-				"/media": "/operating-center/marketing#media",
+				"/media": "/operating-center/marketing?tab=media&view=summary",
 				"/uploads": "/operating-center/board#uploads",
 				"/sponsorship": "/operating-center/growth#sponsorship",
 				"/activity": "/operating-center/operations#activity",
-				"/sites": "/operating-center/marketing#sites",
-				"/social": "/operating-center/marketing#social",
-				"/ads": "/operating-center/marketing#ads",
+				"/sites": "/operating-center/marketing?tab=sites&view=summary",
+				"/social": "/operating-center/marketing?tab=social&view=summary",
+				"/ads": "/operating-center/marketing?tab=ads&view=summary",
 				"/sellers": "/operating-center/growth#sellers",
 				"/partners": "/operating-center/growth#partners",
 				"/fundraising": "/operating-center/growth#fundraising",
@@ -5844,6 +5859,13 @@ export default {
 				},
 			});
 		if (request.method === "GET" && url.pathname === "/operating-center") return htmlPage(renderOverviewSectionHtml);
+		// Operating Center app icon + favicon (static, public, cacheable).
+		if (request.method === "GET" && url.pathname === "/operating-center/icon-1024.png")
+			return pngFromBase64(OC_ICON_1024_BASE64);
+		if (request.method === "GET" && url.pathname === "/operating-center/icon-180.png")
+			return pngFromBase64(OC_ICON_180_BASE64);
+		if (request.method === "GET" && url.pathname === "/favicon.ico")
+			return pngFromBase64(OC_ICON_180_BASE64);
 		if (request.method === "GET" && url.pathname === "/operating-center/marketing") return htmlPage(renderMarketingSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/growth") return htmlPage(renderGrowthSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/sport") return htmlPage(renderSportSectionHtml);
@@ -5858,13 +5880,13 @@ export default {
 			const retired: Array<[string, string]> = [
 				["/operating-center/results", "/operating-center/sport#results"],
 				["/operating-center/funds", "/operating-center/growth#funds"],
-				["/operating-center/media", "/operating-center/marketing#media"],
+				["/operating-center/media", "/operating-center/marketing?tab=media&view=summary"],
 				["/operating-center/uploads", "/operating-center/board#uploads"],
 				["/operating-center/sponsorship", "/operating-center/growth#sponsorship"],
 				["/operating-center/activity", "/operating-center/operations#activity"],
-				["/operating-center/sites", "/operating-center/marketing#sites"],
-				["/operating-center/social", "/operating-center/marketing#social"],
-				["/operating-center/ads", "/operating-center/marketing#ads"],
+				["/operating-center/sites", "/operating-center/marketing?tab=sites&view=summary"],
+				["/operating-center/social", "/operating-center/marketing?tab=social&view=summary"],
+				["/operating-center/ads", "/operating-center/marketing?tab=ads&view=summary"],
 				["/operating-center/sellers", "/operating-center/growth#sellers"],
 				["/operating-center/partners", "/operating-center/growth#partners"],
 				["/operating-center/fundraising", "/operating-center/growth#fundraising"],
@@ -5878,7 +5900,7 @@ export default {
 			// Per-object pages keep their query in location.search so the
 			// inline Media review / Creation packet detail can read it.
 			if (url.pathname === "/operating-center/news/review")
-				return redirect301("/operating-center/marketing" + url.search + "#media");
+				return redirect301("/operating-center/marketing?tab=media&view=actions" + (url.search ? "&" + url.search.slice(1) : ""));
 			if (url.pathname === "/operating-center/creation/packet")
 				return redirect301("/operating-center/sport" + url.search + "#creation");
 		}

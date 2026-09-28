@@ -7,7 +7,6 @@
 // tab activation. The shell owns the owner-key gate (single gate per page);
 // tab scripts must NOT contain their own key-form handlers.
 
-import { OC_ICON_DATA_URI } from "./oc-icon";
 import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
 
 function escHtml(v: unknown): string {
@@ -44,6 +43,13 @@ export function ocSectionShell(opts: {
 	tabs: OcTab[];
 	/** Section body when there are no tabs (Overview). */
 	bodyHtml?: string;
+	/**
+	 * When true, tabs are addressed by the `tab` query parameter
+	 * (?tab=ads) with the History API instead of the URL hash (#ads).
+	 * Used by Marketing for deep-linkable tab+view URLs. Other sections
+	 * keep the default hash behavior.
+	 */
+	queryTabs?: boolean;
 	/** Rendered above the tab bar, outside the gate (rarely used). */
 	aboveTabsHtml?: string;
 	/** Rendered at the top of #app, after the gate unlocks (Marketing quick actions). */
@@ -83,6 +89,8 @@ export function ocSectionShell(opts: {
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width,initial-scale=1">
 	<title>${escHtml(opts.title)} — NWANA Operating Center</title>
+	<link rel="icon" type="image/png" href="/operating-center/icon-180.png">
+	<link rel="apple-touch-icon" href="/operating-center/icon-180.png">
 	<style>
 		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9;--warn:#b35400}
 		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
@@ -95,6 +103,11 @@ export function ocSectionShell(opts: {
 		.oc-tabs{background:#10261c;padding:14px clamp(20px,5vw,72px);display:flex;flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:5}
 		.oc-tab{border:1px solid #2f6247;background:transparent;color:#dce9e2;font-weight:650;padding:8px 16px;border-radius:8px;cursor:pointer;width:auto;margin:0}
 		.oc-tab:hover{background:#1c3a2a}.oc-tab-active{background:#fff;color:var(--brand);border-color:#fff}
+		.oc-func-desc{color:var(--muted);font-size:15px;margin:0 0 14px;max-width:70ch}
+		.oc-views{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}
+		.oc-view-btn{border:1px solid var(--brand);background:white;color:var(--brand);font-weight:700;padding:10px 22px;border-radius:9px;cursor:pointer;width:auto;margin:0}
+		.oc-view-btn:hover{background:var(--accent)}
+		.oc-view-btn.oc-view-active{background:var(--brand);color:white}
 		.oc-quick{background:white;border-bottom:1px solid var(--line);padding:16px clamp(20px,5vw,72px);display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 		.oc-quick span{font-weight:700;color:var(--brand);margin-right:6px}
 		.oc-quick button{width:auto;margin:0;background:#2f6247}
@@ -122,7 +135,7 @@ export function ocSectionShell(opts: {
 	</style>
 </head>
 <body>
-	<header><img src="${OC_ICON_DATA_URI}" alt="NWANA Operating Center icon" width="64" height="64"><div><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></div></header>
+	<header><img src="/operating-center/icon-180.png" alt="NWANA Operating Center icon" width="64" height="64"><div><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></div></header>
 	${operatingCenterMenu(opts.section)}
 	${opts.aboveTabsHtml ? `<div class="oc-quick">${opts.aboveTabsHtml}</div>` : ""}
 	${tabBar}
@@ -160,6 +173,7 @@ export function ocSectionShell(opts: {
 		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();__activateInitialTab()});
 		document.querySelector('#app').addEventListener('click',e=>{const b=e.target.closest('.oc-report-btn');if(!b)return;const panel=b.closest('.oc-tabpanel')||document;const m=panel.querySelector('.oc-report-message');downloadReport(b.dataset.screen,b.dataset.filename,m)});
 		${hasTabs ? `
+		const __QUERY_TABS=${opts.queryTabs ? "true" : "false"};
 		const __booted={};
 		function __activateTab(id){
 			let found=false;
@@ -169,10 +183,19 @@ export function ocSectionShell(opts: {
 			if(!__booted[id]){__booted[id]=1;const f=window['boot_'+id];if(typeof f==='function'){f().catch(e=>{const m=document.querySelector('#tabpanel-'+id+' .oc-tab-error');if(m)m.textContent='Error: '+(e&&e.message||e)})}}
 			return true;
 		}
-		function __tabFromHash(){return (location.hash||'').replace(/^#/,'').split('?')[0]||''}
-		function __activateInitialTab(){if(!__activateTab(__tabFromHash())){const first=document.querySelector('.oc-tab');if(first)__activateTab(first.dataset.tab)}}
-		document.querySelectorAll('.oc-tab').forEach(b=>b.addEventListener('click',()=>{if(location.hash==='#'+b.dataset.tab){__activateTab(b.dataset.tab)}else{location.hash=b.dataset.tab}}));
-		window.addEventListener('hashchange',()=>__activateInitialTab());
+		function __tabFromUrl(){
+			if(__QUERY_TABS){try{return new URLSearchParams(location.search).get('tab')||''}catch(e){return ''}}
+			return (location.hash||'').replace(/^#/,'').split('?')[0]||'';
+		}
+		function __navigateTab(id){
+			if(typeof window.__onTabNavigate==='function'){window.__onTabNavigate(id);return}
+			if(__QUERY_TABS){
+				const u=new URL(location.href);u.searchParams.set('tab',id);history.pushState({},'',u);__activateTab(id);
+			}else if(location.hash==='#'+id){__activateTab(id)}else{location.hash=id}
+		}
+		function __activateInitialTab(){if(!__activateTab(__tabFromUrl())){const first=document.querySelector('.oc-tab');if(first)__activateTab(first.dataset.tab)}}
+		document.querySelectorAll('.oc-tab').forEach(b=>b.addEventListener('click',()=>__navigateTab(b.dataset.tab)));
+		if(__QUERY_TABS){window.addEventListener('popstate',()=>__activateInitialTab())}else{window.addEventListener('hashchange',()=>__activateInitialTab())}
 		` : `
 		function __activateInitialTab(){}
 		`}

@@ -12,7 +12,7 @@ import { ocSectionShell } from "./oc-shell";
 
 /** Standard honest empty state: Moodle at academy.nwaofna.org is not connected. */
 function emptyState(title: string, whatWillLiveHere: string): string {
-	return `<section class="panel"><h2>${title}</h2><p class="unavailable">No data yet — Moodle is not connected.</p><p class="meta">What will live here: ${whatWillLiveHere}. Data source: Moodle at academy.nwaofna.org.</p><button type="button" disabled>Подключить Moodle</button><p class="meta">Next step: the owner connects Moodle (academy.nwaofna.org) and grants the Machine read access; courses, students and certifications then appear here automatically. This button is a placeholder — no integration is faked.</p></section>`;
+	return `<section class="panel"><h2>${title}</h2><p class="unavailable">No data yet — Moodle is not connected.</p><p class="meta">What will live here: ${whatWillLiveHere}. Data source: Moodle at academy.nwaofna.org.</p><button type="button" disabled>Connect Moodle</button><p class="meta">Next step: the owner connects Moodle (academy.nwaofna.org) and grants the Machine read access; courses, students and certifications then appear here automatically. This button is a placeholder — no integration is faked.</p></section>`;
 }
 
 /** Minimal per-tab boot function — the shell requires `async function boot_<tabid>()`. Panels are static. */
