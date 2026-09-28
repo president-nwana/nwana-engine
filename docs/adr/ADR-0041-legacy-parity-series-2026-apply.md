@@ -1,16 +1,32 @@
 # ADR-0041 — Legacy parity: port NWANA-FINAL.ps1 result-processing semantics into the Series 2026 apply path
 
 Date: 2026-09-27
-Status: UPDATED. The first apply after this ADR (Event 1177636, 2026-09-27)
-uploaded ONLY the new event's standings with `clear_previous_results=T` and
-destroyed the historical 3K series standings — the "single event per run"
-scope reduction below was WRONG. Superseded by the distance-scoped rebuild
-on branch `feature/series-2026-standings-rebuild`: one owner-confirmed apply
-now rebuilds the WHOLE distance (every event, every result set), exactly like
-the legacy sweep. Hard rule: `clear_previous_results=T` is only ever executed
-inside a full-scope rebuild; a single-event clear+upload without rebuilding
-the scope is forbidden. Regression gate: multi-event rebuild test +
-idempotency test (`test/series-2026-standings-rebuild.spec.ts`).
+Status: UPDATED (correction 2026-09-27 ~20:00 EDT). The first apply after
+this ADR (Event 1177636, 2026-09-27) destroyed the historical 3K series
+standings. The initial diagnosis ("per-event clear_previous_results=T wiped
+history") was IMPRECISE. The precise mechanism, established by re-reading
+NWANA-FINAL.ps1 line by line:
+
+- The standings upload URL carries `event_id`, so `clear_previous_results=T`
+  is scoped to (series, year, race, EVENT, scoring type). The legacy script
+  itself does per-event clear+upload on every run — it is safe by construction.
+- The historical standings lived under the 10 legacy pre-v4 scoring-type
+  names/IDs (186, 187, 188, 189, 190, 191, 226, 227, 228, 229).
+- The Machine's apply (1) created the 10 v4 types, (2) uploaded ONLY the new
+  event's rows into the v4 types, then (3) ran the legacy scoring-type cleanup,
+  which DELETED the 10 legacy types — and with them every historical standings
+  row. The public leaderboard then showed only the v4 types with a single event.
+- NWANA-FINAL.ps1 deletes legacy types only AFTER rebuilding ALL events under
+  the new names. The Machine deleted them after rebuilding ONE event.
+
+Corrected hard rule: legacy scoring-type cleanup may run ONLY after the full
+distance has been rebuilt into the current types with zero errors. (The
+"clear only inside a full rebuild" rule stands as defense in depth.)
+Superseded by the distance-scoped rebuild on branch
+`feature/series-2026-standings-rebuild`: one owner-confirmed apply now rebuilds
+the WHOLE distance (every event, every result set), exactly like the legacy
+sweep. Regression gate: multi-event rebuild test + idempotency test
+(`test/series-2026-standings-rebuild.spec.ts`).
 
 ## Context
 
