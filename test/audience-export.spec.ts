@@ -663,4 +663,12 @@ describe("scrubSponsorText", () => {
 			"Missing [credential] [credential]; check the owner [credential] and the [credential] value.",
 		);
 	});
+	it("does not scrub geographic names like Key West", () => {
+		expect(scrubSponsorText("Participant from Key West, Florida")).toBe(
+			"Participant from Key West, Florida",
+		);
+		expect(scrubSponsorText("The API key for Key Largo access")).toBe(
+			"The API [credential] for Key Largo access",
+		);
+	});
 });

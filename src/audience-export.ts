@@ -124,12 +124,24 @@ export function scrubSponsorText(value: string): string {
 	// Sentinel placeholder keeps the replacement idempotent: "[credential]"
 	// itself matches the credential word pattern, so protect it first.
 	const PLACEHOLDER = "\u0000CRED\u0000";
+	const GEO_PLACEHOLDER = "\u0000GEOKEY\u0000";
 	let out = value.split("[credential]").join(PLACEHOLDER);
+	// Geographic names like "Key West" are not credential references:
+	// protect "Key <Capitalized>" before the generic word scrub.
+	const geoKeys: string[] = [];
+	out = out.replace(/\bKey [A-Z][a-z]+\b/g, (m) => {
+		geoKeys.push(m);
+		return `${GEO_PLACEHOLDER}${geoKeys.length - 1}\u0000`;
+	});
 	for (const id of CREDENTIAL_IDENTIFIERS) {
 		out = out.split(id).join(PLACEHOLDER);
 	}
 	out = out.replace(CREDENTIAL_WORD, PLACEHOLDER);
-	return out.split(PLACEHOLDER).join("[credential]");
+	out = out.split(PLACEHOLDER).join("[credential]");
+	geoKeys.forEach((original, i) => {
+		out = out.split(`${GEO_PLACEHOLDER}${i}\u0000`).join(original);
+	});
+	return out;
 }
 
 /** Recursively scrub every string in an export payload. */
