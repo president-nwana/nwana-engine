@@ -83,6 +83,8 @@ import {
 } from "./operating-center";
 import { renderFundsHtml } from "./operating-center-funds";
 import { renderMediaHtml } from "./operating-center-media";
+import { renderNewsReviewHtml } from "./operating-center-news-review";
+import { approveNewsReview, getNewsReview, markDistributionSent } from "./news-review";
 import { getExecutiveMoneyView } from "./operating-center-money";
 import { renderSponsorshipHtml } from "./operating-center-sponsorship";
 import { renderActivityHtml } from "./operating-center-activity";
@@ -5803,7 +5805,8 @@ export default {
 					url.pathname === "/operating-center/meetings" ||
 					url.pathname === "/operating-center/operations" ||
 					url.pathname === "/operating-center/creation" ||
-					url.pathname === "/operating-center/creation/packet")
+					url.pathname === "/operating-center/creation/packet" ||
+					url.pathname === "/operating-center/news/review")
 			);
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
@@ -5844,6 +5847,19 @@ export default {
 		// ADR-0021: the media plan workspace lives on its own page.
 		if (request.method === "GET" && url.pathname === "/operating-center/media") {
 			return new Response(renderMediaHtml(), {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+				},
+			});
+		}
+
+		// News distribution review: one page per news article showing the
+		// item, its content variants, and every prepared distribution action
+		// with the exact text per channel. Owner-key gate is enforced by the
+		// page's key form + the API routes below.
+		if (request.method === "GET" && url.pathname === "/operating-center/news/review") {
+			return new Response(renderNewsReviewHtml(), {
 				headers: {
 					"content-type": "text/html; charset=utf-8",
 					"cache-control": "no-store",
@@ -6069,6 +6085,19 @@ export default {
 		// ADR-0021: media plan API.
 		if (url.pathname === "/api/operating-center/media/overview" && request.method === "GET") {
 			return getMediaOverview(env.nwana_engine_db);
+		}
+		// News distribution review API (owner-key gated by the
+		// operatingCenterApiRoute gate above).
+		if (url.pathname === "/api/operating-center/news/review" && request.method === "GET") {
+			return getNewsReview(env.nwana_engine_db, url.searchParams.get("article_id") ?? "");
+		}
+		if (url.pathname === "/api/operating-center/news/review/approve" && request.method === "POST") {
+			const body = (await request.json().catch(() => ({}))) as { article_id?: string };
+			return approveNewsReview(env.nwana_engine_db, body.article_id ?? "");
+		}
+		if (url.pathname === "/api/operating-center/news/review/mark-sent" && request.method === "POST") {
+			const body = (await request.json().catch(() => ({}))) as { distribution_id?: string };
+			return markDistributionSent(env.nwana_engine_db, body.distribution_id ?? "");
 		}
 		if (url.pathname === "/api/operating-center/media/plans" && request.method === "GET") {
 			return listMediaPlans(env.nwana_engine_db);
