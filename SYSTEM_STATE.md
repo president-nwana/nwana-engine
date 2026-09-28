@@ -19,6 +19,34 @@ Read before making changes:
 6. relevant docs/adr/
 7. AGENTS.md
 
+## SERIES RESULT LIFECYCLE — ADR-0042 (2026-09-28)
+
+- Standing rule: the owner's single reserved action is approving an athlete's result. After approval the Machine runs the full downstream lifecycle autonomously: registration check → levels/places/points → standings → website results / Winners → winner news → social distribution → next-race promotion. No per-step owner confirmations. The Machine never approves anything itself.
+- Trigger per event: A) every expected participant submitted and every result owner-approved, OR B) the official submission deadline passed (only approved results are processed; missing/unsubmitted/unapproved surface as exceptions).
+- Data: `series_result_approvals` (migration 0044, applied to production D1 2026-09-28), `series_event_deadlines`, `series_auto_process_log`. Approval source: 'oc' | 'chat' | 'import'.
+- Endpoints (owner-key gated): `GET /api/operating-center/series-2026/results/pending`, `POST .../approve`, `POST .../process-now`, `GET .../pipeline`. The approve endpoint refuses results not present in live RunSignup data.
+- OC Sport → Results rebuilt: approval UI in Actions, athlete pipeline table in Details (Registered → Submitted → Approved → Processed → Published), manual Publish removed from the standard flow.
+- Deadline wake-up: one daily cron `17 6 * * *` (06:17 UTC) evaluates every Series 2026 event and auto-processes fired ones; already-PUBLISHED events are skipped via `isEventPublished`. Operating cost: VERIFIED $0 (1 cron execution = 1 request of the 100k/day Workers Free allowance; 2/5 free-plan cron slots used — the pre-existing `*/5 * * * *` trigger has no handler in code and was left untouched).
+- 5K event 1173956 (2026-09-27): 3 owner approvals recorded 2026-09-28 with source='chat' — 232506108 ALBERT FATIKHOV 30:38, 232506109 Susan Otto 36:35, 232539417 Michael Blanchard 39:11 (all three live-verified against RunSignup's public results API). Levels/points/standings/publication pending the next trigger evaluation (daily cron 06:17 UTC, or owner's "Process now" in the OC).
+- Commit bdb7c736 on origin/main; engine Worker deployed (version 64aee570). Tests 583/583, tsc clean.
+
+## READ THIS FIRST
+
+Do not reconstruct NWANA Engine from chat memory.
+Do not infer RunSignup/TicketSignup object meaning from names.
+Do not infer capabilities from hierarchy, URLs, titles, or internal object IDs.
+Do not treat a RunSignup "race" container as a real competition unless the canonical Registry says it is one.
+If a platform fact is not verified, record it as UNKNOWN rather than guessing.
+
+Read before making changes:
+1. MACHINE_PURPOSE.md
+2. OPERATING_PLAN.md — current execution contract; it supersedes conflicting older chronological notes below
+3. SYSTEM_STATE.md
+4. registry/README.md when Registry facts are relevant
+5. registry/objects.yaml when Registry facts are relevant
+6. relevant docs/adr/
+7. AGENTS.md
+
 ## EMAIL INTEGRATION BOUNDARY — OWNER CORRECTION 2026-09-19
 
 - Google Workspace email is not an NWANA Engine integration.
