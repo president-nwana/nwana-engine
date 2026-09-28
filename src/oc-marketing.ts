@@ -55,18 +55,30 @@ const ADS_SCRIPT = `
 	async function ads_fetchOverview(){
 		return await api('/api/operating-center/ads/overview');
 	}
+	// Parameterized live Google Ads metrics (campaigns, ad groups, geo,
+	// conversion actions) from the canonical metrics layer. Never throws:
+	// the summary renders the overview even when this read fails.
+	async function ads_fetchMetricsLast30(){
+		try{
+			const d=await api('/api/operating-center/ads/metrics?preset=last30');
+			return {ok:true,data:d};
+		}catch(err){return {ok:false,error:err.message||String(err),data:null}}
+	}
 	function ads_connBadge(connected){
 		return connected ? '<span class="badge-ok">Connected</span>' : '<span class="badge-warn">Not connected</span>';
 	}
 	async function boot_ads_summary(){
 		const box=document.querySelector('#ads-sum');
 		try{
-			const data=await ads_fetchOverview();
+			const results=await Promise.all([ads_fetchOverview(),ads_fetchMetricsLast30()]);
+			const data=results[0];
+			const m30=results[1];
 			const ads=data.google_ads;
 			const live=data.live_account;
 			const gc=data.grants_compliance;
 			const proposals=data.machine_proposals||[];
 			const proposed=proposals.filter(p=>p.state==='PROPOSED').length;
+			const attn=[];
 			let html='<div class="item"><strong>Google Ads '+ads_connBadge(ads.connected)+'</strong><div class="detail">'+esc(ads.note)+'</div></div>';
 			if(live&&live.available&&!live.error){
 				const cs=live.campaigns||[];
@@ -81,8 +93,26 @@ const ADS_SCRIPT = `
 				const below=(gc.campaigns||[]).filter(c=>c.below_threshold).length;
 				html+='<div class="item"><strong>Ad Grants compliance '+gb+'</strong><div class="detail">Account CTR '+(gc.account_ctr!=null?(gc.account_ctr*100).toFixed(2)+'%':'n/a')+' · '+below+' campaign(s) below the 5% threshold · '+esc(gc.date_range)+'</div></div>';
 			}
+			// Parameterized live metrics (last 30 days) from the canonical
+			// metrics layer. OWNER_ACTION_REQUIRED renders the exact owner
+			// action text instead of a generic error.
+			if(m30.ok&&m30.data&&m30.data.ok){
+				const t=m30.data.account_totals||{};
+				const ctr=(t.ctr!=null?(Number(t.ctr)*100).toFixed(2)+'%':'n/a');
+				html+='<div class="item"><strong>Last 30 days <span class="badge-ok">live</span></strong>'
+					+'<div class="detail">'+Number(t.impressions||0).toLocaleString('en-US')+' impressions · '+Number(t.clicks||0).toLocaleString('en-US')+' clicks · CTR '+ctr+' · Spend $'+Number(t.cost_usd||0).toFixed(2)+' · '+Number(t.conversions||0)+' conversions</div>'
+					+'<div class="detail">Period '+esc(m30.data.period.start)+' to '+esc(m30.data.period.end)+' · '+esc(m30.data.data_quality)+'</div>'
+					+'<div class="detail">Full breakdown (campaigns, ad groups, geo, conversion actions): <code>GET /api/operating-center/ads/metrics?preset=last30</code> — the endpoint needs the Operating Center key.</div></div>';
+			}else{
+				const dq=m30.data&&m30.data.data_quality;
+				const note=(m30.data&&(m30.data.error||m30.data.quality_note))||m30.error||'Could not read parameterized metrics.';
+				const needsOwner=dq==='OWNER_ACTION_REQUIRED';
+				html+='<div class="item"><strong>Last 30 days metrics '+(needsOwner?'<span class="badge-warn">owner action required</span>':'<span class="badge-warn">unavailable</span>')+'</strong>'
+					+'<div class="detail">'+esc(note)+'</div>'
+					+'<div class="detail">Full breakdown endpoint: <code>GET /api/operating-center/ads/metrics?preset=last30</code></div></div>';
+				if(needsOwner)attn.push('Google Ads metrics need an owner action: '+note);
+			}
 			html+='<div class="item"><strong>Machine proposals</strong><div class="detail">'+proposed+' proposed · '+proposals.length+' total in the current set</div></div>';
-			const attn=[];
 			if(!ads.connected)attn.push('Google Ads is not connected — connect it in Actions to let the Machine read the account.');
 			if(ads.error)attn.push('Ads connection error: '+ads.error);
 			if(gc&&gc.available&&gc.status!=='ok')attn.push('Ad Grants compliance is '+gc.status.toUpperCase()+' — review the per-campaign CTR in Details.');
@@ -207,6 +237,34 @@ const ANALYTICS_SCRIPT = `
 		try{ return await api('/api/operating-center/analytics/traffic'); }
 		catch(err){ return { ok:false, error: err.message||String(err) }; }
 	}
+	// Canonical GA4 audience report: last 7 days vs prior 7 days, with
+	// percent changes (sessions, views, users). Never throws: the traffic
+	// card above renders even when this read fails.
+	async function analytics_fetchAudience(){
+		try{
+			const d=await api('/api/operating-center/analytics/audience?preset=last7&compare=1');
+			return {ok:true,data:d};
+		}catch(err){return {ok:false,error:err.message||String(err),data:null}}
+	}
+	function ga4_fmtPct(p){
+		if(p===null||p===undefined)return 'n/a';
+		return (p>=0?'+':'')+Number(p).toFixed(2)+'%';
+	}
+	function ga4_audienceHtml(a){
+		const rows=[['sessions','Sessions'],['screenPageViews','Views'],['totalUsers','Users']];
+		let html='<div class="item"><strong>GA4 audience — last 7 days vs prior 7 days <span class="badge-ok">live</span></strong>';
+		for(const e of rows){
+			const t=a.totals[e[0]];
+			if(!t||!t.current){html+='<div class="detail">'+e[1]+': not returned</div>';continue}
+			const cur=Number(t.current.value)||0;
+			const prior=t.prior!=null?Number(t.prior.value):null;
+			html+='<div class="detail">'+e[1]+': <strong>'+cur.toLocaleString('en-US')+'</strong>'+(prior!==null?' (prior '+prior.toLocaleString('en-US')+')':'')+' · change '+ga4_fmtPct(t.percent_change)+'</div>';
+		}
+		html+='<div class="detail">Period '+esc(a.period_start)+' to '+esc(a.period_end)+' vs '+esc(a.compare_period_start)+' to '+esc(a.compare_period_end)+' · fetched '+esc(a.fetched_at)+' · '+esc(a.data_quality)+'</div>';
+		html+='<div class="detail">Full audience report: <code>GET /api/operating-center/analytics/audience?preset=last7&compare=1</code> — the endpoint needs the Operating Center key.</div>';
+		html+='</div>';
+		return html;
+	}
 	async function analytics_fetchGa(){
 		try{ const d=await api('/api/operating-center/ads/overview'); return d.google_analytics||{}; }
 		catch(err){ return { connected:false, error: err.message||String(err) }; }
@@ -226,6 +284,13 @@ const ANALYTICS_SCRIPT = `
 			html+='<div class="detail">'+esc(t.error||'No traffic data returned.')+'</div>';
 		}
 		html+='</div>';
+		const aud=await analytics_fetchAudience();
+		if(aud.ok&&aud.data&&aud.data.ok&&aud.data.totals){
+			html+=ga4_audienceHtml(aud.data);
+		}else{
+			const note=(aud.data&&(aud.data.error||aud.data.quality_note))||aud.error||'Could not read GA4 audience metrics.';
+			html+='<div class="item"><strong>GA4 audience — last 7 days vs prior 7 days <span class="badge-warn">unavailable</span></strong><div class="detail">'+esc(note)+'</div></div>';
+		}
 		const attn=[];
 		if(!ga.connected)attn.push('Google Analytics is not connected — connect it in Actions so the Machine can read traffic.');
 		html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(esc).join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
@@ -328,6 +393,75 @@ const SOCIAL_SCRIPT = `
 	async function social_fetchOverview(){
 		return await api('/api/operating-center/social/overview');
 	}
+	// Live Meta read: per-destination metrics from the production Meta
+	// integration (followers, posts, reach, impressions, ...). Never throws:
+	// callers fall back to the static last-known list when this fails.
+	async function social_fetchLiveOverview(){
+		try{
+			const d=await api('/api/operating-center/social/overview?live=1');
+			if(d&&d.ok&&(d.destinations||[]).length)return {ok:true,data:d};
+			return {ok:false,error:(d&&d.error)||'The live Meta read returned no destinations.'};
+		}catch(err){return {ok:false,error:err.message||String(err)}}
+	}
+	function social_findMetric(metrics,name){
+		for(const m of (metrics||[])){if(m.metric_name===name)return m}
+		return null;
+	}
+	function social_fmtNum(v){
+		const n=Number(v);
+		return isFinite(n)?n.toLocaleString('en-US'):esc(String(v));
+	}
+	function social_qualityBadge(q){
+		if(q==='LIVE_VERIFIED')return '<span class="badge-ok">live</span>';
+		return '<span class="badge-warn">'+esc(String(q||'unknown'))+'</span>';
+	}
+	function social_lastRefresh(d,dest){
+		const f=social_findMetric(dest.metrics,'followers');
+		if(f&&f.fetched_at)return f.fetched_at;
+		if(dest.metrics&&dest.metrics.length&&dest.metrics[0].fetched_at)return dest.metrics[0].fetched_at;
+		return d.generated_at||'';
+	}
+	// Live summary card per destination: live follower counts, posts, reach,
+	// impressions, plus last refresh and data quality. Never hardcodes a
+	// number — every value comes from the live read above.
+	function social_liveSummaryHtml(d){
+		let html='';
+		for(const dest of (d.destinations||[])){
+			const f=social_findMetric(dest.metrics,'followers');
+			const posts=social_findMetric(dest.metrics,'posts');
+			const reach=social_findMetric(dest.metrics,'reach');
+			const impr=social_findMetric(dest.metrics,'impressions');
+			html+='<div class="item"><strong>'+esc(dest.platform)+' — '+esc(dest.name)+' '+social_qualityBadge(dest.data_quality)+'</strong>';
+			const parts=[];
+			if(f)parts.push('Followers: <strong>'+social_fmtNum(f.value)+'</strong>');
+			if(posts)parts.push('Posts: '+social_fmtNum(posts.value));
+			if(reach)parts.push('Reach: '+social_fmtNum(reach.value));
+			if(impr)parts.push('Impressions: '+social_fmtNum(impr.value));
+			if(parts.length)html+='<div class="detail">'+parts.join(' · ')+'</div>';
+			else html+='<div class="detail unavailable">No live metrics returned for this destination.</div>';
+			if(dest.error)html+='<div class="detail unavailable">'+esc(dest.error)+'</div>';
+			html+='<div class="meta">Last refresh: '+esc(social_lastRefresh(d,dest))+' · data quality: '+esc(dest.data_quality)+'</div></div>';
+		}
+		return html;
+	}
+	// Static fallback: the recorded account list, explicitly labeled as last
+	// known and NOT live. Observed dates are kept verbatim (2026-09-22).
+	async function social_staticSummaryHtml(note){
+		let html='<div class="item"><strong>Live social metrics <span class="badge-warn">unavailable</span></strong>';
+		if(note)html+='<div class="detail">'+esc(note)+'</div>';
+		html+='<div class="detail">Showing last known values below — these are <strong>not</strong> live.</div></div>';
+		const data=await social_fetchOverview();
+		for(const a of (data.accounts||[])){
+			html+='<div class="item"><strong>'+esc(a.platform)+' — '+esc(a.handle)+' <span class="badge-warn">last known</span></strong>';
+			if(a.stats&&a.stats.length){
+				html+='<div class="detail">Last known (observed 2026-09-22): '+a.stats.map(function(s){return esc(s.label)+': <strong>'+esc(s.value)+'</strong>'}).join(' · ')+'</div>';
+			}else{
+				html+='<div class="detail unavailable">No verified statistics recorded for this account (last known: none).</div>';
+			}
+			html+='<div class="detail">'+esc(a.note)+'</div></div>';
+		}
+		return html;
+	}
 	async function social_fetchYtStatus(){
 		try{ return await api('/integrations/youtube/status'); }
 		catch(err){ return { connected:false, error: err.message||String(err) }; }
@@ -340,24 +474,38 @@ const SOCIAL_SCRIPT = `
 	}
 	async function boot_social_summary(){
 		const box=document.querySelector('#social-sum');
-		try{
-			const data=await social_fetchOverview();
-			const yt=await social_fetchYtStatus();
-			let html='';
-			for(const a of (data.accounts||[])){
-				html+='<div class="item"><strong>'+esc(a.platform)+' — '+esc(a.handle)+' '+social_statusBadge(a.status)+'</strong><div class="detail">'+esc(a.note)+'</div></div>';
+		// Live Meta read and YouTube status are independent: one failing never
+		// blocks the other, and the static last-known list only shows when the
+		// live read fails.
+		const [live,yt]=await Promise.all([social_fetchLiveOverview(),social_fetchYtStatus()]);
+		let html='';
+		let liveDests=[];
+		let usedLive=false;
+		if(live.ok){
+			usedLive=true;
+			liveDests=live.data.destinations||[];
+			html+='<div class="item"><strong>Live social metrics <span class="badge-ok">live</span></strong><div class="detail">Period '+esc(live.data.period.start)+' to '+esc(live.data.period.end)+' · fetched '+esc(live.data.generated_at)+'</div></div>';
+			html+=social_liveSummaryHtml(live.data);
+		}else{
+			try{ html+=await social_staticSummaryHtml(live.error); }
+			catch(err){ html='<div class="unavailable">'+esc(err.message||String(err))+'</div>'; }
+		}
+		html+='<div class="item"><strong>YouTube '+(yt.connected?'<span class="badge-ok">connected</span>':'<span class="badge-warn">not connected</span>')+'</strong>';
+		if(yt.connected)html+='<div class="detail">Channel: '+esc(yt.channel_title||yt.channel_id||'')+'</div>';
+		else html+='<div class="detail">'+esc(yt.error||'No OAuth credential stored yet.')+'</div>';
+		html+='</div>';
+		const attn=[];
+		if(usedLive){
+			for(const d of liveDests){
+				if(d.data_quality!=='LIVE_VERIFIED'&&d.data_quality!=='LIVE_PARTIAL')attn.push(d.platform+' ('+d.name+'): '+d.data_quality+(d.error?' — '+d.error:''));
 			}
-			html+='<div class="item"><strong>YouTube '+(yt.connected?'<span class="badge-ok">connected</span>':'<span class="badge-warn">not connected</span>')+'</strong>';
-			if(yt.connected)html+='<div class="detail">Channel: '+esc(yt.channel_title||yt.channel_id||'')+'</div>';
-			else html+='<div class="detail">'+esc(yt.error||'No OAuth credential stored yet.')+'</div>';
-			html+='</div>';
-			const attn=[];
-			for(const a of (data.accounts||[])){const v=String(a.status||'').toLowerCase();if(v.indexOf('not')>=0||v.indexOf('dis')>=0)attn.push(a.platform+' ('+a.handle+') needs attention: '+a.status);}
-			if(!yt.connected)attn.push('YouTube is not connected — connect it in Actions to enable uploads.');
-			html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(esc).join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
-			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Monitors the connected accounts and prepares distribution packs on demand. Posting itself is always manual.</div></div>';
-			box.innerHTML=html;
-		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}else{
+			attn.push('Live social metrics are unavailable — showing last known values. Restore the Meta read to see live numbers.');
+		}
+		if(!yt.connected)attn.push('YouTube is not connected — connect it in Actions to enable uploads.');
+		html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(esc).join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
+		html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Read the Meta destinations live on demand. Posting itself is always manual.</div></div>';
+		box.innerHTML=html;
 	}
 	async function social_buildPacks(){
 		const idEl=document.querySelector('#pack-id');
@@ -458,11 +606,31 @@ const SOCIAL_SCRIPT = `
 	}
 	async function boot_social_details(){
 		const box=document.querySelector('#social-det');
+		// Live per-destination metric tables first; the static last-known list
+		// only renders when the live read fails.
+		const live=await social_fetchLiveOverview();
+		if(live.ok){
+			let html='<div class="detail">Live Meta destinations · period '+esc(live.data.period.start)+' to '+esc(live.data.period.end)+' · fetched '+esc(live.data.generated_at)+'</div>';
+			for(const dest of (live.data.destinations||[])){
+				html+='<div class="item"><strong>'+esc(dest.platform)+' — '+esc(dest.name)+' '+social_qualityBadge(dest.data_quality)+'</strong>';
+				const ms=dest.metrics||[];
+				if(ms.length){
+					html+='<table class="data"><thead><tr><th>Metric</th><th>Value</th><th>Period</th><th>Refreshed</th></tr></thead><tbody>'+
+						ms.map(function(m){return '<tr><td>'+esc(m.metric_name)+'</td><td>'+social_fmtNum(m.value)+'</td><td>'+esc(m.period_start)+' – '+esc(m.period_end)+'</td><td>'+esc(m.fetched_at)+'</td></tr>'}).join('')+'</tbody></table>';
+				}else{
+					html+='<div class="detail unavailable">No live metrics returned for this destination.</div>';
+				}
+				if(dest.error)html+='<div class="detail unavailable">'+esc(dest.error)+'</div>';
+				html+='<div class="meta">Status: '+esc(dest.data_quality)+'</div></div>';
+			}
+			box.innerHTML=html;
+			return;
+		}
 		try{
 			const data=await social_fetchOverview();
-			let html='';
+			let html='<div class="item"><strong>Live social metrics <span class="badge-warn">unavailable</span></strong><div class="detail">'+esc(live.error||'The live Meta read failed.')+'</div><div class="detail">Last known values below — <strong>not</strong> live (observed 2026-09-22).</div></div>';
 			for(const a of (data.accounts||[])){
-				html+='<div class="item"><strong>'+esc(a.platform)+' — '+esc(a.handle)+' '+social_statusBadge(a.status)+'</strong>';
+				html+='<div class="item"><strong>'+esc(a.platform)+' — '+esc(a.handle)+' <span class="badge-warn">last known</span> '+social_statusBadge(a.status)+'</strong>';
 				if(a.url)html+='<div class="detail"><a href="'+esc(a.url)+'" target="_blank" rel="noopener">'+esc(a.url)+'</a></div>';
 				if(a.stats&&a.stats.length){
 					html+='<table class="data"><tbody>'+a.stats.map(function(s){return '<tr><th>'+esc(s.label)+'</th><td>'+esc(s.value)+'</td></tr>'}).join('')+'</tbody></table>';

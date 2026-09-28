@@ -12,6 +12,11 @@
 // This module is read-only against RunSignup and never touches race_event_results.
 
 import { SERIES_2026_SOURCES } from "./series-2026-results";
+import {
+	classifyRunSignupFailure,
+	type RunSignupFailureInterpretation,
+	runSignupGetJson,
+} from "./runsignup-client";
 
 export interface RunSignupParticipantFetchOptions {
 	accessToken: string;
@@ -89,28 +94,35 @@ export function parseParticipant(
 	};
 }
 
-function prepareRequest(
-	url: URL,
-	options: RunSignupParticipantFetchOptions,
-): HeadersInit {
-	const headers: Record<string, string> = {
-		Authorization: `Bearer ${options.accessToken}`,
-	};
-	if (options.apiCallerToken && options.apiCallerSecret) {
-		url.searchParams.set("rsu_api_reg", options.apiCallerToken);
-		headers["X-RSU-API-REG-SECRET"] = options.apiCallerSecret;
-	}
-	return headers;
+/**
+ * Error surfaced by the RunSignup participants endpoint instead of data.
+ * Never inferred: comes from the API error body or the HTTP status.
+ */
+export interface FetchedParticipantApiError {
+	errorCode?: number;
+	errorMsg: string;
+	httpStatus?: number;
+}
+
+export interface FetchRaceParticipantsResult {
+	raceName: string | null;
+	participants: FetchedParticipant[];
+	/** Set when RunSignup returned an API/HTTP error instead of data. */
+	apiError?: FetchedParticipantApiError;
 }
 
 /**
  * Fetch all participant records for one race, following pagination.
  * Returns the raw race name seen in the response for labeling.
+ *
+ * API/HTTP errors are returned as apiError, never thrown: RunSignup reports
+ * errors as HTTP 200 + {"error": {"error_code": N, ...}}, which the old
+ * response.ok check silently treated as an empty participant list.
  */
 export async function fetchRaceParticipants(
 	raceId: number,
 	options: RunSignupParticipantFetchOptions,
-): Promise<{ raceName: string | null; participants: FetchedParticipant[] }> {
+): Promise<FetchRaceParticipantsResult> {
 	const perPage = Math.min(Math.max(options.perPage ?? 1000, 1), 1000);
 	const maxPages = Math.min(Math.max(options.maxPages ?? 50, 1), 200);
 	const participants: FetchedParticipant[] = [];
@@ -121,16 +133,25 @@ export async function fetchRaceParticipants(
 		url.searchParams.set("format", "json");
 		url.searchParams.set("page", String(page));
 		url.searchParams.set("results_per_page", String(perPage));
-		const response = await fetch(url.toString(), {
-			headers: prepareRequest(url, options),
-		});
-		if (!response.ok) {
-			const body = await response.text().catch(() => "");
-			throw new Error(
-				`RunSignup participants request failed: ${response.status} ${response.statusText} for race ${raceId} :: ${body.slice(0, 500)}`,
-			);
+		const result = await runSignupGetJson<UnknownRecord>(
+			url,
+			options.accessToken,
+			prepareExtraHeaders(url, options),
+		);
+		if (!result.ok) {
+			return {
+				raceName,
+				participants,
+				apiError: {
+					errorCode: result.api_error_code,
+					errorMsg:
+						result.api_error_msg ??
+						`RunSignup participants request failed (HTTP ${result.http_status ?? "unknown"})`,
+					httpStatus: result.http_status,
+				},
+			};
 		}
-		const data = (await response.json()) as UnknownRecord;
+		const data = result.data ?? {};
 		const list = Array.isArray(data.participants) ? data.participants : [];
 		if (raceName === null) {
 			const race = asRecord(data.race);
@@ -143,6 +164,108 @@ export async function fetchRaceParticipants(
 		if (list.length < perPage) break;
 	}
 	return { raceName, participants };
+}
+
+/**
+ * Set the API-caller registration pair (query param + header) and return any
+ * extra headers for the request.
+ */
+function prepareExtraHeaders(
+	url: URL,
+	options: RunSignupParticipantFetchOptions,
+): Record<string, string> {
+	if (options.apiCallerToken && options.apiCallerSecret) {
+		url.searchParams.set("rsu_api_reg", options.apiCallerToken);
+		return { "X-RSU-API-REG-SECRET": options.apiCallerSecret };
+	}
+	return {};
+}
+
+export interface RegistrationAccessDiagnosis {
+	/** Whether the endpoint answered (ok:true) — NOT whether data exists. */
+	reachable: boolean;
+	http_status?: number;
+	api_error_code?: number;
+	api_error_msg?: string;
+	participants_returned: number;
+	interpretation: RunSignupFailureInterpretation;
+	race_id: number;
+	diagnosed_at: string;
+}
+
+/**
+ * Probe the RunSignup participants endpoint for one race (5K race 209477)
+ * and return a structured diagnosis of the registration-access state.
+ *
+ * Interpretation values:
+ * - EMPTY_LIST_OK: endpoint responded OK — see participants_returned for
+ *   whether the list was actually empty (empty or not, access works).
+ * - TOKEN_INVALID: OAuth token / API caller credentials rejected
+ *   (official codes 6, 13, 17; HTTP 401).
+ * - SCOPE_INSUFFICIENT: authenticated but denied (official code 7;
+ *   HTTP 403; permission wording in the message).
+ * - THROTTLED: request throttled (official code 14; HTTP 429).
+ * - UNKNOWN: any other failure.
+ *
+ * Official codes: https://runsignup.com/Api/ErrorCodes
+ */
+export async function diagnoseRegistrationAccess(
+	options: RunSignupParticipantFetchOptions,
+	raceId = 209477,
+): Promise<RegistrationAccessDiagnosis> {
+	const url = new URL(`https://api.runsignup.com/rest/race/${raceId}/participants`);
+	url.searchParams.set("format", "json");
+	url.searchParams.set("page", "1");
+	url.searchParams.set("results_per_page", "1");
+	const result = await runSignupGetJson<UnknownRecord>(
+		url,
+		options.accessToken,
+		prepareExtraHeaders(url, options),
+	);
+	const diagnosed_at = new Date().toISOString();
+	if (result.ok) {
+		const data = result.data ?? {};
+		const list = Array.isArray(data.participants) ? data.participants : [];
+		return {
+			reachable: true,
+			http_status: result.http_status,
+			participants_returned: list.length,
+			interpretation: "EMPTY_LIST_OK",
+			race_id: raceId,
+			diagnosed_at,
+		};
+	}
+	return {
+		reachable: false,
+		http_status: result.http_status,
+		api_error_code: result.api_error_code,
+		api_error_msg: result.api_error_msg,
+		participants_returned: 0,
+		interpretation: classifyRunSignupFailure(
+			result.api_error_code,
+			result.api_error_msg,
+			result.http_status,
+		),
+		race_id: raceId,
+		diagnosed_at,
+	};
+}
+
+/**
+ * Format a RunSignup participants API error for the sync log's existing
+ * `error` column (reused — no new migration needed). The API error code and
+ * HTTP status are always included so silent no-ops are distinguishable from
+ * genuinely empty participant lists.
+ */
+export function formatParticipantApiError(
+	apiError: FetchedParticipantApiError,
+	raceId: number,
+): string {
+	const code =
+		apiError.errorCode !== undefined ? `api_error_code=${apiError.errorCode}` : "api_error_code=unknown";
+	const http =
+		apiError.httpStatus !== undefined ? ` http_status=${apiError.httpStatus}` : "";
+	return `RunSignup participants API error for race ${raceId} [${code}${http}]: ${apiError.errorMsg}`;
 }
 
 export interface RegistrationSyncResult {
@@ -189,7 +312,31 @@ export async function syncSeries2026Registrations(
 			.catch(() => null);
 
 		try {
-			const { raceName, participants } = await fetchRaceParticipants(source.raceId, options);
+			const fetchResult = await fetchRaceParticipants(source.raceId, options);
+			if (fetchResult.apiError) {
+				const message = formatParticipantApiError(fetchResult.apiError, source.raceId);
+				if (logId !== null) {
+					await db
+						.prepare(
+							`UPDATE series_registration_sync_log
+							 SET finished_at = ?, status = 'error', error = ?
+							 WHERE id = ?`,
+						)
+						.bind(new Date().toISOString(), message.slice(0, 2000), logId)
+						.run()
+						.catch(() => undefined);
+				}
+				races.push({
+					distance: source.distance,
+					raceId: source.raceId,
+					raceName: fetchResult.raceName,
+					registrationsFetched: 0,
+					registrationsStored: 0,
+					error: message,
+				});
+				continue;
+			}
+			const { raceName, participants } = fetchResult;
 			totalFetched += participants.length;
 			let stored = 0;
 			for (const p of participants) {

@@ -280,28 +280,73 @@ async function youTubeAccessToken(env: YouTubeEnv): Promise<string> {
 	return refreshAccessToken(refreshToken, env);
 }
 
+export interface YouTubeChannelStatistics {
+	subscriber_count: number;
+	total_views: number;
+	video_count: number;
+}
+
 export interface YouTubeChannel {
 	channel_id: string;
 	channel_title: string;
+	statistics?: YouTubeChannelStatistics;
+}
+
+/** YouTube Data API v3 returns counts as decimal strings; parse safely. */
+function parseYouTubeCount(value: unknown): number {
+	const parsed = typeof value === "string" || typeof value === "number"
+		? Number(value)
+		: NaN;
+	if (!Number.isFinite(parsed) || parsed < 0) return 0;
+	return Math.floor(parsed);
+}
+
+function parseChannelStatistics(
+	raw: unknown,
+): YouTubeChannelStatistics {
+	const statistics = (raw ?? {}) as {
+		subscriberCount?: unknown;
+		viewCount?: unknown;
+		videoCount?: unknown;
+	};
+	return {
+		subscriber_count: parseYouTubeCount(statistics.subscriberCount),
+		total_views: parseYouTubeCount(statistics.viewCount),
+		video_count: parseYouTubeCount(statistics.videoCount),
+	};
 }
 
 async function fetchOwnChannel(accessToken: string): Promise<YouTubeChannel> {
 	const response = await fetch(
-		"https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true",
+		"https://www.googleapis.com/youtube/v3/channels?part=id,snippet,statistics&mine=true",
 		{ headers: { Authorization: `Bearer ${accessToken}` } },
 	);
 	const payload = await response.json() as {
-		items?: Array<{ id?: string; snippet?: { title?: string } }>;
+		items?: Array<{
+			id?: string;
+			snippet?: { title?: string };
+			statistics?: {
+				subscriberCount?: unknown;
+				viewCount?: unknown;
+				videoCount?: unknown;
+			};
+		}>;
 		error?: { message?: string };
 	};
 	if (!response.ok) {
-		throw new Error(payload.error?.message ?? `YouTube channels request failed (${response.status})`);
+		const error = new Error(payload.error?.message ?? `YouTube channels request failed (${response.status})`);
+		(error as Error & { status?: number }).status = response.status;
+		throw error;
 	}
 	const item = payload.items?.[0];
 	if (!item?.id) {
 		throw new Error("No YouTube channel is associated with the authorized Google account");
 	}
-	return { channel_id: item.id, channel_title: item.snippet?.title ?? "" };
+	return {
+		channel_id: item.id,
+		channel_title: item.snippet?.title ?? "",
+		statistics: parseChannelStatistics(item.statistics),
+	};
 }
 
 export async function handleYouTubeCallback(
@@ -357,6 +402,9 @@ export async function getYouTubeStatus(env: YouTubeEnv): Promise<{
 	configured: boolean;
 	channel_id?: string;
 	channel_title?: string;
+	subscriber_count?: number;
+	total_views?: number;
+	video_count?: number;
 	missing_configuration?: string[];
 	error?: string;
 }> {
@@ -378,6 +426,9 @@ export async function getYouTubeStatus(env: YouTubeEnv): Promise<{
 			configured: true,
 			channel_id: channel.channel_id,
 			channel_title: channel.channel_title,
+			subscriber_count: channel.statistics?.subscriber_count,
+			total_views: channel.statistics?.total_views,
+			video_count: channel.statistics?.video_count,
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : "YouTube connection failed";
@@ -387,6 +438,96 @@ export async function getYouTubeStatus(env: YouTubeEnv): Promise<{
 			connected: false,
 			configured: true,
 			...(notConnected ? {} : { error: message }),
+		};
+	}
+}
+
+export type YouTubeDataQuality =
+	| "LIVE_VERIFIED"
+	| "STALE"
+	| "UNAVAILABLE"
+	| "SOURCE_API_ERROR"
+	| "SOURCE_AUTH_ERROR"
+	| "OWNER_ACTION_REQUIRED";
+
+export interface YouTubeMetric {
+	metric_name: string;
+	source: "youtube";
+	source_account: string;
+	unit: "count";
+	value: number;
+	fetched_at: string;
+	data_quality: YouTubeDataQuality;
+}
+
+export interface YouTubeChannelMetricsResult {
+	ok: boolean;
+	channel_id?: string;
+	channel_title?: string;
+	metrics: YouTubeMetric[];
+	data_quality?: YouTubeDataQuality;
+	error?: string;
+}
+
+/**
+ * Read-only channel statistics for the Operating Center audience layer.
+ * One Data API request (channels.list mine=true) returns both identity and
+ * statistics. Never throws: API/permission failures are reported in the
+ * result with a data-quality code.
+ */
+export async function getYouTubeChannelMetrics(
+	env: YouTubeEnv,
+): Promise<YouTubeChannelMetricsResult> {
+	const missing = missingConfiguration(env);
+	if (missing.length > 0) {
+		return {
+			ok: false,
+			metrics: [],
+			data_quality: "OWNER_ACTION_REQUIRED",
+			error: `YouTube configuration is missing: ${missing.join(", ")}`,
+		};
+	}
+	try {
+		const accessToken = await youTubeAccessToken(env);
+		const channel = await fetchOwnChannel(accessToken);
+		const fetchedAt = new Date().toISOString();
+		const statistics = channel.statistics ?? {
+			subscriber_count: 0,
+			total_views: 0,
+			video_count: 0,
+		};
+		const buildMetric = (metric_name: string, value: number): YouTubeMetric => ({
+			metric_name,
+			source: "youtube",
+			source_account: channel.channel_id,
+			unit: "count",
+			value,
+			fetched_at: fetchedAt,
+			data_quality: "LIVE_VERIFIED",
+		});
+		return {
+			ok: true,
+			channel_id: channel.channel_id,
+			channel_title: channel.channel_title,
+			metrics: [
+				buildMetric("youtube.subscribers", statistics.subscriber_count),
+				buildMetric("youtube.total_views", statistics.total_views),
+				buildMetric("youtube.video_count", statistics.video_count),
+			],
+		};
+	} catch (error) {
+		const message = error instanceof Error ? error.message : "YouTube channel metrics failed";
+		const status = error instanceof Error ? (error as { status?: number }).status : undefined;
+		const notConnected = message.startsWith("YouTube is not connected");
+		return {
+			ok: false,
+			metrics: [],
+			data_quality: notConnected
+				? "OWNER_ACTION_REQUIRED"
+				: status === 401 || status === 403
+					? "SOURCE_AUTH_ERROR"
+					: "SOURCE_API_ERROR",
+			error: message,
 		};
 	}
 }

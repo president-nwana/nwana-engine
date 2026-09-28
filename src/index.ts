@@ -35,22 +35,32 @@ import {
 } from "./race-lifecycle";
 import { applySeries2026Levels, AUTO_APPROVED_CONFIRMATION } from "./series-2026-apply";
 import {
+	diagnoseRegistrationAccess,
 	getSeries2026ParticipationOverview,
 	syncSeries2026Registrations,
 } from "./series-2026-registrations";
 import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
+import { getMetaSocialOverview } from "./meta-reads";
+import {
+	buildAudienceExport,
+	defaultExportPeriod,
+	liveAudienceAdapters,
+	type AudienceExportEnv,
+} from "./audience-export";
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
 import { executeResultPublication } from "./result-publication-core";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
 import { SEP_26_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-26-2026-3k-result-card";
 import {
         getConversionActions,
+        getGoogleAdsMetrics,
         getGoogleAdsStatus,
         googleAdsAuthorizationUrl,
         handleGoogleAdsCallback,
 } from "./google-ads";
 import {
         getYouTubeStatus,
+        getYouTubeChannelMetrics,
         youTubeAuthorizationUrl,
         handleYouTubeCallback,
         uploadVideo,
@@ -61,6 +71,9 @@ import {
         googleAnalyticsAuthorizationUrl,
         handleGoogleAnalyticsCallback,
         getGa4TrafficOverview,
+        getGa4AudienceReport,
+        GA4_DATE_PRESETS,
+        type Ga4DatePreset,
 } from "./google-analytics";
 import { buildDesiredState } from "./google-ads-current";
 import {
@@ -5797,8 +5810,49 @@ export default {
 		if (request.method === "GET" && url.pathname === "/api/operating-center/analytics/traffic") {
 			return json(await getGa4TrafficOverview(env));
 		}
+		// GA4 canonical audience report (owner key required by the
+		// operatingCenterApiRoute gate above). On-demand runReport reads only;
+		// no cron, no D1 writes, no token exposure.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/analytics/audience") {
+			const presetParam = url.searchParams.get("preset");
+			const preset: Ga4DatePreset | undefined = GA4_DATE_PRESETS.includes(presetParam as Ga4DatePreset)
+				? (presetParam as Ga4DatePreset)
+				: undefined;
+			const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+			const startParam = url.searchParams.get("start");
+			const endParam = url.searchParams.get("end");
+			const start = startParam && datePattern.test(startParam) ? startParam : undefined;
+			const end = endParam && datePattern.test(endParam) ? endParam : undefined;
+			return json(await getGa4AudienceReport(env, {
+				preset,
+				startDate: start && end ? start : undefined,
+				endDate: start && end ? end : undefined,
+				comparePrior: url.searchParams.get("compare") === "1",
+			}));
+		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/social/overview") {
+			// Live Meta read path: with start/end (or live=1) the route returns
+			// live per-destination metrics from the production Meta integration
+			// via getMetaSocialOverview (failure-isolated per destination).
+			// Without params it keeps the legacy static summary the Operating
+			// Center Marketing screen consumes. Owner-key gated by the
+			// operatingCenterApiRoute gate above.
+			const liveStart = url.searchParams.get("start");
+			const liveEnd = url.searchParams.get("end");
+			const liveFlag = url.searchParams.get("live");
+			if (liveStart || liveEnd || liveFlag) {
+				return json(await getMetaSocialOverview(env, {
+					startDate: liveStart ?? undefined,
+					endDate: liveEnd ?? undefined,
+				}));
+			}
 			return json(getSocialOverview());
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/social/youtube") {
+			// Live YouTube channel statistics (subscribers, total views, video
+			// count) via the production YouTube OAuth integration.
+			// Owner-key gated by the operatingCenterApiRoute gate above.
+			return json(await getYouTubeChannelMetrics(env));
 		}
 		// Manual last mile distribution packs: read-only, owner-key gated by
 		// the operatingCenterApiRoute gate above. Builds copy-ready packs
@@ -5824,6 +5878,85 @@ export default {
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/ads/overview") {
 			return json(await getAdsOverview(env));
+		}
+		// Parameterized live Google Ads metrics (canonical metrics layer).
+		// Owner-key gated by the operatingCenterApiRoute gate above.
+		// Read-only: one GAQL request per breakdown, no mutations, no D1
+		// writes, on-demand only. Accepts explicit start/end (YYYY-MM-DD) or
+		// preset=last7|last30|mtd. Requires the developer token secret; without
+		// it the read returns OWNER_ACTION_REQUIRED without hitting the API.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/ads/metrics") {
+			const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+			const toDate = (value: string): string => value.slice(0, 10);
+			const shiftDays = (date: string, days: number): string => {
+				const [year, month, day] = date.split("-").map(Number);
+				const shifted = new Date(Date.UTC(year, month - 1, day));
+				shifted.setUTCDate(shifted.getUTCDate() + days);
+				return toDate(shifted.toISOString());
+			};
+			const today = toDate(new Date().toISOString());
+			const yesterday = shiftDays(today, -1);
+			let start = url.searchParams.get("start") ?? "";
+			let end = url.searchParams.get("end") ?? "";
+			const preset = url.searchParams.get("preset");
+			if (!start && !end && preset) {
+				if (preset === "last7") {
+					start = shiftDays(yesterday, -6);
+					end = yesterday;
+				} else if (preset === "last30") {
+					start = shiftDays(yesterday, -29);
+					end = yesterday;
+				} else if (preset === "mtd") {
+					start = `${today.slice(0, 7)}-01`;
+					end = yesterday;
+					if (start > end) start = end;
+				} else {
+					return json({ ok: false, error: "preset must be last7, last30, or mtd" }, 400);
+				}
+			}
+			if (!datePattern.test(start) || !datePattern.test(end) || start > end) {
+				return json({ ok: false, error: "start and end must be YYYY-MM-DD with start <= end (or use preset=last7|last30|mtd)" }, 400);
+			}
+			const customerId = url.searchParams.get("customer") ?? undefined;
+			return json(await getGoogleAdsMetrics(env, { customerId, startDate: start, endDate: end }));
+		}
+		// Sponsor-safe audience export (canonical metrics layer + live
+		// adapters). Owner-key gated by the operatingCenterApiRoute gate
+		// above. Read-only apart from audience_metrics cache writes.
+		// One live fetch per source with failure isolation: a broken source
+		// marks only its own section STALE / failure quality, never the
+		// whole export. Query params: start/end (YYYY-MM-DD, default last
+		// 30 full days), geography=US|NA|global, source=ga4|google_ads|
+		// facebook|instagram|youtube|runsignup.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/export/audience") {
+			const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+			const defaults = defaultExportPeriod();
+			let start = url.searchParams.get("start") ?? "";
+			let end = url.searchParams.get("end") ?? "";
+			if (!start || !end) {
+				start = defaults.startDate;
+				end = defaults.endDate;
+			}
+			if (!datePattern.test(start) || !datePattern.test(end) || start > end) {
+				return json({ ok: false, error: "start and end must be YYYY-MM-DD with start <= end" }, 400);
+			}
+			const geographyParam = url.searchParams.get("geography");
+			const geography =
+				geographyParam === "US" || geographyParam === "NA" || geographyParam === "global"
+					? geographyParam
+					: null;
+			const sourceParam = url.searchParams.get("source");
+			const knownSources = ["ga4", "google_ads", "facebook", "instagram", "youtube", "runsignup"];
+			if (sourceParam !== null && !knownSources.includes(sourceParam)) {
+				return json({ ok: false, error: `source must be one of ${knownSources.join("|")}` }, 400);
+			}
+			return json(
+				await buildAudienceExport(
+					env as AudienceExportEnv,
+					{ startDate: start, endDate: end, geography, source: sourceParam },
+					liveAudienceAdapters,
+				),
+			);
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/sellers/overview") {
 			try {
@@ -7186,6 +7319,47 @@ export default {
 							error instanceof Error
 								? error.message
 								: "Unknown Series 2026 registration totals error",
+					},
+					500,
+				);
+			}
+		}
+
+		// RunSignup participants-access diagnostic (read-only, owner-key gated by
+		// the operatingCenterApiRoute gate above). Probes the participants
+		// endpoint for the 5K race and reports the last 10 sync log rows, so
+		// silent no-ops (HTTP 200 + API error body) are distinguishable from
+		// genuinely empty participant lists.
+		if (
+			request.method === "GET" &&
+			url.pathname === "/api/operating-center/series-2026/registrations/diagnose"
+		) {
+			try {
+				const diagnosis = await diagnoseRegistrationAccess({
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					apiCallerToken: env.RUNSIGNUP_API_REG,
+					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+				});
+				const recentLogs = await env.nwana_engine_db
+					.prepare(
+						`SELECT id, started_at, finished_at, race_id, distance_label, status,
+							registrations_fetched, error
+						 FROM series_registration_sync_log
+						 ORDER BY id DESC
+						 LIMIT 10`,
+					)
+					.all()
+					.catch(() => ({ results: [] as unknown[] }));
+				return json({ ok: true, diagnosis, recent_sync_logs: recentLogs.results });
+			} catch (error) {
+				console.error(error);
+				return json(
+					{
+						ok: false,
+						error:
+							error instanceof Error
+								? error.message
+								: "Unknown registration diagnosis error",
 					},
 					500,
 				);

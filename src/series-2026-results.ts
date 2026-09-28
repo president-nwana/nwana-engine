@@ -1,3 +1,5 @@
+import { extractRunSignupApiError } from "./runsignup-client";
+
 export interface Series2026Source {
 	distance: string;
 	raceId: number;
@@ -319,7 +321,14 @@ async function getJson(
 			`RunSignup request failed: ${response.status} ${response.statusText} for ${url.pathname} :: ${body.slice(0, 500)}`,
 		);
 	}
-	return await response.json() as UnknownRecord;
+	const data = (await response.json()) as UnknownRecord;
+	// RunSignup reports API errors as HTTP 200 + {"error": {...}}; surface it
+	// on the record so callers can detect it instead of reading empty fields.
+	const apiError = extractRunSignupApiError(data);
+	if (apiError) {
+		data.runSignupApiError = { ...apiError };
+	}
+	return data;
 }
 
 export interface Series2026PreviewOptions {

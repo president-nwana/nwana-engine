@@ -481,3 +481,577 @@ export async function getGa4TrafficOverview(
 		};
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Parameterized GA4 reports (read-only).
+//
+// Extends the module with a generic runReport wrapper plus a canonical
+// audience report used by the Operating Center and sponsor-safe exports.
+// Auth plumbing above is unchanged: every report reuses the stored
+// OAuth refresh token via refreshAccessToken().
+//
+// Operating cost: VERIFIED $0 — on-demand reads only, no cron, no D1 writes.
+// ---------------------------------------------------------------------------
+
+import type { CanonicalMetric, MetricQuality } from "./canonical-metrics";
+
+export interface Ga4ReportRow {
+	dimensions: string[];
+	metrics: string[];
+}
+
+export interface Ga4ReportOptions {
+	metrics: string[];
+	dimensions?: string[];
+	startDate: string;
+	endDate: string;
+	limit?: number;
+	dimensionFilter?: Record<string, unknown>;
+	orderBys?: Array<Record<string, unknown>>;
+}
+
+export interface Ga4ReportResult {
+	ok: boolean;
+	error?: string;
+	error_kind?: "config" | "auth" | "api";
+	rows?: Ga4ReportRow[];
+	row_count?: number;
+}
+
+// Generic parameterized runReport. Never throws for API errors: the Data
+// API's own error message is returned instead.
+export async function runGa4Report(
+	env: GoogleAnalyticsEnv,
+	options: Ga4ReportOptions,
+): Promise<Ga4ReportResult> {
+	const missing = missingConfiguration(env);
+	if (missing.length > 0) {
+		return {
+			ok: false,
+			error_kind: "config",
+			error: `Not connected: ${missing.join(", ")} missing.`,
+		};
+	}
+	let refreshToken: string | null;
+	try {
+		refreshToken = await getStoredRefreshToken(env);
+	} catch (error) {
+		return {
+			ok: false,
+			error_kind: "auth",
+			error: error instanceof Error ? error.message : "Could not read the stored GA4 credential",
+		};
+	}
+	if (!refreshToken) {
+		return {
+			ok: false,
+			error_kind: "auth",
+			error: "Not connected: no OAuth credential stored yet. Open /integrations/google-analytics/connect as the owner to connect.",
+		};
+	}
+	let accessToken: string;
+	try {
+		accessToken = await refreshAccessToken(refreshToken, env);
+	} catch (error) {
+		return {
+			ok: false,
+			error_kind: "auth",
+			error: error instanceof Error ? error.message : "OAuth token refresh failed",
+		};
+	}
+	const body: Record<string, unknown> = {
+		dateRanges: [{ startDate: options.startDate, endDate: options.endDate }],
+		metrics: options.metrics.map((name) => ({ name })),
+	};
+	if (options.dimensions && options.dimensions.length > 0) {
+		body.dimensions = options.dimensions.map((name) => ({ name }));
+	}
+	if (options.dimensionFilter) body.dimensionFilter = options.dimensionFilter;
+	if (options.limit) body.limit = options.limit;
+	if (options.orderBys) body.orderBys = options.orderBys;
+
+	let response: Response;
+	try {
+		response = await fetch(
+			`https://analyticsdata.googleapis.com/v1beta/properties/${GA4_PROPERTY_ID}:runReport`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${accessToken}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify(body),
+			},
+		);
+	} catch (error) {
+		return {
+			ok: false,
+			error_kind: "api",
+			error: error instanceof Error ? error.message : "GA4 Data API request failed",
+		};
+	}
+	let payload: {
+		rows?: Array<{
+			dimensionValues?: Array<{ value?: string }>;
+			metricValues?: Array<{ value?: string }>;
+		}>;
+		rowCount?: number;
+		error?: { message?: string };
+	};
+	try {
+		payload = await response.json() as typeof payload;
+	} catch {
+		return {
+			ok: false,
+			error_kind: "api",
+			error: `GA4 Data API returned an unreadable response (${response.status})`,
+		};
+	}
+	if (!response.ok) {
+		return {
+			ok: false,
+			error_kind: response.status === 401 || response.status === 403 ? "auth" : "api",
+			error: payload.error?.message ?? `GA4 Data API request failed (${response.status})`,
+		};
+	}
+	return {
+		ok: true,
+		rows: (payload.rows ?? []).map((row) => ({
+			dimensions: (row.dimensionValues ?? []).map((value) => value.value ?? ""),
+			metrics: (row.metricValues ?? []).map((value) => value.value ?? "0"),
+		})),
+		row_count: payload.rowCount ?? (payload.rows ?? []).length,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Date presets. All dates are full calendar days in YYYY-MM-DD. "last7" is
+// the 7 most recent complete days (today is excluded — it is incomplete).
+// ---------------------------------------------------------------------------
+
+export type Ga4DatePreset = "last7" | "prior7" | "last30" | "prior30" | "mtd";
+
+export const GA4_DATE_PRESETS: Ga4DatePreset[] = ["last7", "prior7", "last30", "prior30", "mtd"];
+
+const DAY_MS = 86_400_000;
+
+function formatYmd(date: Date): string {
+	return date.toISOString().slice(0, 10);
+}
+
+function parseYmd(today: string): Date {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(today);
+	if (!match) throw new Error(`Invalid date: ${today}`);
+	return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+}
+
+function addDays(date: Date, days: number): Date {
+	return new Date(date.getTime() + days * DAY_MS);
+}
+
+export function resolveDatePreset(
+	preset: Ga4DatePreset,
+	today: string,
+): { startDate: string; endDate: string } {
+	const anchor = parseYmd(today);
+	const monthStart = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1));
+	switch (preset) {
+		case "last7":
+			return { startDate: formatYmd(addDays(anchor, -7)), endDate: formatYmd(addDays(anchor, -1)) };
+		case "prior7":
+			return { startDate: formatYmd(addDays(anchor, -14)), endDate: formatYmd(addDays(anchor, -8)) };
+		case "last30":
+			return { startDate: formatYmd(addDays(anchor, -30)), endDate: formatYmd(addDays(anchor, -1)) };
+		case "prior30":
+			return { startDate: formatYmd(addDays(anchor, -60)), endDate: formatYmd(addDays(anchor, -31)) };
+		case "mtd":
+			return { startDate: formatYmd(monthStart), endDate: formatYmd(addDays(anchor, -1)) };
+	}
+}
+
+// Prior comparable period for a range: same length, immediately before
+// the current start.
+export function priorComparablePeriod(
+	startDate: string,
+	endDate: string,
+): { startDate: string; endDate: string } {
+	const start = parseYmd(startDate);
+	const end = parseYmd(endDate);
+	const lengthDays = Math.round((end.getTime() - start.getTime()) / DAY_MS) + 1;
+	return {
+		startDate: formatYmd(addDays(start, -lengthDays)),
+		endDate: formatYmd(addDays(start, -1)),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Canonical audience report.
+// ---------------------------------------------------------------------------
+
+export interface Ga4MetricTotal {
+	current: CanonicalMetric;
+	prior: CanonicalMetric | null;
+	percent_change: number | null;
+	percent_change_metric: CanonicalMetric | null;
+}
+
+export interface Ga4BreakdownRow {
+	dimension: string;
+	dimension_value: string;
+	metrics: Record<string, CanonicalMetric>;
+}
+
+export interface Ga4AudienceReport {
+	ok: boolean;
+	source: "ga4";
+	source_account: string;
+	preset: string | null;
+	period_start: string;
+	period_end: string;
+	compare: boolean;
+	compare_period_start: string | null;
+	compare_period_end: string | null;
+	fetched_at: string;
+	data_quality: MetricQuality;
+	quality_note?: string;
+	totals: Record<string, Ga4MetricTotal>;
+	breakdowns: {
+		session_source_medium: Ga4BreakdownRow[];
+		landing_page: Ga4BreakdownRow[];
+		country: Ga4BreakdownRow[];
+		us_region: Ga4BreakdownRow[];
+	};
+	error?: string;
+}
+
+export interface Ga4AudienceReportOptions {
+	preset?: Ga4DatePreset;
+	startDate?: string;
+	endDate?: string;
+	comparePrior?: boolean;
+}
+
+// Canonical audience metric definitions: [GA4 API metric, unit].
+const AUDIENCE_METRICS: Array<[string, CanonicalMetric["unit"]]> = [
+	["activeUsers", "count"],
+	["totalUsers", "count"],
+	["newUsers", "count"],
+	["sessions", "count"],
+	["engagedSessions", "count"],
+	["screenPageViews", "count"],
+	["engagementRate", "percent"],
+	["averageSessionDuration", "seconds"],
+	["conversions", "count"],
+];
+
+function makeCanonicalMetric(
+	name: string,
+	rawValue: string,
+	unit: CanonicalMetric["unit"],
+	periodStart: string,
+	periodEnd: string,
+	fetchedAt: string,
+	quality: MetricQuality,
+	overrides: Partial<CanonicalMetric> = {},
+): CanonicalMetric {
+	let value = Number(rawValue ?? "0");
+	if (!Number.isFinite(value)) value = 0;
+	// engagementRate arrives as a 0–1 fraction; report it as percent.
+	if (unit === "percent") value = value * 100;
+	return {
+		metric_name: `ga4.${name}`,
+		source: "ga4",
+		source_account: GA4_PROPERTY_ID,
+		value,
+		unit,
+		period_start: periodStart,
+		period_end: periodEnd,
+		fetched_at: fetchedAt,
+		data_quality: quality,
+		...overrides,
+	};
+}
+
+function percentChange(current: number, prior: number): number | null {
+	if (prior === 0) return current === 0 ? 0 : null;
+	return ((current - prior) / prior) * 100;
+}
+
+// Runs the totals query with `conversions`; if the API rejects that metric
+// name, retries with `keyEvents`. Returns the working metric name.
+async function runTotalsWithConversionFallback(
+	env: GoogleAnalyticsEnv,
+	startDate: string,
+	endDate: string,
+): Promise<{ result: Ga4ReportResult; conversionMetric: string; qualityNote?: string }> {
+	const metricNames = AUDIENCE_METRICS.map(([name]) => name);
+	const first = await runGa4Report(env, {
+		metrics: metricNames,
+		startDate,
+		endDate,
+	});
+	if (first.ok || !/conversion/i.test(first.error ?? "")) {
+		return { result: first, conversionMetric: "conversions" };
+	}
+	const fallback = await runGa4Report(env, {
+		metrics: metricNames.map((name) => (name === "conversions" ? "keyEvents" : name)),
+		startDate,
+		endDate,
+	});
+	return {
+		result: fallback,
+		conversionMetric: "keyEvents",
+		qualityNote: "GA4 Data API rejected the `conversions` metric for this property; used `keyEvents` instead.",
+	};
+}
+
+function metricUnitsByName(
+	conversionMetric: string,
+): Map<string, CanonicalMetric["unit"]> {
+	const units = new Map<string, CanonicalMetric["unit"]>();
+	for (const [name, unit] of AUDIENCE_METRICS) {
+		units.set(name === "conversions" ? conversionMetric : name, unit);
+	}
+	return units;
+}
+
+function buildTotals(
+	names: string[],
+	units: Map<string, CanonicalMetric["unit"]>,
+	current: Ga4ReportRow | undefined,
+	prior: Ga4ReportRow | undefined,
+	periodStart: string,
+	periodEnd: string,
+	compareStart: string | null,
+	compareEnd: string | null,
+	fetchedAt: string,
+	compare: boolean,
+): Record<string, Ga4MetricTotal> {
+	const totals: Record<string, Ga4MetricTotal> = {};
+	names.forEach((name, index) => {
+		const unit = units.get(name) ?? "count";
+		const currentMetric = makeCanonicalMetric(
+			name,
+			current?.metrics[index] ?? "0",
+			unit,
+			periodStart,
+			periodEnd,
+			fetchedAt,
+			"LIVE_VERIFIED",
+			{ geography: "global" },
+		);
+		let priorMetric: CanonicalMetric | null = null;
+		let change: number | null = null;
+		let changeMetric: CanonicalMetric | null = null;
+		if (compare && compareStart && compareEnd) {
+			priorMetric = makeCanonicalMetric(
+				name,
+				prior?.metrics[index] ?? "0",
+				unit,
+				compareStart,
+				compareEnd,
+				fetchedAt,
+				"LIVE_VERIFIED",
+				{ geography: "global" },
+			);
+			change = percentChange(currentMetric.value, priorMetric.value);
+			changeMetric = {
+				metric_name: `ga4.${name}.delta_percent`,
+				source: "ga4",
+				source_account: GA4_PROPERTY_ID,
+				value: change ?? 0,
+				unit: "percent",
+				scope: change === null ? "prior value is zero — change not computable" : undefined,
+				geography: "global",
+				period_start: periodStart,
+				period_end: periodEnd,
+				fetched_at: fetchedAt,
+				data_quality: "LIVE_VERIFIED",
+			};
+		}
+		totals[name] = {
+			current: currentMetric,
+			prior: priorMetric,
+			percent_change: change,
+			percent_change_metric: changeMetric,
+		};
+	});
+	return totals;
+}
+
+async function runBreakdown(
+	env: GoogleAnalyticsEnv,
+	metricNames: string[],
+	units: Map<string, CanonicalMetric["unit"]>,
+	dimension: string,
+	periodStart: string,
+	periodEnd: string,
+	fetchedAt: string,
+	geographyOf: (dimensionValue: string) => string | undefined,
+	dimensionFilter?: Record<string, unknown>,
+): Promise<Ga4BreakdownRow[]> {
+	const result = await runGa4Report(env, {
+		metrics: metricNames,
+		dimensions: [dimension],
+		startDate: periodStart,
+		endDate: periodEnd,
+		limit: 25,
+		orderBys: [{ metric: { metricName: metricNames[0] }, desc: true }],
+		dimensionFilter,
+	});
+	if (!result.ok || !result.rows) return [];
+	return result.rows.map((row) => {
+		const dimensionValue = row.dimensions[0] ?? "";
+		const metrics: Record<string, CanonicalMetric> = {};
+		metricNames.forEach((name, index) => {
+			metrics[name] = makeCanonicalMetric(
+				name,
+				row.metrics[index] ?? "0",
+				units.get(name) ?? "count",
+				periodStart,
+				periodEnd,
+				fetchedAt,
+				"LIVE_VERIFIED",
+				{
+					scope: `${dimension}=${dimensionValue}`,
+					geography: geographyOf(dimensionValue),
+				},
+			);
+		});
+		return { dimension, dimension_value: dimensionValue, metrics };
+	});
+}
+
+export async function getGa4AudienceReport(
+	env: GoogleAnalyticsEnv,
+	options: Ga4AudienceReportOptions = {},
+): Promise<Ga4AudienceReport> {
+	const fetchedAt = new Date().toISOString();
+	const preset = options.preset ?? (options.startDate && options.endDate ? null : "last7");
+	let period: { startDate: string; endDate: string };
+	if (options.startDate && options.endDate) {
+		period = { startDate: options.startDate, endDate: options.endDate };
+	} else {
+		period = resolveDatePreset(preset ?? "last7", fetchedAt.slice(0, 10));
+	}
+	const compare = options.comparePrior === true;
+	const comparePeriod = compare
+		? priorComparablePeriod(period.startDate, period.endDate)
+		: null;
+
+	const current = await runTotalsWithConversionFallback(env, period.startDate, period.endDate);
+	if (!current.result.ok) {
+		const quality: MetricQuality =
+			current.result.error_kind === "auth" ? "SOURCE_AUTH_ERROR" : "SOURCE_API_ERROR";
+		return {
+			ok: false,
+			source: "ga4",
+			source_account: GA4_PROPERTY_ID,
+			preset,
+			period_start: period.startDate,
+			period_end: period.endDate,
+			compare,
+			compare_period_start: comparePeriod?.startDate ?? null,
+			compare_period_end: comparePeriod?.endDate ?? null,
+			fetched_at: fetchedAt,
+			data_quality: quality,
+			quality_note: current.result.error,
+			totals: {},
+			breakdowns: {
+				session_source_medium: [],
+				landing_page: [],
+				country: [],
+				us_region: [],
+			},
+			error: current.result.error,
+		};
+	}
+
+	let priorRow: Ga4ReportRow | undefined;
+	const qualityNotes: string[] = [];
+	if (current.qualityNote) qualityNotes.push(current.qualityNote);
+	if (compare && comparePeriod) {
+		const prior = await runTotalsWithConversionFallback(env, comparePeriod.startDate, comparePeriod.endDate);
+		if (!prior.result.ok) {
+			return {
+				ok: false,
+				source: "ga4",
+				source_account: GA4_PROPERTY_ID,
+				preset,
+				period_start: period.startDate,
+				period_end: period.endDate,
+				compare,
+				compare_period_start: comparePeriod.startDate,
+				compare_period_end: comparePeriod.endDate,
+				fetched_at: fetchedAt,
+				data_quality: prior.result.error_kind === "auth" ? "SOURCE_AUTH_ERROR" : "SOURCE_API_ERROR",
+				quality_note: `Prior period failed: ${prior.result.error}`,
+				totals: {},
+				breakdowns: {
+					session_source_medium: [],
+					landing_page: [],
+					country: [],
+					us_region: [],
+				},
+				error: `Prior period failed: ${prior.result.error}`,
+			};
+		}
+		priorRow = prior.result.rows?.[0];
+		if (prior.qualityNote && !qualityNotes.includes(prior.qualityNote)) qualityNotes.push(prior.qualityNote);
+	}
+
+	const names = AUDIENCE_METRICS.map(([name]) =>
+		name === "conversions" ? current.conversionMetric : name,
+	);
+	const units = metricUnitsByName(current.conversionMetric);
+	const totals = buildTotals(
+		names,
+		units,
+		current.result.rows?.[0],
+		priorRow,
+		period.startDate,
+		period.endDate,
+		comparePeriod?.startDate ?? null,
+		comparePeriod?.endDate ?? null,
+		fetchedAt,
+		compare,
+	);
+
+	// Breakdowns run against the current period only. Each fails
+	// independently; a failed breakdown leaves an empty row list.
+	const sourceMediumMetrics = ["sessions", current.conversionMetric];
+	const [sessionSourceMedium, landingPage, country, usRegion] = await Promise.all([
+		runBreakdown(env, sourceMediumMetrics, units, "sessionSourceMedium",
+			period.startDate, period.endDate, fetchedAt, () => "global"),
+		runBreakdown(env, ["sessions"], units, "landingPage",
+			period.startDate, period.endDate, fetchedAt, () => "global"),
+		runBreakdown(env, ["activeUsers"], units, "country",
+			period.startDate, period.endDate, fetchedAt, (value) =>
+				value === "United States" ? "US" : "global"),
+		runBreakdown(env, ["activeUsers"], units, "region",
+			period.startDate, period.endDate, fetchedAt, () => "US",
+			{ filter: { fieldName: "country", stringFilter: { value: "United States" } } }),
+	]);
+
+	return {
+		ok: true,
+		source: "ga4",
+		source_account: GA4_PROPERTY_ID,
+		preset,
+		period_start: period.startDate,
+		period_end: period.endDate,
+		compare,
+		compare_period_start: comparePeriod?.startDate ?? null,
+		compare_period_end: comparePeriod?.endDate ?? null,
+		fetched_at: fetchedAt,
+		data_quality: "LIVE_VERIFIED",
+		quality_note: qualityNotes.length > 0 ? qualityNotes.join(" ") : undefined,
+		totals,
+		breakdowns: {
+			session_source_medium: sessionSourceMedium,
+			landing_page: landingPage,
+			country,
+			us_region: usRegion,
+		},
+	};
+}

@@ -14,6 +14,8 @@
 //   case); next_race_prep is the exception state, held only when prep data
 //   is incomplete (missing event name or date).
 
+import { extractRunSignupApiError } from "./runsignup-client";
+
 import {
 	SERIES_2026_SOURCES,
 	getSeries2026LevelDefinitions,
@@ -847,7 +849,14 @@ export async function runSignupGetJson(
 			`RunSignup request failed: ${response.status} ${response.statusText} for ${url.pathname} :: ${body.slice(0, 500)}`,
 		);
 	}
-	return (await response.json()) as Record<string, unknown>;
+	const data = (await response.json()) as Record<string, unknown>;
+	// RunSignup reports API errors as HTTP 200 + {"error": {...}}; surface it
+	// on the record so callers can detect it instead of reading empty fields.
+	const apiError = extractRunSignupApiError(data);
+	if (apiError) {
+		data.runSignupApiError = { ...apiError };
+	}
+	return data;
 }
 
 // Shared with write-test flow below and the object-creation workflow.
