@@ -32,6 +32,7 @@ import {
 import { syncSeries2026Registrations } from "./series-2026-registrations";
 import { previewSeries2026ResultPublications } from "./series-2026-results";
 import { executeResultPublication } from "./result-publication-core";
+import { refreshAllAthleteStats } from "./athletes";
 
 export interface AutoProcessEnv {
 	db: D1Database;
@@ -541,6 +542,17 @@ export async function autoProcessEvent(
 		await push("sync_finalized", "ok", "Post-apply sync completed.");
 	} catch (error) {
 		return fail("sync_finalized", error instanceof Error ? error.message : "Sync failed");
+	}
+
+	// Step 3b: refresh canonical athlete stats (dynamic victories / podiums /
+	// best times). The Engine is the single writer; the site, OC, and exports
+	// read the materialized row, so no page can drift from the canonical
+	// numbers. A stats failure must not fail the result pipeline.
+	try {
+		const refreshed = await refreshAllAthleteStats(db);
+		await push("athlete_stats", "ok", `Refreshed stats for ${Object.keys(refreshed).length} athlete profile(s).`);
+	} catch (error) {
+		await push("athlete_stats", "skipped", `Stats refresh failed (non-blocking): ${error instanceof Error ? error.message : String(error)}`);
 	}
 
 	// Step 4: publication — Meta congratulations + winner news + next-race promo.

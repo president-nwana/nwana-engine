@@ -643,7 +643,10 @@ export interface GoogleAdsMetricAdGroup extends GoogleAdsMetricCampaign {
 }
 
 export interface GoogleAdsMetricGeo {
-	country: string; // geoTargetConstants resource name; display names need a GeoTargetConstant lookup
+	country: string; // geographic_view.country_criterion_id resource name, e.g. geoTargetConstants/2840
+	country_name?: string; // canonical_name from geo_target_constant (resolved, best-effort)
+	location_type: string; // LOCATION_OF_PRESENCE | AREA_OF_INTEREST — never summed across types
+	region?: string; // segments.geo_target_region (US region rows only)
 	impressions: number;
 	clicks: number;
 	cost_usd: number;
@@ -700,18 +703,74 @@ export function buildCampaignsQuery({ startDate, endDate, level }: {
 	].join(" ");
 }
 
-export function buildGeoQuery({ startDate, endDate }: {
+/**
+ * Country-level geographic breakdown from geographic_view.
+ * Verified 2026-09-28 against the official Google Ads API docs:
+ * geographic_view requires country_criterion_id + location_type; the two
+ * location types (LOCATION_OF_PRESENCE vs AREA_OF_INTEREST) must NOT be
+ * silently summed — they are kept as separate rows downstream.
+ */
+export function buildGeoCountryQuery({ startDate, endDate }: {
 	startDate: string;
 	endDate: string;
 }): string {
 	return [
-		"SELECT segments.geo_target_country,",
+		"SELECT geographic_view.country_criterion_id,",
+		"geographic_view.location_type,",
 		"metrics.impressions, metrics.clicks,",
 		"metrics.cost_micros, metrics.conversions",
 		"FROM geographic_view",
 		`WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'`,
-		"AND geographic_view.location_type = 'LOCATION_OF_PRESENCE'",
+		"ORDER BY metrics.impressions DESC",
 	].join(" ");
+}
+
+/** Resolve the US country criterion resource name dynamically (no hardcoded 2840). */
+export function buildUsCriterionQuery(): string {
+	return [
+		"SELECT geo_target_constant.resource_name",
+		"FROM geo_target_constant",
+		"WHERE geo_target_constant.country_code = 'US'",
+		"AND geo_target_constant.target_type = 'Country'",
+		"LIMIT 1",
+	].join(" ");
+}
+
+/** U.S. region breakdown for the dynamically resolved US criterion ID. */
+export function buildUsRegionQuery({ startDate, endDate, usCriterionId }: {
+	startDate: string;
+	endDate: string;
+	usCriterionId: string;
+}): string {
+	return [
+		"SELECT geographic_view.country_criterion_id,",
+		"geographic_view.location_type,",
+		"segments.geo_target_region,",
+		"metrics.impressions, metrics.clicks,",
+		"metrics.cost_micros, metrics.conversions",
+		"FROM geographic_view",
+		`WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'`,
+		`AND geographic_view.country_criterion_id = '${usCriterionId}'`,
+		"ORDER BY metrics.impressions DESC",
+	].join(" ");
+}
+
+/** Best-effort display names for geo criterion resource names. */
+export function buildGeoTargetNameQuery(criterionIds: string[]): string {
+	const ids = criterionIds.map((id) => `'${id.replace(/'/g, "")}'`).join(", ");
+	return [
+		"SELECT geo_target_constant.resource_name, geo_target_constant.canonical_name",
+		"FROM geo_target_constant",
+		`WHERE geo_target_constant.resource_name IN (${ids})`,
+	].join(" ");
+}
+
+/** @deprecated Use buildGeoCountryQuery — kept for backward compatibility of callers. */
+export function buildGeoQuery({ startDate, endDate }: {
+	startDate: string;
+	endDate: string;
+}): string {
+	return buildGeoCountryQuery({ startDate, endDate });
 }
 
 export function buildConversionActionQuery({ startDate, endDate }: {
@@ -783,7 +842,8 @@ interface CampaignRow {
 }
 
 interface GeoRow {
-	segments?: { geoTargetCountry?: string };
+	geographicView?: { countryCriterionId?: string; locationType?: string };
+	segments?: { geoTargetRegion?: string };
 	metrics?: {
 		impressions?: string;
 		clicks?: string;
@@ -883,36 +943,41 @@ function aggregateEntityRows(
 }
 
 function aggregateGeoRows(rows: GeoRow[]): GoogleAdsMetricGeo[] {
-	const byCountry = new Map<string, {
-		impressions: number;
-		clicks: number;
-		costMicros: number;
-		conversions: number;
-	}>();
+	// Keyed by (country, location_type, region): the two location types are
+	// never summed together (official Google Ads semantics).
+	const byKey = new Map<string, GoogleAdsMetricGeo & { costMicros: number }>();
 	for (const row of rows) {
-		const country = row.segments?.geoTargetCountry ?? "";
+		const country = row.geographicView?.countryCriterionId ?? "";
 		if (!country) continue;
-		const existing = byCountry.get(country);
+		const location_type = row.geographicView?.locationType ?? "UNKNOWN";
+		const region = row.segments?.geoTargetRegion;
+		const key = `${country}|${location_type}|${region ?? ""}`;
 		const impressions = Number(row.metrics?.impressions ?? 0);
 		const clicks = Number(row.metrics?.clicks ?? 0);
 		const costMicros = Number(row.metrics?.costMicros ?? 0);
 		const conversions = Number(row.metrics?.conversions ?? 0);
+		const existing = byKey.get(key);
 		if (existing) {
 			existing.impressions += impressions;
 			existing.clicks += clicks;
 			existing.costMicros += costMicros;
 			existing.conversions += conversions;
 		} else {
-			byCountry.set(country, { impressions, clicks, costMicros, conversions });
+			byKey.set(key, {
+				country,
+				location_type,
+				...(region ? { region } : {}),
+				impressions,
+				clicks,
+				cost_usd: 0,
+				conversions,
+				costMicros,
+			});
 		}
 	}
-	return [...byCountry.entries()].map(([country, totals]) => ({
-		country,
-		impressions: totals.impressions,
-		clicks: totals.clicks,
-		cost_usd: round2(totals.costMicros / 1_000_000),
-		conversions: totals.conversions,
-	}));
+	return [...byKey.values()]
+		.map(({ costMicros, ...rest }) => ({ ...rest, cost_usd: round2(costMicros / 1_000_000) }))
+		.sort((a, b) => b.impressions - a.impressions);
 }
 
 function aggregateConversionActionRows(rows: ConversionActionRow[]): GoogleAdsMetricConversionAction[] {
@@ -1018,10 +1083,15 @@ function buildCanonicalMetrics(
 		);
 	}
 	for (const row of geo) {
+		const place = row.country_name ?? row.country;
+		const geoScope = row.region
+			? `geo:${place}:${row.region}:${row.location_type}`
+			: `geo:${place}:${row.location_type}`;
 		metrics.push(
-			metric("ads.impressions", row.impressions, "count", "account", row.country),
-			metric("ads.clicks", row.clicks, "count", "account", row.country),
-			metric("ads.cost_usd", row.cost_usd, "usd", "account", row.country),
+			metric("ads.impressions", row.impressions, "count", "account", geoScope),
+			metric("ads.clicks", row.clicks, "count", "account", geoScope),
+			metric("ads.cost_usd", row.cost_usd, "usd", "account", geoScope),
+			metric("ads.conversions", row.conversions, "count", "account", geoScope),
 		);
 	}
 	return metrics;
@@ -1126,6 +1196,51 @@ export async function getGoogleAdsMetrics(
 		const geo = geoSettled.status === "fulfilled"
 			? aggregateGeoRows((geoSettled.value.results ?? []) as GeoRow[])
 			: [];
+		// Best-effort enrichment of the country rows: display names and the
+		// U.S. region breakdown. Each step is failure-isolated — the country
+		// rows above survive any failure here.
+		if (geo.length > 0) {
+			const criterionIds = [...new Set(geo.map((g) => g.country))];
+			try {
+				const namesResult = await runGaql(
+					accessToken,
+					developerToken,
+					customerId,
+					buildGeoTargetNameQuery(criterionIds),
+				);
+				const nameById = new Map<string, string>();
+				for (const r of (namesResult.results ?? []) as Array<{ geoTargetConstant?: { resourceName?: string; canonicalName?: string } }>) {
+					const rn = r.geoTargetConstant?.resourceName;
+					const cn = r.geoTargetConstant?.canonicalName;
+					if (rn && cn) nameById.set(rn, cn);
+				}
+				for (const g of geo) {
+					const n = nameById.get(g.country);
+					if (n) g.country_name = n;
+				}
+			} catch (error) {
+				partialNotes.push(`geo display names unavailable: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			try {
+				const usResult = await runGaql(accessToken, developerToken, customerId, buildUsCriterionQuery());
+				const usRow = ((usResult.results ?? []) as Array<{ geoTargetConstant?: { resourceName?: string } }>)[0];
+				const usCriterionId = usRow?.geoTargetConstant?.resourceName;
+				if (usCriterionId) {
+					const regionResult = await runGaql(
+						accessToken,
+						developerToken,
+						customerId,
+						buildUsRegionQuery({ startDate, endDate, usCriterionId }),
+					);
+					const regionRows = aggregateGeoRows((regionResult.results ?? []) as GeoRow[]);
+					geo.push(...regionRows);
+				} else {
+					partialNotes.push("U.S. region breakdown unavailable: US criterion not resolved");
+				}
+			} catch (error) {
+				partialNotes.push(`U.S. region breakdown unavailable: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 		const conversion_actions = conversionActionsSettled.status === "fulfilled"
 			? aggregateConversionActionRows((conversionActionsSettled.value.results ?? []) as ConversionActionRow[])
 			: [];

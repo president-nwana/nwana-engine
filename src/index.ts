@@ -36,6 +36,7 @@ import {
 import { applySeries2026Levels, AUTO_APPROVED_CONFIRMATION } from "./series-2026-apply";
 import {
 	diagnoseRegistrationAccess,
+	getRaceEventIds,
 	getSeries2026ParticipationOverview,
 	syncSeries2026Registrations,
 } from "./series-2026-registrations";
@@ -135,6 +136,12 @@ import { renderSportSectionHtml } from "./oc-sport";
 import { renderAcademySectionHtml } from "./oc-academy";
 import { renderBoardSectionHtml } from "./oc-board";
 import { renderOperationsSectionHtml } from "./oc-operations";
+import {
+	getAthleteProfile,
+	listAthleteProfiles,
+	refreshAllAthleteStats,
+	refreshAthleteStats,
+} from "./athletes";
 import {
 	createCreationPacket,
 	listCreationPackets,
@@ -6209,6 +6216,37 @@ export default {
 			}
 		}
 
+		// Canonical athlete profiles: one data model for personal athlete
+		// pages, the Elite Athletes page, sponsor-safe exports, the Operating
+		// Center, and news/athlete cards. GET endpoints are public (the data
+		// is published on the public website); the site Worker reads the same
+		// D1 table directly. Refresh is owner-key gated; the Engine is the
+		// single writer of computed stats (auto-refresh after every result
+		// apply + daily cron).
+		if (request.method === "GET" && url.pathname === "/api/athletes") {
+			return json({ ok: true, athletes: await listAthleteProfiles(env.nwana_engine_db) });
+		}
+		if (request.method === "GET" && url.pathname.startsWith("/api/athletes/")) {
+			const slug = decodeURIComponent(url.pathname.slice("/api/athletes/".length)).split("/")[0];
+			if (!slug || !/^[a-z0-9-]+$/.test(slug)) {
+				return json({ ok: false, error: "Unknown athlete" }, 404);
+			}
+			const profile = await getAthleteProfile(env.nwana_engine_db, slug);
+			if (!profile) return json({ ok: false, error: "Unknown athlete" }, 404);
+			return json({ ok: true, profile });
+		}
+		if (request.method === "POST" && url.pathname.startsWith("/api/athletes/") && url.pathname.endsWith("/refresh")) {
+			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
+				return json({ ok: false, error: "Athlete stats refresh requires the owner key" }, 401);
+			}
+			const slug = decodeURIComponent(
+				url.pathname.slice("/api/athletes/".length, -"/refresh".length).replace(/\/$/, ""),
+			);
+			const stats = await refreshAthleteStats(env.nwana_engine_db, slug);
+			if (!stats) return json({ ok: false, error: "Unknown athlete" }, 404);
+			return json({ ok: true, slug, stats });
+		}
+
 		// Site news distribution channel: the machine's publishing endpoint for
 		// the public website (news feed + winner announcements). Owner key
 		// only; the public site reads from D1 directly.
@@ -7335,11 +7373,16 @@ export default {
 			url.pathname === "/api/operating-center/series-2026/registrations/diagnose"
 		) {
 			try {
-				const diagnosis = await diagnoseRegistrationAccess({
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
-					apiCallerToken: env.RUNSIGNUP_API_REG,
-					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
-				});
+				const eventIds = await getRaceEventIds(env.nwana_engine_db, 209477);
+				const diagnosis = await diagnoseRegistrationAccess(
+					{
+						accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+						apiCallerToken: env.RUNSIGNUP_API_REG,
+						apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+					},
+					209477,
+					eventIds,
+				);
 				const recentLogs = await env.nwana_engine_db
 					.prepare(
 						`SELECT id, started_at, finished_at, race_id, distance_label, status,
@@ -7855,6 +7898,15 @@ if (
 			} catch (err) {
 				console.log(`[series-2026-cron] ${label}: ERROR ${err instanceof Error ? err.message : String(err)}`);
 			}
+		}
+		// Canonical athlete stats refresh: keeps dynamic victories/podiums/
+		// best times current even when no event fired today. Failure-isolated:
+		// a stats failure must not fail the cron.
+		try {
+			const refreshed = await refreshAllAthleteStats(env.nwana_engine_db);
+			console.log(`[series-2026-cron] athlete stats refreshed for ${Object.keys(refreshed).length} profile(s)`);
+		} catch (err) {
+			console.log(`[series-2026-cron] athlete stats refresh ERROR ${err instanceof Error ? err.message : String(err)}`);
 		}
 	},
 };

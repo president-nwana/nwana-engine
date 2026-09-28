@@ -71,3 +71,44 @@ describe("parseParticipant", () => {
 		expect(p?.userId).toBe(99);
 	});
 });
+
+describe("fetchRaceParticipants event_id", () => {
+	it("sends the required event_id query parameter (official API requirement)", async () => {
+		const { vi } = await import("vitest");
+		const client = await import("../src/runsignup-client");
+		const seen: string[] = [];
+		const spy = vi.spyOn(client, "runSignupGetJson").mockImplementation(async (url: string | URL) => {
+			seen.push(String(url));
+			return { ok: true, data: { participants: [], race: { name: "Test" } }, http_status: 200 };
+		});
+		try {
+			const { fetchRaceParticipants } = await import("../src/series-2026-registrations");
+			await fetchRaceParticipants(209477, { accessToken: "x", eventIds: [1173956, 1173957] });
+			expect(seen.length).toBeGreaterThan(0);
+			const u = new URL(seen[0]);
+			expect(u.searchParams.get("event_id")).toBe("1173956,1173957");
+			expect(u.searchParams.get("format")).toBe("json");
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("reads event IDs from race_lifecycle (active + events_json)", async () => {
+		const { getRaceEventIds } = await import("../src/series-2026-registrations");
+		const db = {
+			prepare() {
+				return {
+					bind() { return this; },
+					async first() {
+						return {
+							active_event_id: 1173956,
+							events_json: JSON.stringify([{ event_id: 1173956 }, { event_id: 1173957 }]),
+						};
+					},
+				};
+			},
+		} as unknown as D1Database;
+		const ids = await getRaceEventIds(db, 209477);
+		expect(ids.sort()).toEqual([1173956, 1173957]);
+	});
+});

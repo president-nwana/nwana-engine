@@ -35,12 +35,11 @@ describe("meta-reads", () => {
 			[new RegExp(`/${NWANA_PAGE}\\?fields=`), { name: "NWANA", followers_count: 123, fan_count: 120 }],
 			[new RegExp(`/${NWANA_PAGE}/insights`), {
 				data: [
-					{ name: "page_impressions", values: [{ value: 10 }, { value: 20 }] },
-					{ name: "page_reach", values: [{ value: 5 }] },
-					{ name: "page_engaged_users", values: [{ value: 2 }] },
+					{ name: "page_total_media_view_unique", values: [{ value: 5 }] },
+					{ name: "page_media_view", values: [{ value: 10 }, { value: 20 }] },
 					{ name: "page_post_engagements", values: [{ value: 3 }] },
-					{ name: "page_views_total", values: [{ value: 7 }] },
-					{ name: "page_actions_post_reactions_total", values: [{ value: 4 }] },
+					{ name: "page_total_actions", values: [{ value: 7 }] },
+					{ name: "page_fan_adds_by_paid_non_paid_unique", values: [{ value: 4 }] },
 				],
 			}],
 		]);
@@ -55,12 +54,13 @@ describe("meta-reads", () => {
 		const byName = Object.fromEntries(result.metrics.map((m) => [m.metric_name, m]));
 		expect(byName.followers.value).toBe(123);
 		expect(byName.page_likes.value).toBe(120);
-		expect(byName.impressions.value).toBe(30);
+		expect(byName.views.value).toBe(30);
 		expect(byName.reach.value).toBe(5);
-		expect(byName.reactions.value).toBe(4);
-		expect(byName.impressions.period_start).toBe("2026-09-21");
-		expect(byName.impressions.period_end).toBe("2026-09-27");
-		expect(byName.impressions.source).toBe("facebook");
+		expect(byName.post_engagements.value).toBe(3);
+		expect(byName.new_followers.value).toBe(4);
+		expect(byName.views.period_start).toBe("2026-09-21");
+		expect(byName.views.period_end).toBe("2026-09-27");
+		expect(byName.views.source).toBe("facebook");
 	});
 
 	it("maps a Meta permission error to OWNER_ACTION_REQUIRED naming the missing permission", async () => {
@@ -92,12 +92,12 @@ describe("meta-reads", () => {
 			// NWANA page succeeds fully.
 			[new RegExp(`/${NWANA_PAGE}\\?fields=`), { name: "NWANA", followers_count: 100, fan_count: 99 }],
 			[new RegExp(`/${NWANA_PAGE}/insights`), { data: [
-				{ name: "page_impressions", values: [{ value: 42 }] },
-				{ name: "page_reach", values: [{ value: 40 }] },
-				{ name: "page_engaged_users", values: [{ value: 4 }] },
+				{ name: "page_total_media_view_unique", values: [{ value: 40 }] },
+				{ name: "page_media_view", values: [{ value: 42 }] },
 				{ name: "page_post_engagements", values: [{ value: 5 }] },
-				{ name: "page_views_total", values: [{ value: 6 }] },
-				{ name: "page_actions_post_reactions_total", values: [{ value: 7 }] },
+				{ name: "page_total_actions", values: [{ value: 6 }] },
+				{ name: "page_fan_adds_by_paid_non_paid_unique", values: [{ value: 7 }] },
+				
 			] }],
 			// Nordic Walking Sport page fields call fails with an auth error.
 			[new RegExp(`/${NWS_PAGE}\\?fields=`), { error: { message: "Invalid OAuth access token", code: 190 } }, 401],
@@ -124,10 +124,13 @@ describe("meta-reads", () => {
 		const fetcher = makeFetcher([
 			[new RegExp(`/${IG_NWANA}\\?fields=`), { username: "nwana.official", followers_count: 810, media_count: 73 }],
 			// Batched call fails on an unknown metric; per-metric fallback then succeeds for two.
-			[/insights\?metric=reach%2Cimpressions%2Cprofile_views/, { error: { message: "(#100) Unknown metric impressions", code: 100 } }, 400],
+			[/insights\?metric=reach%2Cviews%2C/, { error: { message: "(#100) Unknown metric views", code: 100 } }, 400],
 			[/insights\?metric=reach&/, { data: [{ name: "reach", values: [{ value: 900 }, { value: 100 }] }] }],
-			[/insights\?metric=impressions&/, { error: { message: "(#100) Unknown metric impressions", code: 100 } }, 400],
-			[/insights\?metric=profile_views&/, { data: [{ name: "profile_views", values: [{ value: 25 }] }] }],
+			[/insights\?metric=views&/, { error: { message: "(#100) Unknown metric views", code: 100 } }, 400],
+			[/insights\?metric=accounts_engaged&/, { data: [{ name: "accounts_engaged", values: [{ value: 50 }] }] }],
+			[/insights\?metric=total_interactions&/, { data: [{ name: "total_interactions", values: [{ value: 25 }] }] }],
+			[/insights\?metric=follows_and_unfollows&/, { data: [{ name: "follows_and_unfollows", values: [{ value: 5 }] }] }],
+			[/insights\?metric=profile_links_taps&/, { data: [{ name: "profile_links_taps", values: [{ value: 3 }] }] }],
 		]);
 		const result = await getInstagramInsights({ NWANA_META_TOKEN: "user-token" }, IG_NWANA, RANGE, fetcher as typeof fetch);
 
@@ -135,9 +138,10 @@ describe("meta-reads", () => {
 		const byName = Object.fromEntries(result.metrics.map((m) => [m.metric_name, m]));
 		expect(byName.followers.value).toBe(810);
 		expect(byName.reach.value).toBe(1000);
-		expect(byName.profile_views.value).toBe(25);
-		expect(byName.impressions).toBeUndefined();
-		expect(result.error).toContain("impressions");
+		expect(byName.accounts_engaged.value).toBe(50);
+		expect(byName.total_interactions.value).toBe(25);
+		expect(byName.views).toBeUndefined();
+		expect(result.error).toContain("views");
 	});
 
 	it("returns ok:false when NWANA_META_TOKEN is not configured", async () => {

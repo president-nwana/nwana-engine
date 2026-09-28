@@ -837,7 +837,7 @@ export function renderOperatingCenterHtml(): string {
 				const accounts=data.accounts||[];
 				const connected=accounts.filter(a=>a.status==='Connected').length;
 				box.innerHTML='<div class="meta">'+accounts.length+' accounts known · '+connected+' connected</div>'+
-					'<div class="meta">LinkedIn: 8 followers (observed 2026-09-22)</div>';
+					'<div class="meta">LinkedIn: 8 followers <span class="unavailable">stale — last observed 2026-09-22, no API access yet</span></div>';
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadAdsSummary(){

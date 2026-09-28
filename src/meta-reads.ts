@@ -221,6 +221,7 @@ function buildMetric(params: {
 	value: number;
 	unit?: "count" | "percent";
 	scope?: string;
+	geography?: string;
 	period_start: string;
 	period_end: string;
 	fetched_at: string;
@@ -234,6 +235,7 @@ function buildMetric(params: {
 		value: params.value,
 		unit: params.unit ?? "count",
 		scope: params.scope,
+		geography: params.geography,
 		period_start: params.period_start,
 		period_end: params.period_end,
 		fetched_at: params.fetched_at,
@@ -268,14 +270,20 @@ function destinationInfo(id: string): { name: string; platform: "facebook" | "in
 const MISSING_TOKEN_NOTE =
 	"NWANA_META_TOKEN is not configured. Store the 60-day Meta user token as the Worker secret NWANA_META_TOKEN, then retry.";
 
-/** [apiMetric, canonicalName] pairs for Page Insights (period=day, summed over the range). */
+/**
+ * [apiMetric, canonicalName] pairs for Page Insights (period=day, summed over
+ * the range). Verified against the Graph API changelog 2026-09-28: the
+ * legacy page_impressions/page_reach/page_engaged_users family was REMOVED
+ * by Meta in June 2026 (v26.0 applies to all versions; requests return
+ * (#100)). Current replacements below.
+ * Requires a Page access token + read_insights + pages_read_engagement.
+ */
 const PAGE_INSIGHT_DEFS: Array<[string, string]> = [
-	["page_impressions", "impressions"],
-	["page_reach", "reach"],
-	["page_engaged_users", "engaged_users"],
+	["page_total_media_view_unique", "reach"],
+	["page_media_view", "views"],
 	["page_post_engagements", "post_engagements"],
-	["page_views_total", "page_views"],
-	["page_actions_post_reactions_total", "reactions"],
+	["page_total_actions", "page_actions"],
+	["page_fan_adds_by_paid_non_paid_unique", "new_followers"],
 ];
 
 function insightsUrl(objectId: string, metric: string, token: string, start: string, end: string): string {
@@ -452,11 +460,20 @@ export async function getMetaPageInsights(
 	};
 }
 
-/** [apiMetric, canonicalName] pairs for Instagram Insights (period=day, summed over the range). */
+/**
+ * [apiMetric, canonicalName] pairs for Instagram Insights (period=day, summed
+ * over the range). Verified 2026-09-28: `impressions` was deprecated in
+ * v22.0 and removed 2026-04-21 — the official replacement is `views`.
+ * Requires instagram_basic + instagram_manage_insights on a
+ * Business/Creator account.
+ */
 const IG_INSIGHT_DEFS: Array<[string, string]> = [
 	["reach", "reach"],
-	["impressions", "impressions"],
-	["profile_views", "profile_views"],
+	["views", "views"],
+	["accounts_engaged", "accounts_engaged"],
+	["total_interactions", "total_interactions"],
+	["follows_and_unfollows", "follows_and_unfollows"],
+	["profile_links_taps", "profile_links_taps"],
 ];
 
 /**
@@ -592,6 +609,60 @@ export async function getInstagramInsights(
 	}
 
 	const data_quality: MetaDataQuality = partialNotes.length > 0 ? "LIVE_PARTIAL" : "LIVE_VERIFIED";
+
+	// Instagram follower demographics by country (official replacement for
+	// the removed audience geography; needs >=100 followers). Separate call,
+	// failure-isolated: never breaks the metrics above.
+	try {
+		const demoUrl = new URL(`${GRAPH_BASE}/${igAccountId}/insights`);
+		demoUrl.searchParams.set("metric", "follower_demographics");
+		demoUrl.searchParams.set("metric_type", "total_value");
+		demoUrl.searchParams.set("period", "lifetime");
+		demoUrl.searchParams.set("timeframe", "this_month");
+		demoUrl.searchParams.set("breakdown", "country");
+		demoUrl.searchParams.set("access_token", userToken);
+		const demoResult = await graphGet(demoUrl.toString(), fetcher);
+		if (demoResult.ok) {
+			const entry = findInsightEntry(demoResult.data, "follower_demographics");
+			const breakdowns = entry && typeof entry.total_value === "object" && entry.total_value !== null
+				? (entry.total_value as Record<string, unknown>).breakdowns
+				: null;
+			const countries = Array.isArray(breakdowns) && breakdowns.length > 0
+				? (breakdowns[0] as Record<string, unknown>).results
+				: null;
+			if (Array.isArray(countries)) {
+				for (const c of countries) {
+					const rec = c as Record<string, unknown>;
+					const country = typeof rec.dimension_values === "object" && rec.dimension_values !== null
+						? String((rec.dimension_values as Record<string, unknown>).country ?? "")
+						: "";
+					const value = toNumber(rec.value);
+					if (country && value !== null) {
+						metrics.push(buildMetric({
+							metric_name: "follower_country",
+							source: "instagram",
+							source_account: handle,
+							value,
+							scope: "followers",
+							geography: country,
+							period_start: start,
+							period_end: end,
+							fetched_at: fetchedAt,
+							data_quality: "LIVE_VERIFIED",
+							quality_note: "Follower demographics by country (this month).",
+						}));
+					}
+				}
+			} else {
+				partialNotes.push("follower_demographics: no country breakdown returned");
+			}
+		} else {
+			partialNotes.push(`follower_demographics: ${demoResult.error.message ?? "request failed"}`);
+		}
+	} catch (error) {
+		partialNotes.push(`follower_demographics: ${error instanceof Error ? error.message : "failed"}`);
+	}
+
 	for (const metric of metrics) {
 		if (partialNotes.length > 0 && metric.data_quality === "LIVE_VERIFIED" && metric.scope === "period_total") {
 			metric.data_quality = "LIVE_PARTIAL";

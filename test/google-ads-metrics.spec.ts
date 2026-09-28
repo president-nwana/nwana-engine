@@ -90,11 +90,27 @@ function stubGoogleAdsFetch(recorded: RecordedCall[], failPrimary = false): void
 				campaign: { id: "camp1", name: "NWANA Search" },
 				metrics: { impressions: "500", clicks: "20", costMicros: "200000000", conversions: "2", conversionsValue: "0" },
 			}];
-		} else if (query.includes("FROM geographic_view")) {
+		} else if (query.includes("FROM geographic_view") && query.includes("country_criterion_id = 'geoTargetConstants/2840'")) {
 			results = [{
-				segments: { geoTargetCountry: "geoTargetConstants/2840" },
-				metrics: { impressions: "1500", clicks: "60", costMicros: "600000000", conversions: "6" },
+				geographicView: { countryCriterionId: "geoTargetConstants/2840", locationType: "LOCATION_OF_PRESENCE" },
+				segments: { geoTargetRegion: "Florida" },
+				metrics: { impressions: "900", clicks: "36", costMicros: "360000000", conversions: "4" },
 			}];
+		} else if (query.includes("FROM geographic_view")) {
+			results = [
+				{
+					geographicView: { countryCriterionId: "geoTargetConstants/2840", locationType: "LOCATION_OF_PRESENCE" },
+					metrics: { impressions: "1500", clicks: "60", costMicros: "600000000", conversions: "6" },
+				},
+				{
+					geographicView: { countryCriterionId: "geoTargetConstants/2840", locationType: "AREA_OF_INTEREST" },
+					metrics: { impressions: "100", clicks: "4", costMicros: "40000000", conversions: "0" },
+				},
+			];
+		} else if (query.includes("FROM geo_target_constant") && query.includes("country_code = 'US'")) {
+			results = [{ geoTargetConstant: { resourceName: "geoTargetConstants/2840" } }];
+		} else if (query.includes("FROM geo_target_constant")) {
+			results = [{ geoTargetConstant: { resourceName: "geoTargetConstants/2840", canonicalName: "United States" } }];
 		} else if (query.includes("FROM customer")) {
 			results = [{
 				segments: { conversionAction: `customers/${CUSTOMER_ID}/conversionActions/111` },
@@ -129,11 +145,24 @@ describe("buildCampaignsQuery", () => {
 });
 
 describe("buildGeoQuery", () => {
-	it("targets geographic_view with the date window", () => {
+	it("targets geographic_view with country_criterion_id + location_type", () => {
 		const query = buildGeoQuery({ startDate: "2026-08-26", endDate: "2026-09-23" });
 		expect(query).toContain("FROM geographic_view");
-		expect(query).toContain("segments.geo_target_country");
+		expect(query).toContain("geographic_view.country_criterion_id");
+		expect(query).toContain("geographic_view.location_type");
 		expect(query).toContain("segments.date BETWEEN '2026-08-26' AND '2026-09-23'");
+	});
+});
+
+describe("buildUsRegionQuery / buildUsCriterionQuery / buildGeoTargetNameQuery", () => {
+	it("builds the US region query for a dynamically resolved criterion id", async () => {
+		const { buildUsRegionQuery, buildUsCriterionQuery, buildGeoTargetNameQuery } =
+			await import("../src/google-ads");
+		expect(buildUsCriterionQuery()).toContain("country_code = 'US'");
+		const region = buildUsRegionQuery({ startDate: "2026-08-26", endDate: "2026-09-23", usCriterionId: "geoTargetConstants/2840" });
+		expect(region).toContain("segments.geo_target_region");
+		expect(region).toContain("country_criterion_id = 'geoTargetConstants/2840'");
+		expect(buildGeoTargetNameQuery(["geoTargetConstants/2840"])).toContain("geo_target_constant.canonical_name");
 	});
 });
 
@@ -154,7 +183,7 @@ describe("getGoogleAdsMetrics", () => {
 		const result = await getGoogleAdsMetrics(env, { startDate: "2026-08-26", endDate: "2026-09-23" });
 		expect(result.ok).toBe(true);
 		const apiCalls = recorded.filter((call) => call.url.includes("googleads.googleapis.com"));
-		expect(apiCalls.length).toBe(4); // campaigns + ad_groups + geo + conversion actions
+		expect(apiCalls.length).toBe(7); // campaigns + ad_groups + geo + geo names + US criterion + US regions + conversion actions
 		for (const call of apiCalls) {
 			expect(call.headers["developer-token"]).toBeUndefined();
 			expect(call.headers["Authorization"]).toBe("Bearer test-access-token");
@@ -167,7 +196,7 @@ describe("getGoogleAdsMetrics", () => {
 		const env = await makeEnv(recorded, true);
 		await getGoogleAdsMetrics(env, { startDate: "2026-08-26", endDate: "2026-09-23" });
 		const apiCalls = recorded.filter((call) => call.url.includes("googleads.googleapis.com"));
-		expect(apiCalls.length).toBe(4); // campaigns + ad_groups + geo + conversion actions
+		expect(apiCalls.length).toBe(7); // campaigns + ad_groups + geo + geo names + US criterion + US regions + conversion actions
 		for (const call of apiCalls) {
 			expect(call.headers["developer-token"]).toBe(DEVELOPER_TOKEN);
 			expect(call.headers["Authorization"]).toBe("Bearer test-access-token");
@@ -215,9 +244,15 @@ describe("getGoogleAdsMetrics", () => {
 		// Breakdowns.
 		expect(result.ad_groups).toHaveLength(1);
 		expect(result.ad_groups[0]!.campaign_id).toBe("camp1");
-		expect(result.geo).toHaveLength(1);
+		// LOCATION_OF_PRESENCE and AREA_OF_INTEREST are never summed together;
+		// the U.S. region breakdown is appended as its own row.
+		expect(result.geo).toHaveLength(3);
 		expect(result.geo[0]!.country).toBe("geoTargetConstants/2840");
+		expect(result.geo[0]!.location_type).toBe("LOCATION_OF_PRESENCE");
+		expect(result.geo[0]!.country_name).toBe("United States");
 		expect(result.geo[0]!.cost_usd).toBe(600);
+		expect(result.geo[1]!.location_type).toBe("AREA_OF_INTEREST");
+		expect(result.geo[2]!.region).toBe("Florida");
 		expect(result.conversion_actions).toHaveLength(1);
 		expect(result.conversion_actions[0]!.action_id).toBe("111");
 		expect(result.conversion_actions[0]!.conversions).toBe(8);
@@ -237,7 +272,7 @@ describe("getGoogleAdsMetrics", () => {
 		const ctrMetric = result.metrics.find((metric) => metric.metric_name === "ads.ctr" && metric.scope === "account");
 		expect(ctrMetric!.unit).toBe("percent");
 		expect(ctrMetric!.value).toBeCloseTo(4.4, 4);
-		const geoClicks = result.metrics.find((metric) => metric.metric_name === "ads.clicks" && metric.geography === "geoTargetConstants/2840");
+		const geoClicks = result.metrics.find((metric) => metric.metric_name === "ads.clicks" && metric.geography === "geo:United States:LOCATION_OF_PRESENCE");
 		expect(geoClicks!.value).toBe(60);
 		const campaignCost = result.metrics.find((metric) => metric.metric_name === "ads.cost_usd" && metric.scope === "campaign:camp1");
 		expect(campaignCost).toMatchObject({ value: 895.6, unit: "usd" });

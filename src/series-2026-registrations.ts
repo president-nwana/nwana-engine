@@ -24,6 +24,14 @@ export interface RunSignupParticipantFetchOptions {
 	apiCallerSecret?: string;
 	perPage?: number;
 	maxPages?: number;
+	/**
+	 * RunSignup event IDs for the race. The Get Race Participants endpoint
+	 * REQUIRES event_id (official docs:
+	 * https://runsignup.com/API/race/:race_id/participants/GET). Requests
+	 * without it return HTTP 200 with an empty list — the root cause of the
+	 * 648 empty production syncs before 2026-09-28.
+	 */
+	eventIds?: number[];
 }
 
 export interface FetchedParticipant {
@@ -133,6 +141,11 @@ export async function fetchRaceParticipants(
 		url.searchParams.set("format", "json");
 		url.searchParams.set("page", String(page));
 		url.searchParams.set("results_per_page", String(perPage));
+		// event_id is REQUIRED by the official API; without it the endpoint
+		// returns HTTP 200 with an empty list.
+		if (options.eventIds && options.eventIds.length > 0) {
+			url.searchParams.set("event_id", options.eventIds.join(","));
+		}
 		const result = await runSignupGetJson<UnknownRecord>(
 			url,
 			options.accessToken,
@@ -194,6 +207,63 @@ export interface RegistrationAccessDiagnosis {
 }
 
 /**
+ * Read all known RunSignup event IDs for a race from race_lifecycle
+ * (events_json + active_event_id). Used to satisfy the participants
+ * endpoint's required event_id parameter.
+ */
+export async function getRaceEventIds(db: D1Database, raceId: number): Promise<number[]> {
+	const ids = new Set<number>();
+	try {
+		const row = await db
+			.prepare(`SELECT active_event_id, events_json FROM race_lifecycle WHERE race_id = ? LIMIT 1`)
+			.bind(raceId)
+			.first<{ active_event_id: number | null; events_json: string | null }>();
+		if (row?.active_event_id) ids.add(Number(row.active_event_id));
+		if (row?.events_json) {
+			const events = JSON.parse(row.events_json) as Array<{ event_id?: number }>;
+			for (const e of events) {
+				if (e?.event_id) ids.add(Number(e.event_id));
+			}
+		}
+	} catch {
+		// table missing or unreadable: caller proceeds without event_id
+	}
+	return [...ids];
+}
+
+/**
+ * Control diagnostic: GET /rest/race/:race_id/participant-counts.
+ * If counts > 0 but the participants list is empty, the problem is in the
+ * request parameters (e.g. missing event_id), not in access rights.
+ * Official docs: https://runsignup.com/API/race/:race_id/participant-counts/GET
+ */
+export async function fetchParticipantCounts(
+	raceId: number,
+	eventIds: number[],
+	options: RunSignupParticipantFetchOptions,
+): Promise<{ ok: boolean; counts: Array<{ event_id: number; num_participants: number }>; error?: string }> {
+	const url = new URL(`https://api.runsignup.com/rest/race/${raceId}/participant-counts`);
+	url.searchParams.set("format", "json");
+	if (eventIds.length > 0) url.searchParams.set("event_id", eventIds.join(","));
+	const result = await runSignupGetJson<UnknownRecord>(url, options.accessToken, prepareExtraHeaders(url, options));
+	if (!result.ok) {
+		return {
+			ok: false,
+			counts: [],
+			error: result.api_error_msg ?? `HTTP ${result.http_status ?? "unknown"}`,
+		};
+	}
+	const data = result.data ?? {};
+	const list = Array.isArray(data.participant_counts) ? data.participant_counts : [];
+	const counts = list
+		.map((c) => {
+			const r = asRecord(c);
+			return { event_id: int(r?.event_id) ?? 0, num_participants: int(r?.num_participants) ?? 0 };
+		})
+		.filter((c) => c.event_id > 0);
+	return { ok: true, counts };
+}
+/**
  * Probe the RunSignup participants endpoint for one race (5K race 209477)
  * and return a structured diagnosis of the registration-access state.
  *
@@ -212,17 +282,27 @@ export interface RegistrationAccessDiagnosis {
 export async function diagnoseRegistrationAccess(
 	options: RunSignupParticipantFetchOptions,
 	raceId = 209477,
-): Promise<RegistrationAccessDiagnosis> {
+	eventIds: number[] = [],
+): Promise<RegistrationAccessDiagnosis & { participant_counts?: Array<{ event_id: number; num_participants: number }>; counts_error?: string }> {
 	const url = new URL(`https://api.runsignup.com/rest/race/${raceId}/participants`);
 	url.searchParams.set("format", "json");
 	url.searchParams.set("page", "1");
 	url.searchParams.set("results_per_page", "1");
+	if (eventIds.length > 0) url.searchParams.set("event_id", eventIds.join(","));
 	const result = await runSignupGetJson<UnknownRecord>(
 		url,
 		options.accessToken,
 		prepareExtraHeaders(url, options),
 	);
+	// Control endpoint: participant-counts tells us whether the race actually
+	// has registrations, so an empty participants list can be attributed to
+	// request parameters vs access rights.
+	const counts = await fetchParticipantCounts(raceId, eventIds, options);
 	const diagnosed_at = new Date().toISOString();
+	const extra = {
+		participant_counts: counts.ok ? counts.counts : undefined,
+		counts_error: counts.ok ? undefined : counts.error,
+	};
 	if (result.ok) {
 		const data = result.data ?? {};
 		const list = Array.isArray(data.participants) ? data.participants : [];
@@ -233,6 +313,7 @@ export async function diagnoseRegistrationAccess(
 			interpretation: "EMPTY_LIST_OK",
 			race_id: raceId,
 			diagnosed_at,
+			...extra,
 		};
 	}
 	return {
@@ -248,6 +329,7 @@ export async function diagnoseRegistrationAccess(
 		),
 		race_id: raceId,
 		diagnosed_at,
+		...extra,
 	};
 }
 
@@ -312,7 +394,13 @@ export async function syncSeries2026Registrations(
 			.catch(() => null);
 
 		try {
-			const fetchResult = await fetchRaceParticipants(source.raceId, options);
+			// event_id is REQUIRED by the official participants endpoint;
+			// read all known event IDs for this race from race_lifecycle.
+			const eventIds = await getRaceEventIds(db, source.raceId);
+			const fetchResult = await fetchRaceParticipants(source.raceId, {
+				...options,
+				eventIds,
+			});
 			if (fetchResult.apiError) {
 				const message = formatParticipantApiError(fetchResult.apiError, source.raceId);
 				if (logId !== null) {

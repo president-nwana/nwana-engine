@@ -799,7 +799,106 @@ export async function eventsPage(): Promise<string> {
 
 // ---------------- 19. /elite (Elite Athletes, content preserved) ----------------
 
-export async function elitePage(): Promise<string> {
+// Canonical athlete profile row: the single source of truth shared with the
+// Engine, OC, sponsor exports, and news cards. Static credentials are
+// verified records; stats are derived from official finalized results and
+// materialized by the Engine. This page never invents or hardcodes numbers.
+interface CanonicalAthleteRow {
+	full_name: string;
+	org_role: string | null;
+	athlete_role: string | null;
+	public_property_url: string | null;
+	photo_url: string | null;
+	credentials_json: string;
+	computed_stats_json: string | null;
+	stats_computed_at: string | null;
+}
+
+interface AthleteCredentialLite {
+	type: string;
+	title: string;
+	detail: string;
+}
+
+interface AthleteStatsLite {
+	wins: number;
+	season_wins: Record<string, number>;
+}
+
+async function getCanonicalAthlete(db: D1Database | undefined, slug: string): Promise<CanonicalAthleteRow | null> {
+	if (!db) return null;
+	try {
+		return await db
+			.prepare(
+				`SELECT full_name, org_role, athlete_role, public_property_url, photo_url,
+				        credentials_json, computed_stats_json, stats_computed_at
+				 FROM athlete_profiles WHERE slug = ?`,
+			)
+			.bind(slug)
+			.first<CanonicalAthleteRow>();
+	} catch {
+		return null;
+	}
+}
+
+// Albert Fatikhov card: static verified credentials from the canonical row,
+// dynamic season numbers from Engine-computed stats. No hardcoded counts.
+function albertCard(profile: CanonicalAthleteRow | null): string {
+	let credentials: AthleteCredentialLite[] = [];
+	let wins2026: number | null = null;
+	let statsAsOf: string | null = null;
+	if (profile) {
+		try {
+			credentials = JSON.parse(profile.credentials_json || "[]");
+		} catch {
+			credentials = [];
+		}
+		try {
+			const stats: AthleteStatsLite | null = profile.computed_stats_json
+				? JSON.parse(profile.computed_stats_json)
+				: null;
+			if (stats) {
+				wins2026 = stats.season_wins?.["2026"] ?? stats.wins ?? null;
+				statsAsOf = profile.stats_computed_at ? profile.stats_computed_at.slice(0, 10) : null;
+			}
+		} catch {
+			wins2026 = null;
+		}
+	}
+	const bulletFor = (c: AthleteCredentialLite): string => {
+		const sep = c.type === "national_championship" ? ": " : ", ";
+		return c.detail ? `${c.title}${sep}${c.detail}` : c.title;
+	};
+	const achievementBullets = credentials
+		.filter((c) => c.type === "world_championship" || c.type === "national_championship" || c.type === "competition_best")
+		.map(bulletFor);
+	if (wins2026 !== null) {
+		achievementBullets.push(`${wins2026} NWANA Open Series Victories, 2026 season`);
+	}
+	const focus = credentials.find((c) => c.type === "focus");
+	const seasonLine = wins2026 !== null
+		? `During the 2026 season, he has recorded ${wins2026} victories in the NWANA Open Nordic Walking Series while competing across distances from 1K through 20K.`
+		: `During the 2026 season, he competes in the NWANA Open Nordic Walking Series across distances from 1K through 20K.`;
+	const photo = profile?.photo_url ||
+		"https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/efade10b-4183-42c3-8549-bdcfaed4b27c-bQoiOp.png";
+	const propertyUrl = profile?.public_property_url || "https://albertfatikhov.nwaofna.org/";
+	return `
+    <div class="card" style="margin-top:22px;margin-bottom:20px">
+      <div class="kicker">United States</div>
+      <h3>Albert Fatikhov, World Championship Medalist</h3>
+      <div style="margin:14px 0">
+        <img src="${esc(photo)}" alt="Albert Fatikhov" style="max-width:300px;width:100%;border-radius:12px">
+      </div>
+      <p>Albert Fatikhov is a World Championship medalist in competitive Nordic Walking and an active international-level athlete. His competitive record includes two World Championship medals, six Latvian Championship medals, and a successful return to regular competition in the United States through the NWANA Open Nordic Walking Series. At the 2024 World Championship in Lahti, Finland, Albert won the Silver Medal in the 4 x 5K men's relay and the Bronze Medal in the 5K individual race. ${esc(seasonLine)}</p>
+      ${bullets(achievementBullets)}
+      ${focus ? `<p><strong>${esc(focus.title)}.</strong> Albert continues to compete actively while focusing on speed, technique, and performance development across the shorter Nordic Walking distances.</p>` : ``}
+      ${statsAsOf ? `<p style="color:var(--muted);font-size:13px">Season statistics computed from official finalized NWANA results, as of ${esc(statsAsOf)}.</p>` : ``}
+      <p><a class="card-link" href="${esc(propertyUrl)}" target="_blank" rel="noopener">albertfatikhov.nwaofna.org →</a></p>
+    </div>`;
+}
+
+export async function elitePage(db?: D1Database): Promise<string> {
+	const albert = await getCanonicalAthlete(db, "albert-fatikhov");
 	const content = `
   ${pageHead("Elite Athletes", "Elite Athletes Club", "Elite athletes exist, even before the sport is fully developed in the U.S. Competitive Nordic Walking is still emerging in the United States. Yet international-level athletes already represent the country on the world stage.")}
   <div class="section"><div class="wrap">
@@ -816,17 +915,7 @@ export async function elitePage(): Promise<string> {
   <div class="section alt"><div class="wrap">
     <div class="kicker">Elite directory</div>
     <h2>Verified international achievements</h2>
-    <div class="card" style="margin-top:22px;margin-bottom:20px">
-      <div class="kicker">United States</div>
-      <h3>Albert Fatikhov, World Championship Medalist</h3>
-      <div style="margin:14px 0">
-        <img src="https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/efade10b-4183-42c3-8549-bdcfaed4b27c-bQoiOp.png" alt="Albert Fatikhov" style="max-width:300px;width:100%;border-radius:12px">
-      </div>
-      <p>Albert Fatikhov is a World Championship medalist in competitive Nordic Walking and an active international-level athlete. His competitive record includes two World Championship medals, six Latvian Championship medals, and a successful return to regular competition in the United States through the NWANA Open Nordic Walking Series. At the 2024 World Championship in Lahti, Finland, Albert won the Silver Medal in the 4 x 5K men's relay and the Bronze Medal in the 5K individual race. During the 2026 season, he has recorded 23 victories in the NWANA Open Nordic Walking Series while competing across distances from 1K through 20K.</p>
-      ${bullets(["Silver Medal, 4 x 5K Men's Relay, World Championship, Lahti, Finland (2024)", "Bronze Medal, 5K, World Championship, Lahti, Finland (2024)", "6 Latvian Championship Medals: 1 Bronze in 2023 and 5 medals in 2024", "23 NWANA Open Series Victories, 2026 season", "30:58 Official 5K Competition Best, Latvian Championship, Vakarbulli (2024)"])}
-      <p><strong>Current Competitive Focus:</strong> 1K, 3K and 5K. Albert continues to compete actively while focusing on speed, technique, and performance development across the shorter Nordic Walking distances.</p>
-      <p><a class="card-link" href="https://albertfatikhov.nwaofna.org/" target="_blank" rel="noopener">albertfatikhov.nwaofna.org →</a></p>
-    </div>
+        ${albertCard(albert)}
     <div class="card" style="margin-bottom:20px">
       <div class="kicker">United States</div>
       <h3>Tommy Aunan, World Championship Medalist</h3>

@@ -180,7 +180,7 @@ export default {
 				return html(await eventsPage());
 			}
 			if (request.method === "GET" && path === "/elite") {
-				return html(await elitePage());
+				return html(await elitePage(env.nwana_site_db));
 			}
 			if (request.method === "GET" && path === "/elite/tommy-aunan") {
 				return html(await tommyAunanPage());

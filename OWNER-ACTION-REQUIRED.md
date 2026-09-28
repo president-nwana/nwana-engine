@@ -63,23 +63,28 @@ in the Cloud Console — the current level already serves production reads.
 
 **Need:** LinkedIn developer app with the **Community Management API** product; `r_organization_social` (+ `r_organization_followers` for follower stats) granted; access token stored as Worker secret `LINKEDIN_ACCESS_TOKEN`; organization ID for `linkedin.com/company/nwana`.
 
-**Why:** LinkedIn has no integration at all today — the Engine shows a hardcoded "8 followers (observed 2026-09-22)". The official API provides follower counts and follower statistics (including by geography) at $0.
+**Why:** LinkedIn has no integration at all today — the Engine shows a stale "8 followers (last observed 2026-09-22)". The official API provides follower counts and follower statistics (including by geography) at $0.
 
 **Account:** A LinkedIn account that is a **super admin** of the NWANA company page (`linkedin.com/company/nwana`).
 
+**Documented risk (verified 2026-09-28):** LinkedIn's docs describe the Community Management APIs as available to registered legal organizations for *commercial* use cases. NWANA is a 501(c)(3) nonprofit — a nonprofit-specific access path is not confirmed in the docs. Step 7 below resolves this before any implementation work.
+
 **Steps:**
 1. Open [developer.linkedin.com/apps](https://developer.linkedin.com/apps) → **Create app** → fill in app name ("NWANA Engine"), associate it with the **NWANA company page** (LinkedIn verifies via a link a page admin must click: app → Settings → Verify).
-2. **Products** tab → find **Community Management API** → **Request access** → fill the form (reason: "Read-only analytics for our own company page — follower counts and engagement statistics"). Approval ranges from instant (development tier) to a short review.
+2. **Products** tab → find **Community Management API** → **Request access** → fill the form (reason: "Read-only analytics for our own company page — follower counts and engagement statistics").
 3. **Auth** tab → note the **Client ID** and **Client Secret** (needed only if we later switch to full OAuth; for now the token generator suffices).
 4. Generate a token: [linkedin.com/developers/tools/oauth/token-generator](https://www.linkedin.com/developers/tools/oauth/token-generator) → select the app → check scopes `r_organization_social`, `r_organization_followers`, `rw_organization_admin` → Request Access Token → sign in as the page admin → copy the token (~60-day lifetime; I will build the refresh reminder).
 5. Find the Organization ID: open the company page as admin — the URL contains `/company/<number>/admin/` — the **number alone** is the ID.
 6. Send back via the secure credential flow: the access token + the organization ID number.
+7. **Nonprofit eligibility check:** confirm in the app's Products tab (or LinkedIn support reply) that the Community Management API product is approved for our 501(c)(3) organization. If LinkedIn denies nonprofit access, this item becomes `NO_SUPPORTED_ACCESS_PATH` and the stale follower count stays as the last verified observation — no further action.
 
 **App review:** The Community Management API product request IS the review — no separate Marketing Developer Platform review needed for read-only org analytics.
 
 **Reversible:** Yes — revoke the token in the app's Auth tab at any time.
 
-**Send back:** Access token (secure flow) + organization ID number + confirmation the Community Management API product is approved.
+**Send back:** Access token (secure flow) + organization ID number + confirmation the Community Management API product is approved (steps 2 and 7).
+
+**Until then:** LinkedIn stays `OWNER_ACTION_REQUIRED`; the last verified observation (8 followers, 2026-09-22) is shown as STALE, never as live data.
 
 ---
 
