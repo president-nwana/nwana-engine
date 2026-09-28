@@ -57,6 +57,7 @@ import {
         getGoogleAdsStatus,
         googleAdsAuthorizationUrl,
         handleGoogleAdsCallback,
+        testGoogleAdsNoTokenAccess,
 } from "./google-ads";
 import {
         getYouTubeStatus,
@@ -5879,12 +5880,19 @@ export default {
 		if (request.method === "GET" && url.pathname === "/api/operating-center/ads/overview") {
 			return json(await getAdsOverview(env));
 		}
+		// TEMPORARY diagnostic: post-sunset Google Ads access test without a
+		// developer token. Public but strictly read-only (one
+		// listAccessibleCustomers + one GAQL search, no mutations, no D1
+		// writes). Remove after the access-level verification completes.
+		if (request.method === "GET" && url.pathname === "/api/_diag/ads-no-token-test") {
+			return json(await testGoogleAdsNoTokenAccess(env));
+		}
 		// Parameterized live Google Ads metrics (canonical metrics layer).
 		// Owner-key gated by the operatingCenterApiRoute gate above.
 		// Read-only: one GAQL request per breakdown, no mutations, no D1
 		// writes, on-demand only. Accepts explicit start/end (YYYY-MM-DD) or
-		// preset=last7|last30|mtd. Requires the developer token secret; without
-		// it the read returns OWNER_ACTION_REQUIRED without hitting the API.
+		// preset=last7|last30|mtd. No developer token required (sunset
+		// 2026-09-09): auth is OAuth via the Cloud project owning the client.
 		if (request.method === "GET" && url.pathname === "/api/operating-center/ads/metrics") {
 			const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 			const toDate = (value: string): string => value.slice(0, 10);

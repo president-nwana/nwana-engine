@@ -5,9 +5,10 @@ export interface GoogleAdsEnv {
 	GOOGLE_ADS_CLIENT_ID?: string;
 	GOOGLE_ADS_CLIENT_SECRET?: string;
 	GOOGLE_ADS_TOKEN_KEY?: string;
-	// Google Ads API developer token (Tools > API Center in Google Ads).
-	// Required as the `developer-token` header on every googleads.googleapis.com
-	// call; live metrics reads are refused without it.
+	// Google Ads API developer token (legacy). Sunset by Google on 2026-09-09:
+	// the header is optional and ignored by the API servers; access level is
+	// determined by the Google Cloud project that owns the OAuth client.
+	// Kept only so existing deployments that still set it keep working.
 	GOOGLE_ADS_DEVELOPER_TOKEN?: string;
 }
 
@@ -19,10 +20,11 @@ const API_VERSION = "v22";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-// Headers for every googleads.googleapis.com call. The developer token is
-// mandatory per the Google Ads API; it is attached whenever configured so
-// existing callers keep working while unconfigured (status probes), and the
-// metrics read path requires it explicitly before any request is attempted.
+// Headers for every googleads.googleapis.com call. Since Google's 2026-09-09
+// developer-token sunset, the developer-token header is optional and ignored
+// by the API servers; access level is determined by the Google Cloud project
+// that owns the OAuth client. The header is attached only when a legacy token
+// is still configured, so existing deployments keep working unchanged.
 function googleAdsApiHeaders(
 	accessToken: string,
 	env: GoogleAdsEnv,
@@ -614,11 +616,12 @@ export async function getGoogleAdsAccountSnapshot(
 // Parameterized live metrics read path (canonical metrics layer).
 //
 // Unlike the legacy snapshot above, these queries accept an arbitrary date
-// window and customer id, always send the developer-token header, and return
-// normalized CanonicalMetric records (from ./canonical-metrics) so the
-// Operating Center and any export read from the same data layer. Read-only:
-// one GAQL request per query, no mutations, no D1 writes, on-demand only
-// (no polling).
+// window and customer id, and return normalized CanonicalMetric records
+// (from ./canonical-metrics) so the Operating Center and any export read
+// from the same data layer. No developer token is required (sunset
+// 2026-09-09): authentication is OAuth via the Google Cloud project that
+// owns the client. Read-only: one GAQL request per query, no mutations,
+// no D1 writes, on-demand only (no polling).
 // ---------------------------------------------------------------------------
 
 export interface GoogleAdsMetricCampaign {
@@ -675,10 +678,6 @@ export interface GoogleAdsMetricsResult {
 	error?: string;
 	quality_note?: string;
 }
-
-const DEVELOPER_TOKEN_REQUIRED_NOTE =
-	"Google Ads developer token not configured. Create one in Google Ads (Tools > API Center) " +
-	"and set Worker secret GOOGLE_ADS_DEVELOPER_TOKEN.";
 
 export function buildCampaignsQuery({ startDate, endDate, level }: {
 	startDate: string;
@@ -737,19 +736,24 @@ class GoogleAdsRequestError extends Error {
 
 async function runGaql(
 	accessToken: string,
-	developerToken: string,
+	developerToken: string | undefined,
 	customerId: string,
 	query: string,
 ): Promise<{ results?: unknown[] }> {
+	const headers: Record<string, string> = {
+		Authorization: `Bearer ${accessToken}`,
+		"content-type": "application/json",
+	};
+	// Legacy token, if still configured, is sent but ignored by the API
+	// servers since the 2026-09-09 sunset. Never required.
+	if (developerToken) {
+		headers["developer-token"] = developerToken;
+	}
 	const response = await fetch(
 		`https://googleads.googleapis.com/${API_VERSION}/customers/${customerId}/googleAds:search`,
 		{
 			method: "POST",
-			headers: {
-				Authorization: `Bearer ${accessToken}`,
-				"content-type": "application/json",
-				"developer-token": developerToken,
-			},
+			headers,
 			body: JSON.stringify({ query }),
 		},
 	);
@@ -1033,17 +1037,9 @@ export async function getGoogleAdsMetrics(
 		endDate: string;
 	},
 ): Promise<GoogleAdsMetricsResult> {
-	// Defect fix #2: never attempt the Google Ads API without the mandatory
-	// developer token; report the exact owner action instead.
-	if (!env.GOOGLE_ADS_DEVELOPER_TOKEN) {
-		return emptyMetricsResult(
-			customerId,
-			startDate,
-			endDate,
-			"OWNER_ACTION_REQUIRED",
-			DEVELOPER_TOKEN_REQUIRED_NOTE,
-		);
-	}
+	// Post-sunset (2026-09-09) there is no developer-token gate: the API
+	// determines access from the Google Cloud project owning the OAuth
+	// client. Proceed directly to OAuth + GAQL.
 	if (
 		!DATE_PATTERN.test(startDate) ||
 		!DATE_PATTERN.test(endDate) ||
@@ -1194,4 +1190,111 @@ export async function getGoogleAdsMetrics(
 			error instanceof Error ? error.message : "Google Ads metrics read failed",
 		);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// TEMPORARY diagnostic (post developer-token sunset verification).
+// Tests a real production Google Ads API read using only the existing OAuth
+// credentials, WITHOUT any developer-token header. Read-only: one
+// listAccessibleCustomers call + one GAQL search, no mutations, no D1
+// writes. To be removed after the access-level verification completes.
+// ---------------------------------------------------------------------------
+
+export interface GoogleAdsNoTokenTestResult {
+	// Google Cloud project number owning the OAuth client (numeric prefix of
+	// the client id; the project slug is not derivable from the client id).
+	cloud_project_number: string | null;
+	oauth_configured: boolean;
+	missing_oauth_config: string[];
+	oauth_refresh_ok: boolean;
+	oauth_refresh_error: string | null;
+	developer_token_header_sent: false;
+	list_accessible_customers: { ok: boolean; resource_names?: string[]; error?: string };
+	gaql_search: { ok: boolean; row_count?: number; error?: string };
+}
+
+export async function testGoogleAdsNoTokenAccess(
+	env: GoogleAdsEnv,
+): Promise<GoogleAdsNoTokenTestResult> {
+	const clientId = env.GOOGLE_ADS_CLIENT_ID ?? "";
+	const projectNumber = /^(\d+)-/.exec(clientId)?.[1] ?? null;
+	const missing = missingConfiguration(env);
+	const result: GoogleAdsNoTokenTestResult = {
+		cloud_project_number: projectNumber,
+		oauth_configured: missing.length === 0,
+		missing_oauth_config: missing,
+		oauth_refresh_ok: false,
+		oauth_refresh_error: null,
+		developer_token_header_sent: false,
+		list_accessible_customers: { ok: false },
+		gaql_search: { ok: false },
+	};
+	if (missing.length > 0) return result;
+	let accessToken: string;
+	try {
+		const credential = await env.nwana_engine_db.prepare(`
+			SELECT encrypted_refresh_token, iv
+			FROM integration_credentials
+			WHERE provider = ?
+			LIMIT 1
+		`).bind(PROVIDER).first<{
+			encrypted_refresh_token: string;
+			iv: string;
+		}>();
+		if (!credential) {
+			result.oauth_refresh_error = "No stored OAuth credential for GOOGLE_ADS yet.";
+			return result;
+		}
+		const refreshToken = await decryptRefreshToken(
+			credential.encrypted_refresh_token,
+			credential.iv,
+			env.GOOGLE_ADS_TOKEN_KEY!,
+		);
+		accessToken = await refreshAccessToken(refreshToken, env);
+		result.oauth_refresh_ok = true;
+	} catch (error) {
+		result.oauth_refresh_error = error instanceof Error ? error.message : "OAuth refresh failed";
+		return result;
+	}
+	// 1) listAccessibleCustomers — no developer-token header.
+	try {
+		const response = await fetch(
+			`https://googleads.googleapis.com/${API_VERSION}/customers:listAccessibleCustomers`,
+			{ headers: { Authorization: `Bearer ${accessToken}` } },
+		);
+		const payload = await response.json() as {
+			resourceNames?: string[];
+			error?: { code?: number; message?: string; status?: string };
+		};
+		if (!response.ok) {
+			result.list_accessible_customers = {
+				ok: false,
+				error: `HTTP ${response.status} ${payload.error?.status ?? ""}: ${payload.error?.message ?? "request failed"}`.trim(),
+			};
+		} else {
+			result.list_accessible_customers = { ok: true, resource_names: payload.resourceNames ?? [] };
+		}
+	} catch (error) {
+		result.list_accessible_customers = {
+			ok: false,
+			error: error instanceof Error ? error.message : "listAccessibleCustomers failed",
+		};
+	}
+	// 2) One GAQL search on the live customer — no developer-token header.
+	try {
+		const gaql = await runGaql(
+			accessToken,
+			undefined,
+			GOOGLE_ADS_LIVE_CUSTOMER_ID,
+			"SELECT campaign.id, campaign.name, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions " +
+			`FROM campaign WHERE segments.date BETWEEN '2026-08-26' AND '2026-09-28' LIMIT 5`,
+		);
+		result.gaql_search = { ok: true, row_count: gaql.results?.length ?? 0 };
+	} catch (error) {
+		result.gaql_search = {
+			ok: false,
+			error: error instanceof Error ? error.message : "GAQL search failed",
+		};
+	}
+	return result;
 }

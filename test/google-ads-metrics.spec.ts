@@ -1,7 +1,9 @@
 // Parameterized Google Ads live metrics read path.
-// Verifies: developer-token header is always sent, GAQL carries the date
-// window, metric math (CTR, conversion rate, micros -> USD), daily-row
-// aggregation, and OWNER_ACTION_REQUIRED when the token is missing.
+// Post developer-token sunset (2026-09-09): no token is required; access is
+// determined by the Google Cloud project owning the OAuth client. Verifies:
+// GAQL carries the date window, metric math (CTR, conversion rate, micros ->
+// USD), daily-row aggregation, and that the legacy developer-token header is
+// only sent when a token is still configured (never required).
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -145,21 +147,21 @@ describe("buildConversionActionQuery", () => {
 });
 
 describe("getGoogleAdsMetrics", () => {
-	it("returns OWNER_ACTION_REQUIRED and never calls the API when the developer token is missing", async () => {
-		const fetchMock = vi.fn(async () => {
-			throw new Error("must not be called");
-		});
-		vi.stubGlobal("fetch", fetchMock);
+	it("proceeds without a developer token (sunset 2026-09-09) and calls the API", async () => {
 		const recorded: RecordedCall[] = [];
+		stubGoogleAdsFetch(recorded);
 		const env = await makeEnv(recorded, false);
 		const result = await getGoogleAdsMetrics(env, { startDate: "2026-08-26", endDate: "2026-09-23" });
-		expect(result.ok).toBe(false);
-		expect(result.data_quality).toBe("OWNER_ACTION_REQUIRED");
-		expect(result.quality_note).toContain("GOOGLE_ADS_DEVELOPER_TOKEN");
-		expect(fetchMock).not.toHaveBeenCalled();
+		expect(result.ok).toBe(true);
+		const apiCalls = recorded.filter((call) => call.url.includes("googleads.googleapis.com"));
+		expect(apiCalls.length).toBe(4); // campaigns + ad_groups + geo + conversion actions
+		for (const call of apiCalls) {
+			expect(call.headers["developer-token"]).toBeUndefined();
+			expect(call.headers["Authorization"]).toBe("Bearer test-access-token");
+		}
 	});
 
-	it("sends the developer-token header on every googleads.googleapis.com call", async () => {
+	it("sends the legacy developer-token header only when a token is still configured", async () => {
 		const recorded: RecordedCall[] = [];
 		stubGoogleAdsFetch(recorded);
 		const env = await makeEnv(recorded, true);
