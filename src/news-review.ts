@@ -16,6 +16,7 @@
 // every channel stays manual last mile.
 
 import { buildPack, type PackChannel, type PackObjectData } from "./manual-distribution-packs";
+import { getFacebookPageToken } from "./meta-result-publisher";
 
 export interface NewsReviewArticle {
 	article_id: string;
@@ -268,4 +269,101 @@ export async function markDistributionSent(
 	});
 
 	return jsonResponse({ ok: true, distribution_id: distId, status: "sent" });
+}
+
+/**
+ * Owner publishes a prepared news item to the connected Facebook Pages.
+ * Unlike approve/mark-sent, this endpoint performs the actual publish via
+ * the Meta Graph API using the Worker's NWANA_META_TOKEN (page tokens are
+ * derived per page). Text-only post via /{page-id}/feed.
+ *
+ * Duplicate-safe: a distribution already marked 'sent' is skipped.
+ */
+export async function publishNewsToFacebook(
+	db: D1Database,
+	metaToken: string,
+	articleId: string,
+): Promise<Response> {
+	const id = (articleId ?? "").trim();
+	if (!id) return jsonResponse({ ok: false, error: "article_id is required" }, 400);
+
+	const articleRow = await db
+		.prepare(`SELECT article_id, title FROM media_articles WHERE article_id = ?`)
+		.bind(id)
+		.first<{ article_id: string; title: string }>();
+	if (!articleRow) return jsonResponse({ ok: false, error: `News article not found: ${id}` }, 404);
+
+	const packData = NEWS_PACK_DATA[id];
+	if (!packData) return jsonResponse({ ok: false, error: `No verified pack data for article: ${id}` }, 409);
+	const pack = buildPack("news_item", packData, "generic");
+	if (pack.missingFields.length > 0) {
+		return jsonResponse({ ok: false, error: `Pack missing fields: ${pack.missingFields.join(", ")}` }, 409);
+	}
+
+	if (!metaToken) return jsonResponse({ ok: false, error: "NWANA_META_TOKEN is not configured" }, 503);
+
+	const targets = [
+		{ pageId: "595301193675669", name: "NWANA", channel: "meta-fb-ig" },
+		{ pageId: "103190499173992", name: "Nordic Walking Sport", channel: "meta-sport" },
+	] as const;
+
+	const results: Record<string, unknown> = {};
+	for (const target of targets) {
+		const distRow = await db
+			.prepare(
+				`SELECT distribution_id, status FROM media_distributions
+				 WHERE article_id = ? AND channel = ? ORDER BY created_at DESC LIMIT 1`,
+			)
+			.bind(id, target.channel)
+			.first<{ distribution_id: string; status: string }>();
+		if (distRow?.status === "sent") {
+			results[target.channel] = { skipped_duplicate: true, distribution_id: distRow.distribution_id };
+			continue;
+		}
+		try {
+			const pageToken = await getFacebookPageToken(metaToken, target.pageId);
+			const body = new URLSearchParams({ message: pack.text, access_token: pageToken });
+			const resp = await fetch(`https://graph.facebook.com/v23.0/${target.pageId}/feed`, {
+				method: "POST",
+				body,
+			});
+			const data = (await resp.json()) as Record<string, unknown>;
+			if (!resp.ok || typeof data.id !== "string") {
+				throw new Error(`Meta publish failed (${resp.status}): ${JSON.stringify(data).slice(0, 200)}`);
+			}
+			const postId = data.id as string;
+			if (distRow) {
+				await db
+					.prepare(
+						`UPDATE media_distributions
+						 SET status = 'sent', sent_at = CURRENT_TIMESTAMP,
+						     external_url = ?, notes = COALESCE(notes, '') || ?
+						 WHERE distribution_id = ?`,
+					)
+					.bind(
+						`https://www.facebook.com/${postId}`,
+						` | Published by Machine via Graph API, post ${postId}`,
+						distRow.distribution_id,
+					)
+					.run();
+			}
+			await audit(db, distRow?.distribution_id ?? id, "NEWS_DISTRIBUTION_SENT", {
+				article_id: id,
+				channel: target.channel,
+				page: target.name,
+				external_id: postId,
+				published_by: "machine",
+				note: "Machine published the prepared news text to the Facebook Page via Graph API.",
+			});
+			results[target.channel] = { ok: true, external_id: postId, distribution_id: distRow?.distribution_id ?? null };
+		} catch (error) {
+			results[target.channel] = {
+				ok: false,
+				error: error instanceof Error ? error.message : String(error),
+				distribution_id: distRow?.distribution_id ?? null,
+			};
+		}
+	}
+
+	return jsonResponse({ ok: true, article_id: id, results });
 }

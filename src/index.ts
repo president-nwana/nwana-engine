@@ -84,7 +84,7 @@ import {
 import { renderFundsHtml } from "./operating-center-funds";
 import { renderMediaHtml } from "./operating-center-media";
 import { renderNewsReviewHtml } from "./operating-center-news-review";
-import { approveNewsReview, getNewsReview, markDistributionSent } from "./news-review";
+import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFacebook } from "./news-review";
 import { getExecutiveMoneyView } from "./operating-center-money";
 import { renderSponsorshipHtml } from "./operating-center-sponsorship";
 import { renderActivityHtml } from "./operating-center-activity";
@@ -6098,6 +6098,10 @@ export default {
 		if (url.pathname === "/api/operating-center/news/review/mark-sent" && request.method === "POST") {
 			const body = (await request.json().catch(() => ({}))) as { distribution_id?: string };
 			return markDistributionSent(env.nwana_engine_db, body.distribution_id ?? "");
+		}
+		if (url.pathname === "/api/operating-center/news/publish-facebook" && request.method === "POST") {
+			const body = (await request.json().catch(() => ({}))) as { article_id?: string };
+			return publishNewsToFacebook(env.nwana_engine_db, env.NWANA_META_TOKEN, body.article_id ?? "");
 		}
 		if (url.pathname === "/api/operating-center/media/plans" && request.method === "GET") {
 			return listMediaPlans(env.nwana_engine_db);
