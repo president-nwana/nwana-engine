@@ -1211,6 +1211,15 @@ export interface GoogleAdsNoTokenTestResult {
 	developer_token_header_sent: false;
 	list_accessible_customers: { ok: boolean; resource_names?: string[]; error?: string };
 	gaql_search: { ok: boolean; row_count?: number; error?: string };
+	aug26_sep28_totals: {
+		ok: boolean;
+		impressions?: number;
+		clicks?: number;
+		cost_usd?: number;
+		conversions?: number;
+		data_quality?: string;
+		error?: string;
+	} | null;
 }
 
 export async function testGoogleAdsNoTokenAccess(
@@ -1228,6 +1237,7 @@ export async function testGoogleAdsNoTokenAccess(
 		developer_token_header_sent: false,
 		list_accessible_customers: { ok: false },
 		gaql_search: { ok: false },
+		aug26_sep28_totals: null,
 	};
 	if (missing.length > 0) return result;
 	let accessToken: string;
@@ -1294,6 +1304,33 @@ export async function testGoogleAdsNoTokenAccess(
 		result.gaql_search = {
 			ok: false,
 			error: error instanceof Error ? error.message : "GAQL search failed",
+		};
+	}
+	// 3) Full Aug 26 - Sep 28 production read via the canonical metrics path
+	// (same code the OC endpoint uses), no developer token.
+	try {
+		const metrics = await getGoogleAdsMetrics(env, {
+			startDate: "2026-08-26",
+			endDate: "2026-09-28",
+		});
+		result.aug26_sep28_totals = metrics.ok
+			? {
+				ok: true,
+				impressions: metrics.account_totals.impressions,
+				clicks: metrics.account_totals.clicks,
+				cost_usd: metrics.account_totals.cost_usd,
+				conversions: metrics.account_totals.conversions,
+				data_quality: metrics.data_quality,
+			}
+			: {
+				ok: false,
+				data_quality: metrics.data_quality,
+				error: metrics.error ?? metrics.quality_note ?? "metrics read failed",
+			};
+	} catch (error) {
+		result.aug26_sep28_totals = {
+			ok: false,
+			error: error instanceof Error ? error.message : "metrics read failed",
 		};
 	}
 	return result;
