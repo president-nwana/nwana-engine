@@ -7,6 +7,14 @@
 	"name": "nwana-engine",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-09-07",
+	// ADR-0042: one daily trigger evaluates the Series 2026 result-processing
+	// trigger for every event (deadline wake-up). 1 execution = 1 request
+	// against the 100k/day Workers Free allowance: VERIFIED $0.
+	// The pre-existing */5 trigger is preserved untouched (no handler in
+	// code; origin unknown).
+	"triggers": {
+		"crons": ["*/5 * * * *", "17 6 * * *"]
+	},
 	"observability": {
 		"enabled": true
 	},
@@ -43,7 +51,8 @@
 	 */
 	// "vars": {  "MY_VARIABLE": "production_value" }
 	"vars": {
-		"OPERATING_CENTER_ENABLED": "true"
+		"OPERATING_CENTER_ENABLED": "true",
+		"PUBLIC_BASE_URL": "https://nwana-engine.nwana-engine.workers.dev"
 	},
 	/**
 	 * Static Assets

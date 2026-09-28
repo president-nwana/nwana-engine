@@ -102,12 +102,15 @@ const RESULTS_SUMMARY_HTML = RESULTS_CSS + `<section class="panel"><h2>Results s
 <section class="panel"><h2>Registrations vs results — four separate metrics</h2><div id="results-reg">Loading…</div></section>`;
 
 const RESULTS_ACTIONS_HTML = `<section class="panel"><h2>Results actions</h2>
-	<p class="meta"><strong>Machine (automatic):</strong> computes performance levels, points, and level places on demand and keeps the per-distance lifecycle. Syncing from RunSignup is manual — the Machine no longer syncs on page load. <strong>Owner (manual):</strong> the actions below. Publishing a result always needs your explicit confirmation.</p>
+	<p class="meta"><strong>Your one decision per event:</strong> review and approve results below. <strong>After approval the Machine runs everything itself</strong> — levels, level places, points, standings, publication, winner news, social congratulations, next-race promotion. No separate confirmations below this line. <strong>Machine (automatic):</strong> computes performance levels, points, and level places on demand and keeps the per-distance lifecycle. <strong>Owner (manual):</strong> approving results, refreshing sync, confirming prep.</p>
+	<h3>Approve results</h3>
+	<div id="results-approve-actions"><div class="unavailable">Loading…</div></div>
 	<div id="results-act">Loading…</div>
 	<h3 style="margin-top:16px">Sync registrations</h3><p class="meta">One POST to /api/series-2026/registrations/sync — pulls RunSignup participant records for all 6 Series 2026 races into the registration data layer (separate from results). Manual only.</p>
 	<div class="item"><strong>Registration sync</strong><div class="detail" id="results-reg-sync-status">Not synced in this session.</div><div class="btnrow"><button type="button" class="secondary" id="results-reg-sync-btn">Sync registrations now</button></div><div class="message" aria-live="polite"></div></div></section>`;
 
 const RESULTS_DETAILS_HTML = `<section class="panel"><h2>Sync status</h2><div class="sync-status" id="results-det-sync">Loading…</div></section>
+	<section class="panel"><h2>Athlete pipeline — Registered → Submitted → Approved → Processed → Published</h2><div id="results-det-pipeline">Loading…</div></section>
 	<section class="panel"><h2>Full lifecycle</h2><div id="results-det-lifecycle">Loading…</div></section>
 	<section class="panel"><h2>Results by event and level</h2><div id="results-det-results">Loading…</div></section>`;
 
@@ -163,7 +166,6 @@ const RESULTS_SCRIPT = `
 		const box=document.querySelector('#results-sum');
 		try{
 			const life=await results_fetchLifecycle();
-			const prev=await results_fetchPreview();
 			const distances=life.distances||[];
 			let html='';
 			for(const d of distances){
@@ -183,7 +185,7 @@ const RESULTS_SCRIPT = `
 			html+='<div class="item"><strong>Prep awaiting review</strong><div class="detail">'+(prepCount?prepCount+' race(s) in next-race prep — confirm in Actions.':'None.')+'</div></div>';
 			const attn=[];
 			for(const d of distances){
-				if(d.stage==='verifying')attn.push(d.distance+' is stuck in verifying — owner verification needed.');
+				if(d.stage==='verifying')attn.push(d.distance+' is in verifying — approve its results in Actions to run the full pipeline.');
 				if(!d.synced_at)attn.push(d.distance+' has never been synced from RunSignup.');
 			}
 			if(!prev.error){
@@ -191,7 +193,7 @@ const RESULTS_SCRIPT = `
 				if(ready.length)attn.push(ready.length+' result(s) ready for publication — publish them in Actions.');
 			}
 			html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(esc).join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
-			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Computes performance levels, level places, and points from verified results and keeps the per-distance lifecycle (registration_open → awaiting_results → verifying → levels_computed → published → next_race_prep). Results are synced manually from Actions; nothing publishes without your confirmation.</div></div>';
+			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Computes performance levels, level places, and points from approved results and keeps the per-distance lifecycle (registration_open → awaiting_results → verifying → levels_computed → published → next_race_prep). You approve results in Actions — after that the Machine runs levels, standings, publication, winner news, social, and next-race promotion by itself.</div></div>';
 			box.innerHTML=html;
 			try{
 				const part=await results_fetchParticipation();
@@ -203,7 +205,6 @@ const RESULTS_SCRIPT = `
 		const box=document.querySelector('#results-act');
 		try{
 			const life=await results_fetchLifecycle();
-			const prev=await results_fetchPreview();
 			const distances=life.distances||[];
 			let html='<h3>Refresh sync</h3><p class="meta">One POST per distance to /api/operating-center/race-lifecycle/sync. The Machine does not sync automatically.</p>'+
 				distances.map(d=>'<div class="item"><strong>'+esc(d.distance)+'</strong><div class="detail">'+(d.synced_at?'Last synced '+esc(d.synced_at):'Never synced')+'</div><div class="btnrow"><button type="button" class="secondary" data-sync="'+esc(d.distance)+'">Refresh '+esc(d.distance)+'</button></div><div class="message" aria-live="polite"></div></div>').join('');
@@ -214,7 +215,6 @@ const RESULTS_SCRIPT = `
 			}else{
 				html+='<div class="unavailable">No race in prep review right now.</div>';
 			}
-			html+='<h3>Publish results</h3><div id="results-pub-actions"><div class="unavailable">Loading…</div></div>';
 			box.innerHTML=html;
 			box.querySelectorAll('[data-sync]').forEach(function(btn){
 				btn.addEventListener('click',async()=>{
@@ -234,32 +234,55 @@ const RESULTS_SCRIPT = `
 					}catch(err){msg.textContent=err.message}
 				});
 			});
-			const pubBox=box.querySelector('#results-pub-actions');
-			if(prev.error){pubBox.innerHTML='<div class="unavailable">'+esc(prev.error)+'</div>';}
+			// ADR-0042: result approval UI. After approval the Machine runs
+			// levels, standings, publication, winner news, social, next-race
+			// promo by itself — no separate publish action exists anymore.
+			const approveBox=document.querySelector('#results-approve-actions');
+			const activeEvents=distances.map(d=>({distance:d.distance,event:d.active_event})).filter(x=>x.event&&x.event.event_id);
+			if(!activeEvents.length){approveBox.innerHTML='<div class="unavailable">No active events with results.</div>';}
 			else{
-				const ready=(prev.drafts||[]).filter(d=>d.publication_required);
-				if(!ready.length){pubBox.innerHTML='<div class="unavailable">No results ready for publication.</div>';}
-				else{
-					pubBox.innerHTML=ready.map(d=>{
-						const title=(d.editorial_draft&&d.editorial_draft.title)||d.publication_key;
-						return '<div class="item"><strong>'+esc(title)+'</strong>'+
-							'<div class="detail">'+esc((d.source&&d.source.distance)||'')+' · Status: '+esc(d.publication_status)+'</div>'+
-							'<div class="btnrow"><button type="button" class="secondary" data-pubkey="'+esc(d.publication_key)+'">Publish result</button></div></div>';
-					}).join('');
-					pubBox.querySelectorAll('[data-pubkey]').forEach(function(btn){
-						btn.addEventListener('click',async()=>{
-							const key=btn.dataset.pubkey;
-							if(!confirm('Publish this result?\\n\\nDestinations: 4 Meta pages + NWANA site news (winner announcement + next-race promo).\\nThis cannot be undone.'))return;
-							btn.disabled=true;
+				const opts=activeEvents.map(x=>'<option value="'+esc(x.distance)+'|'+x.event.event_id+'">'+esc(x.distance)+' — '+esc(x.event.event_name||('Event '+x.event.event_id))+' · '+esc(x.event.event_date||'')+'</option>').join('');
+				approveBox.innerHTML='<div class="item"><strong>Event</strong><div class="btnrow"><select id="results-approve-event" style="max-width:100%">'+opts+'</select><button type="button" class="secondary" id="results-approve-load">Load results</button></div></div><div id="results-approve-table"></div><div class="message" id="results-approve-msg" aria-live="polite"></div>';
+				const loadBtn=approveBox.querySelector('#results-approve-load');
+				loadBtn.addEventListener('click',async()=>{
+					const sel=approveBox.querySelector('#results-approve-event').value.split('|');
+					const distance=sel[0],eventId=sel[1];
+					const tbl=approveBox.querySelector('#results-approve-table');
+					const msg=approveBox.querySelector('#results-approve-msg');
+					tbl.innerHTML='<div class="unavailable">Loading…</div>';msg.textContent='';
+					try{
+						const data=await api('/api/operating-center/series-2026/results/pending?distance='+encodeURIComponent(distance)+'&event_id='+encodeURIComponent(eventId));
+						const rows=data.results||[];
+						if(!rows.length){tbl.innerHTML='<div class="unavailable">No results on RunSignup for this event.</div>';return;}
+						tbl.innerHTML='<table><thead><tr><th></th><th>Athlete</th><th>Time</th><th>Approved</th></tr></thead><tbody>'+
+							rows.map(r=>'<tr><td>'+(r.approved?'':'<input type="checkbox" data-rid="'+esc(r.result_id)+'">')+'</td><td>'+esc(r.athlete)+'</td><td>'+esc(r.time||'—')+'</td><td>'+(r.approved?'<span class="ok">Approved</span>':'<span class="err">Pending</span>')+'</td></tr>').join('')+
+							'</tbody></table>'+
+							'<div class="meta">Trigger: '+esc(data.trigger.detail)+'</div>'+
+							'<div class="btnrow"><button type="button" class="secondary" id="results-approve-sel">Approve selected</button><button type="button" class="secondary" id="results-approve-all">Approve all pending</button><button type="button" class="secondary" id="results-approve-retry">Process now (retry)</button></div>';
+						async function doApprove(ids){
+							if(!ids.length){msg.textContent='Nothing selected.';return;}
+							if(!confirm('Approve '+ids.length+' result(s)?\\n\\nAfter approval the Machine runs the full downstream lifecycle automatically: levels, points, standings, publication, winner news, social congratulations, next-race promotion.'))return;
+							msg.textContent='Approving… the Machine is running the downstream lifecycle. This may take a minute.';
 							try{
-								const res=await api('/result-publications/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({publication_key:key,confirmation:'PUBLISH'})});
-								alert(res.already_published?'Already published.':'Published.');
-								btn.disabled=false;
-								const item=btn.closest('.item');if(item)item.remove();
-							}catch(err){alert(err.message);btn.disabled=false}
+								const res=await api('/api/operating-center/series-2026/results/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:distance,event_id:Number(eventId),result_ids:ids})});
+								if(res.process&&res.process.ok){msg.textContent='Done: approved '+res.approved+', trigger '+res.trigger.reason+', all steps ok.';}
+								else if(res.process){msg.textContent='Approved '+res.approved+', but processing failed: '+(res.process.error||'see Details');}
+								else{msg.textContent='Approved '+res.approved+'. Trigger not fired: '+res.trigger.detail;}
+								loadBtn.click();
+							}catch(err){msg.textContent=err.message}
+						}
+						tbl.querySelector('#results-approve-sel').addEventListener('click',()=>doApprove(Array.from(tbl.querySelectorAll('input[data-rid]:checked')).map(c=>c.dataset.rid)));
+						tbl.querySelector('#results-approve-all').addEventListener('click',()=>doApprove(Array.from(tbl.querySelectorAll('input[data-rid]')).map(c=>c.dataset.rid)));
+						tbl.querySelector('#results-approve-retry').addEventListener('click',async()=>{
+							msg.textContent='Evaluating trigger…';
+							try{
+								const res=await api('/api/operating-center/series-2026/results/process-now',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:distance,event_id:Number(eventId)})});
+								msg.textContent=res.fired?(res.process&&res.process.ok?'Processing finished: all steps ok.':'Processing failed: '+(res.process&&res.process.error||'unknown')):('Not fired: '+res.trigger.detail);
+								loadBtn.click();
+							}catch(err){msg.textContent=err.message}
 						});
-					});
-				}
+					}catch(err){tbl.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+				});
 			}
 			const regBtn=box.querySelector('#results-reg-sync-btn');
 			if(regBtn){
@@ -299,6 +322,28 @@ const RESULTS_SCRIPT = `
 				const res=await api('/api/operating-center/race-results');
 				resBox.innerHTML=results_resultsHtml(res);
 			}catch(err){resBox.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+			const pipeBox=document.querySelector('#results-det-pipeline');
+			try{
+				const evs=distances.map(d=>({distance:d.distance,event:d.active_event})).filter(x=>x.event&&x.event.event_id);
+				if(!evs.length){pipeBox.innerHTML='<div class="unavailable">No active events.</div>';}
+				else{
+					pipeBox.innerHTML='<div class="btnrow"><select id="results-pipe-event">'+evs.map(x=>'<option value="'+esc(x.distance)+'|'+x.event.event_id+'">'+esc(x.distance)+' — '+esc(x.event.event_name||('Event '+x.event.event_id))+'</option>').join('')+'</select><button type="button" class="secondary" id="results-pipe-load">Load pipeline</button></div><div id="results-pipe-table" style="margin-top:8px"></div>';
+					pipeBox.querySelector('#results-pipe-load').addEventListener('click',async()=>{
+						const sel=pipeBox.querySelector('#results-pipe-event').value.split('|');
+						const tbl=pipeBox.querySelector('#results-pipe-table');
+						tbl.innerHTML='<div class="unavailable">Loading…</div>';
+						try{
+							const data=await api('/api/operating-center/series-2026/results/pipeline?distance='+encodeURIComponent(sel[0])+'&event_id='+encodeURIComponent(sel[1]));
+							const rows=data.athletes||[];
+							if(!rows.length){tbl.innerHTML='<div class="unavailable">No athletes in this pipeline yet.</div>';return;}
+							const dot=v=>v?'<span class="ok">●</span>':'<span class="meta">○</span>';
+							tbl.innerHTML='<table><thead><tr><th>Athlete</th><th>Reg.</th><th>Sub.</th><th>Appr.</th><th>Proc.</th><th>Publ.</th><th>Result</th><th>Level</th><th>Level place</th><th>Points</th></tr></thead><tbody>'+
+								rows.map(r=>'<tr><td>'+esc(r.athlete)+'</td><td>'+dot(r.registered)+'</td><td>'+dot(r.submitted)+'</td><td>'+dot(r.approved)+'</td><td>'+dot(r.processed)+'</td><td>'+dot(r.published)+'</td><td>'+esc(r.result||'—')+'</td><td>'+esc(r.level||'—')+'</td><td>'+esc(r.levelPlace||'—')+'</td><td>'+(r.points==null?'—':esc(String(r.points)))+'</td></tr>').join('')+
+								'</tbody></table>';
+						}catch(err){tbl.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+					});
+				}
+			}catch(err){pipeBox.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}catch(err){
 			const m=document.querySelector('#tabpanel-results .oc-tab-error');
 			if(m)m.textContent='Error: '+(err.message||err);
@@ -308,7 +353,7 @@ const RESULTS_SCRIPT = `
 
 const RESULTS_PANELS = ocFunction(
 	"results",
-	"Series 2026 race results — live lifecycle per distance, publication status, and sync state. The Machine computes levels and points; you refresh, confirm, and publish.",
+	"Series 2026 race results — live lifecycle per distance, athlete pipeline, and approval actions. You approve results; the Machine runs the rest.",
 	RESULTS_SUMMARY_HTML,
 	RESULTS_ACTIONS_HTML,
 	RESULTS_DETAILS_HTML,

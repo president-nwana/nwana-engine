@@ -10,21 +10,31 @@ import {
         type DistributionObject,
         type DistributionRule,
 } from "./distribution-planner";
-import { applySeries2026PublicationHistory, previewSeries2026ResultPublications } from "./series-2026-results";
+import { applySeries2026PublicationHistory, previewSeries2026ResultPublications, SERIES_2026_SOURCES } from "./series-2026-results";
+import { getEventApprovals, recordResultApproval } from "./series-2026-approvals";
+import {
+	autoProcessEvent,
+	evaluateEventTrigger,
+	fetchLiveEventResults,
+	getAthletePipeline,
+	isEventPublished,
+} from "./series-2026-auto-process";
 import {
 	confirmRaceLifecyclePrep,
 	getRaceLifecycleView,
 	getRaceResultsView,
+	RACE_LIFECYCLE_SERIES,
 	syncRaceLifecycleDistance,
 	testSeries2026WriteAccess,
 } from "./race-lifecycle";
-import { applySeries2026Levels } from "./series-2026-apply";
+import { applySeries2026Levels, AUTO_APPROVED_CONFIRMATION } from "./series-2026-apply";
 import {
 	getSeries2026ParticipationOverview,
 	syncSeries2026Registrations,
 } from "./series-2026-registrations";
 import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
+import { executeResultPublication } from "./result-publication-core";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
 import { SEP_26_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-26-2026-3k-result-card";
 import {
@@ -189,6 +199,7 @@ interface Env {
 	GOOGLE_YOUTUBE_REDIRECT_URI?: string;
 	OPERATING_CENTER_ENABLED?: string;
 	OPERATING_CENTER_KEY?: string;
+	PUBLIC_BASE_URL?: string;
 	IMAGES: ImagesBinding;
 }
 
@@ -5517,11 +5528,6 @@ async function establishSeries2026ResultPublicationBaseline(
 }
 
 
-interface ResultDeliveryRow {
-	destination: string;
-	status: string;
-	external_id: string | null;
-}
 
 async function getMetaConnectionStatus(env: Env): Promise<Response> {
 	if (!env.NWANA_META_TOKEN) {
@@ -5550,24 +5556,6 @@ async function getMetaConnectionStatus(env: Env): Promise<Response> {
 	});
 }
 
-async function saveResultDelivery(
-	db: D1Database,
-	publicationKey: string,
-	destination: string,
-	externalId: string,
-): Promise<void> {
-	await db.prepare(`
-		INSERT INTO result_publication_deliveries (
-			publication_key, destination, status, external_id, published_at
-		) VALUES (?, ?, 'PUBLISHED', ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(publication_key, destination) DO UPDATE SET
-			status = 'PUBLISHED',
-			external_id = excluded.external_id,
-			last_error = NULL,
-			published_at = CURRENT_TIMESTAMP,
-			updated_at = CURRENT_TIMESTAMP
-	`).bind(publicationKey, destination, externalId).run();
-}
 
 async function publishSeries2026Result(
 	request: Request,
@@ -5588,6 +5576,18 @@ async function publishSeries2026Result(
 	}
 	if (!body.publication_key) {
 		return json({ ok: false, error: "publication_key is required" }, 400);
+	}
+	// History first: already_published short-circuits before any external
+	// call or credential requirement (idempotent re-entry).
+	const existing = await env.nwana_engine_db.prepare(`
+		SELECT status FROM result_publication_history
+		WHERE publication_key = ? LIMIT 1
+	`).bind(body.publication_key).first<{ status: string }>();
+	if (existing?.status === "LEGACY_BASELINE") {
+		return json({ ok: false, error: "Historical baseline results cannot be published as new" }, 409);
+	}
+	if (existing?.status === "PUBLISHED") {
+		return json({ ok: true, already_published: true, publication_key: body.publication_key });
 	}
 	if (!isResultCardDesignReady()) {
 		return json({
@@ -5614,166 +5614,32 @@ async function publishSeries2026Result(
 	if (!env.NWANA_META_TOKEN) {
 		return json({ ok: false, error: "NWANA_META_TOKEN is not configured" }, 503);
 	}
-
-	const existing = await env.nwana_engine_db.prepare(`
-		SELECT status FROM result_publication_history
-		WHERE publication_key = ? LIMIT 1
-	`).bind(body.publication_key).first<{ status: string }>();
-	if (existing?.status === "LEGACY_BASELINE") {
-		return json({ ok: false, error: "Historical baseline results cannot be published as new" }, 409);
-	}
-	if (existing?.status === "PUBLISHED") {
-		return json({ ok: true, already_published: true, publication_key: body.publication_key });
+	if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+		return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
 	}
 
 	const raceId = Number(body.publication_key.split(":")[2]);
 	if (!Number.isInteger(raceId)) {
 		return json({ ok: false, error: "Invalid result publication key" }, 400);
 	}
-	const preview = await previewSeries2026ResultPublications(
-		env.RUNSIGNUP_ACCESS_TOKEN,
-		{ raceId },
-	);
-	const draft = preview.drafts.find((value) => value.publication_key === body.publication_key);
-	if (!draft || !draft.ready_for_editorial_review || !draft.editorial_draft.ready_for_approval) {
-		return json({ ok: false, error: "Publication draft is missing or not ready" }, 409);
-	}
 
-	await env.nwana_engine_db.prepare(`
-		INSERT INTO result_publication_history (
-			publication_key, series, status, race_id, event_id, result_set_id, metadata
-		) VALUES (?, 'SERIES_2026', 'APPROVED', ?, ?, ?, ?)
-		ON CONFLICT(publication_key) DO UPDATE SET
-			status = CASE WHEN status = 'PUBLISHED' THEN status ELSE 'APPROVED' END,
-			metadata = excluded.metadata,
-			updated_at = CURRENT_TIMESTAMP
-	`).bind(
-		draft.publication_key,
-		draft.source.race_id,
-		draft.source.event_id,
-		draft.source.result_set_id,
-		JSON.stringify({ editorial_draft: draft.editorial_draft, image_url: imageUrl.toString() }),
-	).run();
-
-	const deliveryResult = await env.nwana_engine_db.prepare(`
-		SELECT destination, status, external_id
-		FROM result_publication_deliveries
-		WHERE publication_key = ?
-	`).bind(draft.publication_key).all<ResultDeliveryRow>();
-	const delivered = new Map(deliveryResult.results.map((row) => [row.destination, row]));
-	const result: Record<string, unknown> = {};
-
-	const facebookDestinations = [
-		RESULT_DESTINATIONS.facebookNwana,
-		RESULT_DESTINATIONS.facebookNordicWalkingSport,
-	] as const;
-	for (const destination of facebookDestinations) {
-		if (delivered.get(destination.ledgerKey)?.status === "PUBLISHED") {
-			result[destination.ledgerKey] = {
-				skipped_duplicate: true,
-				external_id: delivered.get(destination.ledgerKey)?.external_id,
-			};
-			continue;
-		}
-		const pageToken = await getFacebookPageToken(
-			env.NWANA_META_TOKEN,
-			destination.pageId,
-		);
-		const published = await publishFacebookResult({
-			pageId: destination.pageId,
-			message: draft.editorial_draft.post_text,
+	// The core checks publication history first (idempotent: already_published
+	// short-circuits before any external call), then resolves the preview.
+	try {
+		const published = await executeResultPublication({
+			db: env.nwana_engine_db,
+			runSignupToken: env.RUNSIGNUP_ACCESS_TOKEN,
+			metaToken: env.NWANA_META_TOKEN,
+			publicationKey: body.publication_key,
 			imageUrl: imageUrl.toString(),
-			pageToken,
+			authorizedBy: { kind: "owner_publish_confirmation" },
 		});
-		await saveResultDelivery(
-			env.nwana_engine_db,
-			draft.publication_key,
-			destination.ledgerKey,
-			published.external_id,
-		);
-		result[destination.ledgerKey] = published;
+		return json(published);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : "Publication failed";
+		const status = /missing or not ready|cannot be published as new|Invalid result publication key/.test(message) ? 409 : 500;
+		return json({ ok: false, error: message }, status);
 	}
-
-	const instagramDestinations = [
-		RESULT_DESTINATIONS.instagramNwanaOfficial,
-		RESULT_DESTINATIONS.instagramNwSport,
-	] as const;
-	for (const destination of instagramDestinations) {
-		if (delivered.get(destination.ledgerKey)?.status === "PUBLISHED") {
-			result[destination.ledgerKey] = {
-				skipped_duplicate: true,
-				external_id: delivered.get(destination.ledgerKey)?.external_id,
-			};
-			continue;
-		}
-		const published = await publishInstagramResult({
-			accountId: destination.accountId,
-			caption: draft.editorial_draft.post_text,
-			imageUrl: imageUrl.toString(),
-			userToken: env.NWANA_META_TOKEN,
-		});
-		await saveResultDelivery(
-			env.nwana_engine_db,
-			draft.publication_key,
-			destination.ledgerKey,
-			published.external_id,
-		);
-		result[destination.ledgerKey] = published;
-	}
-
-	await env.nwana_engine_db.prepare(`
-		UPDATE result_publication_history
-		SET status = 'PUBLISHED', updated_at = CURRENT_TIMESTAMP
-		WHERE publication_key = ?
-	`).bind(draft.publication_key).run();
-
-	// Engine-side news auto-publish (ADR-0011): the owner's explicit PUBLISH
-	// confirmation above authorizes one winner announcement on the public
-	// site's news feed. Internal D1 write only; nothing external is sent.
-	const siteNews = await autoPublishWinnerNews(env.nwana_engine_db, {
-		publicationKey: draft.publication_key,
-		series: "SERIES_2026",
-		raceId: draft.source.race_id,
-		eventId: draft.source.event_id,
-	});
-
-	// Next-race promo auto-publish (ADR-0013): the same PUBLISH confirmation
-	// authorizes one promo for the next not-yet-run event of the same
-	// series and distance, closing the publication -> next event loop.
-	// Internal D1 write only; skips with a reported reason when there is
-	// no upcoming event, never failing the publication.
-	const nextRaceNews = await autoPublishNextRacePromo(env.nwana_engine_db, {
-		publicationKey: draft.publication_key,
-		series: "SERIES_2026",
-		raceId: draft.source.race_id,
-		eventId: draft.source.event_id,
-	});
-
-	// Audit: the owner's explicit PUBLISH confirmation is a consequential
-	// action; record it so the Activity feed shows what was published,
-	// where, and when.
-	await env.nwana_engine_db.prepare(`
-		INSERT INTO audit_events (audit_id, object_id, action, module, status, details)
-		VALUES (?, ?, 'RESULT_PUBLISHED', 'RESULTS', 'PUBLISHED', ?)
-	`).bind(
-		`AUDIT-${crypto.randomUUID()}`,
-		draft.publication_key,
-		JSON.stringify({
-			publication_key: draft.publication_key,
-			destinations: Object.keys(result),
-			site_news: siteNews,
-			next_race_news: nextRaceNews,
-		}),
-	).run();
-
-	return json({
-		ok: true,
-		publication_key: draft.publication_key,
-		status: "PUBLISHED",
-		deliveries: result,
-		site_news: siteNews,
-		next_race_news: nextRaceNews,
-	});
 }
 
 export default {
@@ -6397,6 +6263,174 @@ export default {
 			}
 		}
 
+		// ADR-0042: owner approves results; the Machine runs the downstream
+		// lifecycle. Approvals are the only owner action here; everything
+		// after them is automatic. All routes are owner-key gated by the
+		// /api/operating-center/* prefix gate above.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/series-2026/results/pending") {
+			try {
+				const distance = url.searchParams.get("distance") ?? "";
+				const eventId = Number(url.searchParams.get("event_id"));
+				const source = SERIES_2026_SOURCES.find((s) => s.distance === distance);
+				if (!source || !Number.isInteger(eventId)) {
+					return json({ ok: false, error: "distance and event_id are required" }, 400);
+				}
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const autoEnv = {
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					apiCallerToken: env.RUNSIGNUP_API_REG,
+					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+					publicBaseUrl: new URL(request.url).origin,
+				};
+				const live = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				const approvals = await getEventApprovals(env.nwana_engine_db, distance, eventId);
+				const trigger = await evaluateEventTrigger(autoEnv, { distance, raceId: source.raceId, eventId });
+				return json({
+					ok: true,
+					distance,
+					event_id: eventId,
+					results: live.map((r) => ({
+						result_id: r.result_id,
+						athlete: r.athlete,
+						gender: r.gender,
+						time: r.time,
+						approved: approvals.has(r.result_id),
+						approved_at: approvals.get(r.result_id)?.approvedAt ?? null,
+					})),
+					trigger: {
+						fire: trigger.fire,
+						reason: trigger.reason,
+						detail: trigger.detail,
+						deadline: trigger.deadline,
+						missing_submissions: trigger.missingSubmissions,
+						unapproved: trigger.unapprovedResults.map((r) => r.result_id),
+					},
+				});
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Pending approvals failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/results/approve") {
+			try {
+				const body = await request.json() as { distance?: string; event_id?: number; result_ids?: string[] };
+				const distance = body.distance ?? "";
+				const eventId = Number(body.event_id);
+				const resultIds = Array.isArray(body.result_ids) ? body.result_ids.filter((id) => typeof id === "string") : [];
+				const source = SERIES_2026_SOURCES.find((s) => s.distance === distance);
+				if (!source || !Number.isInteger(eventId) || resultIds.length === 0) {
+					return json({ ok: false, error: "distance, event_id and result_ids[] are required" }, 400);
+				}
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const autoEnv = {
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					metaToken: env.NWANA_META_TOKEN,
+					apiCallerToken: env.RUNSIGNUP_API_REG,
+					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+					publicBaseUrl: new URL(request.url).origin,
+				};
+				const live = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				const liveById = new Map(live.map((r) => [r.result_id, r]));
+				const recorded = [];
+				for (const resultId of resultIds) {
+					const row = liveById.get(resultId);
+					if (!row) {
+						return json({ ok: false, error: `Result ${resultId} is not in the live RunSignup result set; refusing to approve unseen data` }, 409);
+					}
+					recorded.push(await recordResultApproval(env.nwana_engine_db, {
+						distance,
+						raceId: source.raceId,
+						eventId,
+						resultId,
+						athlete: row.athlete,
+						time: row.time,
+						source: "oc",
+					}));
+				}
+				const trigger = await evaluateEventTrigger(autoEnv, { distance, raceId: source.raceId, eventId });
+				let process: unknown = null;
+				if (trigger.fire) {
+					process = await autoProcessEvent(autoEnv, { distance, raceId: source.raceId, eventId, trigger });
+				}
+				return json({
+					ok: true,
+					approved: recorded.length,
+					trigger: { fire: trigger.fire, reason: trigger.reason, detail: trigger.detail },
+					process,
+				});
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Approval failed" }, 500);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/results/process-now") {
+			try {
+				const body = await request.json() as { distance?: string; event_id?: number };
+				const distance = body.distance ?? "";
+				const eventId = Number(body.event_id);
+				const source = SERIES_2026_SOURCES.find((s) => s.distance === distance);
+				if (!source || !Number.isInteger(eventId)) {
+					return json({ ok: false, error: "distance and event_id are required" }, 400);
+				}
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const autoEnv = {
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					metaToken: env.NWANA_META_TOKEN,
+					apiCallerToken: env.RUNSIGNUP_API_REG,
+					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+					publicBaseUrl: new URL(request.url).origin,
+				};
+				const trigger = await evaluateEventTrigger(autoEnv, { distance, raceId: source.raceId, eventId });
+				if (!trigger.fire) {
+					return json({ ok: true, fired: false, trigger: { reason: trigger.reason, detail: trigger.detail } });
+				}
+				const process = await autoProcessEvent(autoEnv, { distance, raceId: source.raceId, eventId, trigger });
+				return json({ ok: true, fired: true, trigger: { reason: trigger.reason, detail: trigger.detail }, process });
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Process-now failed" }, 500);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/series-2026/results/pipeline") {
+			try {
+				const distance = url.searchParams.get("distance") ?? "";
+				const eventId = Number(url.searchParams.get("event_id"));
+				const source = SERIES_2026_SOURCES.find((s) => s.distance === distance);
+				if (!source || !Number.isInteger(eventId)) {
+					return json({ ok: false, error: "distance and event_id are required" }, 400);
+				}
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const autoEnv = {
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					apiCallerToken: env.RUNSIGNUP_API_REG,
+					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+					publicBaseUrl: new URL(request.url).origin,
+				};
+				const live = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				const rows = await getAthletePipeline(autoEnv, { distance, raceId: source.raceId, eventId }, live);
+				return json({ ok: true, distance, event_id: eventId, athletes: rows });
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Pipeline view failed" }, 500);
+			}
+		}
+
+
 		if (request.method === "POST" && url.pathname === "/api/operating-center/race-lifecycle/apply-levels") {
 			try {
 				const body = await request.json() as { distance?: string; event_id?: number; confirmation?: string; event_limit?: number; reset_rebuild?: boolean };
@@ -6408,6 +6442,9 @@ export default {
 				}
 				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
 					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				if (body.confirmation === AUTO_APPROVED_CONFIRMATION) {
+					return json({ ok: false, error: "AUTO:OWNER_APPROVED_RESULTS is internal-only; use the approvals flow" }, 400);
 				}
 				const result = await applySeries2026Levels({
 					db: env.nwana_engine_db,
@@ -7431,6 +7468,61 @@ if (
 			},
 			404,
 		);
+	},
+
+	// ADR-0042 daily deadline wake-up. One cron execution = 1 request against
+	// the 100k/day Workers Free allowance (VERIFIED $0). The cron NEVER
+	// approves results: it only evaluates the trigger and runs the
+	// already-authorized downstream chain for events whose results the owner
+	// approved. Already-PUBLISHED events are skipped.
+	async scheduled(
+		controller: ScheduledController,
+		env: Env,
+		ctx: ExecutionContext,
+	): Promise<void> {
+		if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+			console.log("[series-2026-cron] skipped: RUNSIGNUP_ACCESS_TOKEN not configured");
+			return;
+		}
+		const autoEnv = {
+			db: env.nwana_engine_db,
+			accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+			metaToken: env.NWANA_META_TOKEN,
+			apiCallerToken: env.RUNSIGNUP_API_REG,
+			apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+			publicBaseUrl: env.PUBLIC_BASE_URL ?? "https://nwana-engine.nwana-engine.workers.dev",
+		};
+		const rows = await env.nwana_engine_db
+			.prepare(`SELECT distance, race_id, active_event_id FROM race_lifecycle WHERE series = ? AND active_event_id IS NOT NULL`)
+			.bind(RACE_LIFECYCLE_SERIES)
+			.all<{ distance: string; race_id: number; active_event_id: number }>();
+		for (const row of (rows.results ?? [])) {
+			const label = `${row.distance}/${row.active_event_id}`;
+			try {
+				if (await isEventPublished(env.nwana_engine_db, row.race_id, row.active_event_id)) {
+					console.log(`[series-2026-cron] ${label}: already PUBLISHED, skipping`);
+					continue;
+				}
+				const trigger = await evaluateEventTrigger(autoEnv, {
+					distance: row.distance,
+					raceId: row.race_id,
+					eventId: row.active_event_id,
+				});
+				if (!trigger.fire) {
+					console.log(`[series-2026-cron] ${label}: not fired (${trigger.reason})`);
+					continue;
+				}
+				const result = await autoProcessEvent(autoEnv, {
+					distance: row.distance,
+					raceId: row.race_id,
+					eventId: row.active_event_id,
+					trigger,
+				});
+				console.log(`[series-2026-cron] ${label}: processed ok=${result.ok} steps=${result.steps.map((s) => s.step + ":" + s.status).join(",")}`);
+			} catch (err) {
+				console.log(`[series-2026-cron] ${label}: ERROR ${err instanceof Error ? err.message : String(err)}`);
+			}
+		}
 	},
 };
 export {

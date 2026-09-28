@@ -68,10 +68,13 @@ describe("operating center sport: Summary/Actions/Details", () => {
 		expect(html).not.toContain("/operating-center/sport?packet_id=");
 	});
 
-	it("wires only the verified result publication endpoint with a confirm dialog", () => {
-		expect(html).toContain("/result-publications/publish");
-		expect(html).toContain("confirmation:'PUBLISH'");
-		expect(html).toContain("confirm('Publish this result?");
+	it("wires the result-approval endpoint as the only standard owner action (ADR-0042)", () => {
+		// Approval is the single owner decision per event; the Machine runs
+		// levels, standings, publication, winner news, social, and next-race
+		// promo by itself. No manual publish button remains in Actions.
+		expect(html).toContain("/api/operating-center/series-2026/results/approve");
+		expect(html).toContain("/api/operating-center/series-2026/results/pending");
+		expect(html).toContain("confirm('Approve ");
 		expect(html).not.toContain("race-lifecycle/apply-levels");
 	});
 

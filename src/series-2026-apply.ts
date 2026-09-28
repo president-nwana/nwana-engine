@@ -47,6 +47,13 @@ export const APPLY_LEVELS_CONFIRMATION = "APPLY_LEVELS";
 // per-event stage gate but keeps the owner gate, explicit confirmation,
 // write-access check and audit log. ADR-0041: clear only inside full rebuild.
 export const REBUILD_DISTANCE_CONFIRMATION = "REBUILD_DISTANCE";
+// ADR-0042: the Machine's autonomous downstream run passes this instead of
+// APPLY_LEVELS. It is accepted ONLY after the auto-processor has verified
+// that every submitted result for the event carries a recorded owner
+// approval (series_result_approvals). The write-access check, stage gate
+// and audit log still apply unchanged. Never auto-approve: the approval
+// records are the authorization, and the Machine never creates them.
+export const AUTO_APPROVED_CONFIRMATION = "AUTO:OWNER_APPROVED_RESULTS";
 
 const PERFORMANCE_LEVEL_FIELD = "Performance Level";
 const LEVEL_PLACE_FIELD = "Level Place";
@@ -835,7 +842,8 @@ export async function applySeries2026Levels(
 	};
 
 	const isRebuild = input.confirmation === REBUILD_DISTANCE_CONFIRMATION;
-	if (input.confirmation !== APPLY_LEVELS_CONFIRMATION && !isRebuild) {
+	const isAutoApproved = input.confirmation === AUTO_APPROVED_CONFIRMATION;
+	if (input.confirmation !== APPLY_LEVELS_CONFIRMATION && !isRebuild && !isAutoApproved) {
 		const result = fail(base, "confirm", `Explicit confirmation "${APPLY_LEVELS_CONFIRMATION}" or "${REBUILD_DISTANCE_CONFIRMATION}" is required.`);
 		return result;
 	}
