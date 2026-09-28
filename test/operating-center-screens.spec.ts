@@ -35,6 +35,13 @@ import {
 	buildMeetingsReport,
 	REPORT_SCREENS,
 } from "../src/operating-center-screens";
+import { renderOverviewSectionHtml } from "../src/oc-overview";
+import { renderMarketingSectionHtml } from "../src/oc-marketing";
+import { renderGrowthSectionHtml } from "../src/oc-growth";
+import { renderSportSectionHtml } from "../src/oc-sport";
+import { renderAcademySectionHtml } from "../src/oc-academy";
+import { renderBoardSectionHtml } from "../src/oc-board";
+import { renderOperationsSectionHtml } from "../src/oc-operations";
 import type { GoogleAdsEnv } from "../src/google-ads";
 import { buildLiveCampaignsQuery } from "../src/google-ads";
 
@@ -87,31 +94,41 @@ const ALL_FIFTEEN: Array<[string, string, string]> = [
 	...NEW_PAGES.map(([id, label, href]) => [id, label, href] as [string, string, string]),
 ];
 
-describe("operating center menu (ADR-0028): 17 buttons", () => {
-	it("lists a button for every operating-center page", () => {
+const SEVEN_SECTIONS: Array<[string, string, string, () => string]> = [
+	["overview", "Overview", "/operating-center", renderOverviewSectionHtml],
+	["marketing", "Marketing", "/operating-center/marketing", renderMarketingSectionHtml],
+	["growth", "Growth", "/operating-center/growth", renderGrowthSectionHtml],
+	["sport", "Sport", "/operating-center/sport", renderSportSectionHtml],
+	["academy", "Academy", "/operating-center/academy", renderAcademySectionHtml],
+	["board", "Board", "/operating-center/board", renderBoardSectionHtml],
+	["operations", "Operations", "/operating-center/operations", renderOperationsSectionHtml],
+];
+
+describe("operating center menu (rebuild 2026-09-28): 7 buttons", () => {
+	it("lists a button for every section", () => {
 		const menu = operatingCenterMenu("overview");
-		for (const [, label, href] of ALL_FIFTEEN) {
+		for (const [, label, href] of SEVEN_SECTIONS) {
 			expect(menu).toContain(`href="${href}"`);
 			expect(menu).toContain(`>${label}<`);
 		}
 	});
 
-	it("marks the current page with aria-current on every new page", () => {
-		for (const [id, , href] of NEW_PAGES) {
-			expect(operatingCenterMenu(id as never)).toContain(
+	it("marks the current section with aria-current on every section page", () => {
+		for (const [id, , href] of SEVEN_SECTIONS) {
+			expect(operatingCenterMenu(id)).toContain(
 				`href="${href}" aria-current="page"`,
 			);
 		}
 	});
 
-	it("renders the menu directly under the header on every new page", () => {
-		for (const [, , , render] of NEW_PAGES) {
+	it("renders the menu directly under the header on every section page", () => {
+		for (const [, , , render] of SEVEN_SECTIONS) {
 			expect(render()).toMatch(/<\/header>\s*<nav class="oc-menu"/);
 		}
 	});
 
 	it("keeps the menu a wrapping flex row (mobile-friendly)", () => {
-		const html = renderSitesHtml();
+		const html = renderMarketingSectionHtml();
 		expect(html).toContain("flex-wrap:wrap");
 	});
 });

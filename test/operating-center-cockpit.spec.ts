@@ -1,25 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { renderOperatingCenterHtml } from "../src/operating-center";
+import { renderOverviewSectionHtml } from "../src/oc-overview";
 
 // Cockpit contract: /operating-center is a compact live summary. Every card
 // reads the same API endpoint its detail page uses, one section failure never
 // breaks the rest, and no number is hardcoded into the page.
 
 const COCKPIT_CARDS: Array<[string, string]> = [
-	["lifecycle-summary", "/operating-center/results"],
-	["fund-summary", "/operating-center/funds"],
-	["sponsorship-summary", "/operating-center/sponsorship"],
-	["ads-summary", "/operating-center/ads"],
-	["social-summary", "/operating-center/social"],
-	["media-summary", "/operating-center/media"],
-	["partners-summary", "/operating-center/partners"],
-	["sellers-summary", "/operating-center/sellers"],
-	["fundraising-summary", "/operating-center/fundraising"],
-	["groups-summary", "/operating-center/groups"],
-	["sites-summary", "/operating-center/sites"],
+	["lifecycle-summary", "/operating-center/sport#results"],
+	["fund-summary", "/operating-center/growth#funds"],
+	["sponsorship-summary", "/operating-center/growth#sponsorship"],
+	["ads-summary", "/operating-center/marketing#ads"],
+	["social-summary", "/operating-center/marketing#social"],
+	["media-summary", "/operating-center/marketing#media"],
+	["partners-summary", "/operating-center/growth#partners"],
+	["sellers-summary", "/operating-center/growth#sellers"],
+	["fundraising-summary", "/operating-center/growth#fundraising"],
+	["groups-summary", "/operating-center/sport#groups"],
+	["sites-summary", "/operating-center/marketing#sites"],
 	["board-summary", "/operating-center/board"],
-	["meetings-summary", "/operating-center/meetings"],
-	["activity-summary", "/operating-center/activity"],
+	["meetings-summary", "/operating-center/board#meetings"],
+	["activity-summary", "/operating-center/operations#activity"],
 	["operations-summary", "/operating-center/operations"],
 ];
 
@@ -48,7 +48,7 @@ function extractScripts(html: string): string[] {
 }
 
 describe("operating center cockpit", () => {
-	const html = renderOperatingCenterHtml();
+	const html = renderOverviewSectionHtml();
 	const scripts = extractScripts(html).join("\n");
 
 	it("renders a top owner summary strip", () => {

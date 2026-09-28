@@ -498,35 +498,33 @@ export async function getOperatingCenterOverview(db: D1Database): Promise<Respon
 	});
 }
 
-export type OperatingCenterPageId = "overview" | "results" | "funds" | "media" | "board" | "uploads" | "sponsorship" | "activity" | "sites" | "social" | "ads" | "sellers" | "partners" | "fundraising" | "groups" | "meetings" | "operations" | "creation";
+export type OperatingCenterPageId =
+	| "overview"
+	| "marketing"
+	| "growth"
+	| "sport"
+	| "academy"
+	| "board"
+	| "operations";
 
 /**
- * ADR-0023: shared button menu rendered directly under the header on every
- * operating-center page. Same markup everywhere so the cockpit navigates as one.
- * ADR-0027: 15 buttons (7 new screens: sites, social, ads, sellers,
- * partners, fundraising, groups).
- * ADR-0028: 16 buttons (meetings added).
+ * Shared 7-section button menu rendered directly under the header on every
+ * operating-center section page. Same markup everywhere so the center
+ * navigates as one workspace. (Replaces the old 18-button menu, 2026-09-28.)
+ *
+ * The parameter accepts legacy standalone-page ids as plain strings so the
+ * retired single-page renderers (kept for tests/reference) still compile;
+ * only the 7 canonical ids ever highlight.
  */
-export function operatingCenterMenu(active: OperatingCenterPageId): string {
+export function operatingCenterMenu(active: OperatingCenterPageId | string): string {
 	const items: Array<{ id: OperatingCenterPageId; label: string; href: string }> = [
 		{ id: "overview", label: "Overview", href: "/operating-center" },
-		{ id: "results", label: "Results", href: "/operating-center/results" },
-		{ id: "funds", label: "Funds", href: "/operating-center/funds" },
-		{ id: "media", label: "Media", href: "/operating-center/media" },
+		{ id: "marketing", label: "Marketing", href: "/operating-center/marketing" },
+		{ id: "growth", label: "Growth", href: "/operating-center/growth" },
+		{ id: "sport", label: "Sport", href: "/operating-center/sport" },
+		{ id: "academy", label: "Academy", href: "/operating-center/academy" },
 		{ id: "board", label: "Board", href: "/operating-center/board" },
-		{ id: "uploads", label: "Uploads", href: "/operating-center/uploads" },
-		{ id: "sponsorship", label: "Sponsorship", href: "/operating-center/sponsorship" },
-		{ id: "activity", label: "Activity", href: "/operating-center/activity" },
-		{ id: "sites", label: "Sites", href: "/operating-center/sites" },
-		{ id: "social", label: "Social", href: "/operating-center/social" },
-		{ id: "ads", label: "Ads", href: "/operating-center/ads" },
-		{ id: "sellers", label: "Sellers", href: "/operating-center/sellers" },
-		{ id: "partners", label: "Partners", href: "/operating-center/partners" },
-		{ id: "fundraising", label: "Fundraising", href: "/operating-center/fundraising" },
-		{ id: "groups", label: "Groups", href: "/operating-center/groups" },
-		{ id: "meetings", label: "Meetings", href: "/operating-center/meetings" },
 		{ id: "operations", label: "Operations", href: "/operating-center/operations" },
-		{ id: "creation", label: "Create", href: "/operating-center/creation" },
 	];
 	return (
 		'<nav class="oc-menu" aria-label="Operating center">' +

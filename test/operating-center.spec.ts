@@ -11,6 +11,13 @@ import {
 } from "../src/operating-center";
 import { renderBoardHtml } from "../src/operating-center-board";
 import { renderUploadsHtml } from "../src/operating-center-uploads";
+import { renderOverviewSectionHtml } from "../src/oc-overview";
+import { renderMarketingSectionHtml } from "../src/oc-marketing";
+import { renderGrowthSectionHtml } from "../src/oc-growth";
+import { renderSportSectionHtml } from "../src/oc-sport";
+import { renderAcademySectionHtml } from "../src/oc-academy";
+import { renderBoardSectionHtml } from "../src/oc-board";
+import { renderOperationsSectionHtml } from "../src/oc-operations";
 
 describe("operating center initiative intake", () => {
 	it("normalizes a source-material initiative without inventing an outcome", () => {
@@ -200,27 +207,47 @@ function extractScripts(html: string): string[] {
 	return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 }
 
-describe("operating center button menu (ADR-0023)", () => {
-	it("renders the same three-button menu under the header on all pages", () => {
-		for (const html of [renderOperatingCenterHtml(), renderRaceResultsHtml()]) {
+describe("operating center button menu (rebuild 2026-09-28): 7 sections", () => {
+	it("renders the same seven-button menu under the header on all section pages", () => {
+		for (const html of [
+			renderOverviewSectionHtml(),
+			renderMarketingSectionHtml(),
+			renderGrowthSectionHtml(),
+			renderSportSectionHtml(),
+			renderAcademySectionHtml(),
+			renderBoardSectionHtml(),
+			renderOperationsSectionHtml(),
+		]) {
 			expect(html).toContain('class="oc-menu"');
 			expect(html).toContain('href="/operating-center"');
-			expect(html).toContain('href="/operating-center/results"');
-			expect(html).toContain('href="/operating-center/funds"');
+			expect(html).toContain('href="/operating-center/marketing"');
+			expect(html).toContain('href="/operating-center/growth"');
+			expect(html).toContain('href="/operating-center/sport"');
+			expect(html).toContain('href="/operating-center/academy"');
+			expect(html).toContain('href="/operating-center/board"');
+			expect(html).toContain('href="/operating-center/operations"');
 			expect(html).toContain(">Overview<");
-			expect(html).toContain(">Results<");
-			expect(html).toContain(">Funds<");
+			expect(html).toContain(">Marketing<");
+			expect(html).toContain(">Growth<");
+			expect(html).toContain(">Sport<");
+			expect(html).toContain(">Academy<");
+			expect(html).toContain(">Board<");
+			expect(html).toContain(">Operations<");
 		}
 	});
 
-	it("marks the current page on the menu", () => {
+	it("marks the current section on the menu", () => {
 		expect(operatingCenterMenu("overview")).toContain('href="/operating-center" aria-current="page"');
-		expect(operatingCenterMenu("results")).toContain('href="/operating-center/results" aria-current="page"');
-		expect(operatingCenterMenu("funds")).toContain('href="/operating-center/funds" aria-current="page"');
+		expect(operatingCenterMenu("marketing")).toContain('href="/operating-center/marketing" aria-current="page"');
+		expect(operatingCenterMenu("growth")).toContain('href="/operating-center/growth" aria-current="page"');
+		expect(operatingCenterMenu("sport")).toContain('href="/operating-center/sport" aria-current="page"');
+		expect(operatingCenterMenu("academy")).toContain('href="/operating-center/academy" aria-current="page"');
+		expect(operatingCenterMenu("board")).toContain('href="/operating-center/board" aria-current="page"');
+		expect(operatingCenterMenu("operations")).toContain('href="/operating-center/operations" aria-current="page"');
 	});
 
 	it("sits directly under the header", () => {
-		const html = renderOperatingCenterHtml();
+		const html = renderOverviewSectionHtml();
 		expect(html).toMatch(/<\/header>\s*<nav class="oc-menu"/);
 	});
 });

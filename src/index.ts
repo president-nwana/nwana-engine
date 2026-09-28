@@ -91,6 +91,14 @@ import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
 import { renderUploadsHtml } from "./operating-center-uploads";
 import { renderCreationHtml, renderCreationPacketHtml } from "./operating-center-creation";
+// 7-section Operating Center rebuild (2026-09-28): one renderer per section.
+import { renderOverviewSectionHtml } from "./oc-overview";
+import { renderMarketingSectionHtml } from "./oc-marketing";
+import { renderGrowthSectionHtml } from "./oc-growth";
+import { renderSportSectionHtml } from "./oc-sport";
+import { renderAcademySectionHtml } from "./oc-academy";
+import { renderBoardSectionHtml } from "./oc-board";
+import { renderOperationsSectionHtml } from "./oc-operations";
 import {
 	createCreationPacket,
 	listCreationPackets,
@@ -5768,6 +5776,34 @@ export default {
 		}
 
 		const url = new URL(request.url);
+
+		// Legacy top-level shortcuts → their new section tabs (rebuild
+		// 2026-09-28). Public 301s; these paths never existed as routes in
+		// this worker, so nothing else claims them.
+		if (request.method === "GET") {
+			const legacyTop: Record<string, string> = {
+				"/results": "/operating-center/sport#results",
+				"/funds": "/operating-center/growth#funds",
+				"/media": "/operating-center/marketing#media",
+				"/uploads": "/operating-center/board#uploads",
+				"/sponsorship": "/operating-center/growth#sponsorship",
+				"/activity": "/operating-center/operations#activity",
+				"/sites": "/operating-center/marketing#sites",
+				"/social": "/operating-center/marketing#social",
+				"/ads": "/operating-center/marketing#ads",
+				"/sellers": "/operating-center/growth#sellers",
+				"/partners": "/operating-center/growth#partners",
+				"/fundraising": "/operating-center/growth#fundraising",
+				"/groups": "/operating-center/sport#groups",
+				"/meetings": "/operating-center/board#meetings",
+				"/creation": "/operating-center/sport#creation",
+			};
+			const legacyTarget = legacyTop[url.pathname];
+			if (legacyTarget) {
+				return Response.redirect(new URL(legacyTarget, url).toString(), 301);
+			}
+		}
+
 		const operatingCenterRoute =
 			url.pathname === "/operating-center" ||
 			url.pathname.startsWith("/operating-center/") ||
@@ -5783,31 +5819,14 @@ export default {
 			}, 503);
 		}
 
+		// Public page shells: every GET under /operating-center* renders the
+		// key-entry gate client-side; all /api/operating-center/* and
+		// /api/board/* data routes stay owner-key gated. (Rebuild 2026-09-28:
+		// replaces the old per-page exemption list with one prefix check.
+		// Safe: no /api/* path starts with "/operating-center".)
 		const operatingCenterApiRoute =
 			operatingCenterRoute &&
-			!(
-				request.method === "GET" &&
-				(url.pathname === "/operating-center" ||
-					url.pathname === "/operating-center/results" ||
-					url.pathname === "/operating-center/funds" ||
-					url.pathname === "/operating-center/media" ||
-					url.pathname === "/operating-center/board" ||
-					url.pathname === "/operating-center/uploads" ||
-					url.pathname === "/operating-center/sponsorship" ||
-					url.pathname === "/operating-center/activity" ||
-					url.pathname === "/operating-center/sites" ||
-					url.pathname === "/operating-center/social" ||
-					url.pathname === "/operating-center/ads" ||
-					url.pathname === "/operating-center/sellers" ||
-					url.pathname === "/operating-center/partners" ||
-					url.pathname === "/operating-center/fundraising" ||
-					url.pathname === "/operating-center/groups" ||
-					url.pathname === "/operating-center/meetings" ||
-					url.pathname === "/operating-center/operations" ||
-					url.pathname === "/operating-center/creation" ||
-					url.pathname === "/operating-center/creation/packet" ||
-					url.pathname === "/operating-center/news/review")
-			);
+			!(request.method === "GET" && url.pathname.startsWith("/operating-center"));
 
 		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
 			return json({
@@ -5816,102 +5835,7 @@ export default {
 			}, 401);
 		}
 
-		if (request.method === "GET" && url.pathname === "/operating-center") {
-			return new Response(renderOperatingCenterHtml(), {
-				headers: {
-					"content-type": "text/html; charset=utf-8",
-					"cache-control": "no-store",
-				},
-			});
-		}
-
-		if (request.method === "GET" && url.pathname === "/operating-center/results") {
-			return new Response(renderRaceResultsHtml(), {
-				headers: {
-					"content-type": "text/html; charset=utf-8",
-					"cache-control": "no-store",
-				},
-			});
-		}
-
-		// ADR-0022: Funds live on their own page, like race results.
-		if (request.method === "GET" && url.pathname === "/operating-center/funds") {
-			return new Response(renderFundsHtml(), {
-				headers: {
-					"content-type": "text/html; charset=utf-8",
-					"cache-control": "no-store",
-				},
-			});
-		}
-
-		// ADR-0021: the media plan workspace lives on its own page.
-		if (request.method === "GET" && url.pathname === "/operating-center/media") {
-			return new Response(renderMediaHtml(), {
-				headers: {
-					"content-type": "text/html; charset=utf-8",
-					"cache-control": "no-store",
-				},
-			});
-		}
-
-		// News distribution review: one page per news article showing the
-		// item, its content variants, and every prepared distribution action
-		// with the exact text per channel. Owner-key gate is enforced by the
-		// page's key form + the API routes below.
-		if (request.method === "GET" && url.pathname === "/operating-center/news/review") {
-			return new Response(renderNewsReviewHtml(), {
-				headers: {
-					"content-type": "text/html; charset=utf-8",
-					"cache-control": "no-store",
-				},
-			});
-		}
-
-		// Board workspace: intake, meetings, work items (full workspace; the
-		// overview shows only a compact summary).
-		if (request.method === "GET" && url.pathname === "/operating-center/board") {
-			return new Response(renderBoardHtml(), {
-				headers: {
-					"content-type": "text/html; charset=utf-8",
-					"cache-control": "no-store",
-				},
-			});
-		}
-
-		// Board uploads: upload form and routed uploads list (full workspace;
-		// the overview shows only a compact summary).
-		if (request.method === "GET" && url.pathname === "/operating-center/uploads") {
-			return new Response(renderUploadsHtml(), {
-				headers: {
-					"content-type": "text/html; charset=utf-8",
-					"cache-control": "no-store",
-				},
-			});
-		}
-
-		// ADR-0026: sponsorship assets live on their own page (the overview
-		// shows only a compact summary card).
-		if (request.method === "GET" && url.pathname === "/operating-center/sponsorship") {
-			return new Response(renderSponsorshipHtml(), {
-				headers: {
-					"content-type": "text/html; charset=utf-8",
-					"cache-control": "no-store",
-				},
-			});
-		}
-
-		// ADR-0026: the activity feed lives on its own page (the overview
-		// shows only a compact summary card).
-		if (request.method === "GET" && url.pathname === "/operating-center/activity") {
-			return new Response(renderActivityHtml(), {
-				headers: {
-					"content-type": "text/html; charset=utf-8",
-					"cache-control": "no-store",
-				},
-			});
-		}
-
-		// ADR-0027: seven new screens, each with a downloadable report.
+		// 7-section Operating Center (rebuild 2026-09-28). Canonical GET pages.
 		const htmlPage = (render: () => string) =>
 			new Response(render(), {
 				headers: {
@@ -5919,17 +5843,47 @@ export default {
 					"cache-control": "no-store",
 				},
 			});
-		if (request.method === "GET" && url.pathname === "/operating-center/sites") return htmlPage(renderSitesHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/social") return htmlPage(renderSocialHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/ads") return htmlPage(renderAdsHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/sellers") return htmlPage(renderSellersHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/partners") return htmlPage(renderPartnersHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/fundraising") return htmlPage(renderFundraisingHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/groups") return htmlPage(renderGroupsHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/meetings") return htmlPage(renderMeetingsHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/operations") return htmlPage(renderOperationsHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/creation") return htmlPage(renderCreationHtml);
-		if (request.method === "GET" && url.pathname === "/operating-center/creation/packet") return htmlPage(renderCreationPacketHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center") return htmlPage(renderOverviewSectionHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/marketing") return htmlPage(renderMarketingSectionHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/growth") return htmlPage(renderGrowthSectionHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/sport") return htmlPage(renderSportSectionHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/academy") return htmlPage(renderAcademySectionHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/board") return htmlPage(renderBoardSectionHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/operations") return htmlPage(renderOperationsSectionHtml);
+
+		// Retired standalone pages → 301 to their section tab (rebuild 2026-09-28).
+		if (request.method === "GET") {
+			const redirect301 = (target: string) =>
+				Response.redirect(new URL(target, url).toString(), 301);
+			const retired: Array<[string, string]> = [
+				["/operating-center/results", "/operating-center/sport#results"],
+				["/operating-center/funds", "/operating-center/growth#funds"],
+				["/operating-center/media", "/operating-center/marketing#media"],
+				["/operating-center/uploads", "/operating-center/board#uploads"],
+				["/operating-center/sponsorship", "/operating-center/growth#sponsorship"],
+				["/operating-center/activity", "/operating-center/operations#activity"],
+				["/operating-center/sites", "/operating-center/marketing#sites"],
+				["/operating-center/social", "/operating-center/marketing#social"],
+				["/operating-center/ads", "/operating-center/marketing#ads"],
+				["/operating-center/sellers", "/operating-center/growth#sellers"],
+				["/operating-center/partners", "/operating-center/growth#partners"],
+				["/operating-center/fundraising", "/operating-center/growth#fundraising"],
+				["/operating-center/groups", "/operating-center/sport#groups"],
+				["/operating-center/meetings", "/operating-center/board#meetings"],
+				["/operating-center/creation", "/operating-center/sport#creation"],
+			];
+			for (const [from, to] of retired) {
+				if (url.pathname === from) return redirect301(to);
+			}
+			// Per-object pages keep their query in location.search so the
+			// inline Media review / Creation packet detail can read it.
+			if (url.pathname === "/operating-center/news/review")
+				return redirect301("/operating-center/marketing" + url.search + "#media");
+			if (url.pathname === "/operating-center/creation/packet")
+				return redirect301("/operating-center/sport" + url.search + "#creation");
+		}
+
+
 
 		// ADR-0027: overview APIs for the seven new screens.
 		// ADR-0028: meetings overview.

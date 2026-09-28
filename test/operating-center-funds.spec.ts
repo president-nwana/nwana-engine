@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderFundsHtml } from "../src/operating-center-funds";
 import { renderOperatingCenterHtml } from "../src/operating-center";
+import { renderGrowthSectionHtml } from "../src/oc-growth";
 
 describe("funds dedicated page (ADR-0022)", () => {
 	it("renders a standalone English funds page with the full pipeline UI", () => {
@@ -38,17 +39,24 @@ describe("operating center main page funds card (ADR-0022)", () => {
 	});
 });
 
-describe("funds page button menu and script (ADR-0023)", () => {
-	it("renders the shared three-button menu under the header", () => {
-		const html = renderFundsHtml();
+describe("funds in the Growth section (rebuild 2026-09-28)", () => {
+	it("renders the shared seven-button menu under the header", () => {
+		const html = renderGrowthSectionHtml();
 		expect(html).toMatch(/<\/header>\s*<nav class="oc-menu"/);
 		expect(html).toContain('href="/operating-center"');
-		expect(html).toContain('href="/operating-center/results"');
-		expect(html).toContain('href="/operating-center/funds" aria-current="page"');
+		expect(html).toContain('href="/operating-center/growth" aria-current="page"');
+	});
+
+	it("keeps the funds prospect pipeline and Instructor Growth Fund tabs (money detail loads from the fund API)", () => {
+		const html = renderGrowthSectionHtml();
+		expect(html).toContain('data-tab="funds"');
+		expect(html).toContain('data-tab="igf"');
+		expect(html).toContain("/api/operating-center/fund");
+		expect(html).toContain("/api/operating-center/fund/prospect/advance");
 	});
 
 	it("embeds syntactically valid JavaScript (regression convention: inline JS in template literals)", () => {
-		const html = renderFundsHtml();
+		const html = renderGrowthSectionHtml();
 		const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 		expect(scripts.length).toBeGreaterThan(0);
 		for (const body of scripts) {

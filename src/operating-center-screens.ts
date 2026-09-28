@@ -58,7 +58,7 @@ export type ReportScreenId =
 
 export const REPORT_SCREENS: Array<{
 	id: ReportScreenId;
-	page: OperatingCenterPageId;
+	page: OperatingCenterPageId | string;
 	label: string;
 	path: string;
 	reportPath: string;
@@ -89,7 +89,7 @@ function escHtml(v: unknown): string {
 // goes in panelsHtml; page-specific logic (which must define boot()) goes
 // in script. The script must not contain backticks or ${ sequences.
 function ocScreenShell(opts: {
-	page: OperatingCenterPageId;
+	page: OperatingCenterPageId | string;
 	title: string;
 	subtitle: string;
 	panelsHtml: string;

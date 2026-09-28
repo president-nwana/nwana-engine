@@ -2,49 +2,47 @@ import { describe, expect, it } from "vitest";
 import {
 	operatingCenterMenu,
 	renderOperatingCenterHtml,
-	renderRaceResultsHtml,
 } from "../src/operating-center";
-import { renderSponsorshipHtml } from "../src/operating-center-sponsorship";
-import { renderActivityHtml } from "../src/operating-center-activity";
+import { renderOverviewSectionHtml } from "../src/oc-overview";
+import { renderGrowthSectionHtml } from "../src/oc-growth";
+import { renderOperationsSectionHtml } from "../src/oc-operations";
 
 function extractScripts(html: string): string[] {
 	return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 }
 
-const ALL_PAGES: Array<[string, string, string]> = [
+const SEVEN_SECTIONS: Array<[string, string, string]> = [
 	["overview", "Overview", "/operating-center"],
-	["results", "Results", "/operating-center/results"],
-	["funds", "Funds", "/operating-center/funds"],
-	["media", "Media", "/operating-center/media"],
+	["marketing", "Marketing", "/operating-center/marketing"],
+	["growth", "Growth", "/operating-center/growth"],
+	["sport", "Sport", "/operating-center/sport"],
+	["academy", "Academy", "/operating-center/academy"],
 	["board", "Board", "/operating-center/board"],
-	["uploads", "Uploads", "/operating-center/uploads"],
-	["sponsorship", "Sponsorship", "/operating-center/sponsorship"],
-	["activity", "Activity", "/operating-center/activity"],
+	["operations", "Operations", "/operating-center/operations"],
 ];
 
-describe("operating center button menu (ADR-0026): one screen per panel", () => {
-	it("lists a button for every operating-center page", () => {
+describe("operating center button menu (rebuild 2026-09-28): 7 sections", () => {
+	it("lists a button for every section", () => {
 		const menu = operatingCenterMenu("overview");
-		for (const [, label, href] of ALL_PAGES) {
+		for (const [, label, href] of SEVEN_SECTIONS) {
 			expect(menu).toContain(`href="${href}"`);
 			expect(menu).toContain(`>${label}<`);
 		}
 	});
 
-	it("marks the current page with aria-current on every page", () => {
-		for (const [id, , href] of ALL_PAGES) {
-			expect(operatingCenterMenu(id as never)).toContain(
+	it("marks the current section with aria-current on every section", () => {
+		for (const [id, , href] of SEVEN_SECTIONS) {
+			expect(operatingCenterMenu(id)).toContain(
 				`href="${href}" aria-current="page"`,
 			);
 		}
 	});
 
-	it("renders the menu directly under the header on every page", () => {
+	it("renders the menu directly under the header on every section page", () => {
 		for (const html of [
-			renderOperatingCenterHtml(),
-			renderRaceResultsHtml(),
-			renderSponsorshipHtml(),
-			renderActivityHtml(),
+			renderOverviewSectionHtml(),
+			renderGrowthSectionHtml(),
+			renderOperationsSectionHtml(),
 		]) {
 			expect(html).toMatch(/<\/header>\s*<nav class="oc-menu"/);
 		}
@@ -78,20 +76,20 @@ describe("operating center main page (ADR-0026): dashboard of summary cards", ()
 	});
 });
 
-describe("operating center sponsorship page (ADR-0026)", () => {
-	const html = renderSponsorshipHtml();
+describe("operating center sponsorship in the Growth section (rebuild 2026-09-28)", () => {
+	const html = renderGrowthSectionHtml();
 
-	it("carries the full generate form and asset list with stage advancement", () => {
+	it("carries the sponsorship tab with the generate form and asset list with stage advancement", () => {
+		expect(html).toContain('data-tab="sponsorship"');
 		expect(html).toContain('id="sponsorship-generate-form"');
 		expect(html).toContain('id="sponsorship-assets"');
 		expect(html).toContain("/api/operating-center/sponsorship-assets/generate");
 		expect(html).toContain("/api/operating-center/sponsorship-assets/advance");
 		expect(html).toContain("Move to ");
-		expect(html).toContain("<h1>Sponsorship assets</h1>");
 	});
 
-	it("marks itself current in the menu", () => {
-		expect(html).toContain('href="/operating-center/sponsorship" aria-current="page"');
+	it("marks Growth current in the menu", () => {
+		expect(html).toContain('href="/operating-center/growth" aria-current="page"');
 	});
 
 	it("embeds syntactically valid JavaScript (regression convention)", () => {
@@ -103,10 +101,11 @@ describe("operating center sponsorship page (ADR-0026)", () => {
 	});
 });
 
-describe("operating center activity page (ADR-0026)", () => {
-	const html = renderActivityHtml();
+describe("operating center activity in the Operations section (rebuild 2026-09-28)", () => {
+	const html = renderOperationsSectionHtml();
 
-	it("carries the full feed with requires-reading and mark-as-read", () => {
+	it("carries the activity tab with the full feed with requires-reading and mark-as-read", () => {
+		expect(html).toContain('data-tab="activity"');
 		expect(html).toContain('id="activity-reading"');
 		expect(html).toContain('id="activity-new"');
 		expect(html).toContain("Mark as read");
@@ -114,8 +113,8 @@ describe("operating center activity page (ADR-0026)", () => {
 		expect(html).toContain("/api/operating-center/activity/acknowledge");
 	});
 
-	it("marks itself current in the menu", () => {
-		expect(html).toContain('href="/operating-center/activity" aria-current="page"');
+	it("marks Operations current in the menu", () => {
+		expect(html).toContain('href="/operating-center/operations" aria-current="page"');
 	});
 
 	it("embeds syntactically valid JavaScript (regression convention)", () => {
