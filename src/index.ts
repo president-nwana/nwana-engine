@@ -57,7 +57,6 @@ import {
         getGoogleAdsStatus,
         googleAdsAuthorizationUrl,
         handleGoogleAdsCallback,
-        testGoogleAdsNoTokenAccess,
 } from "./google-ads";
 import {
         getYouTubeStatus,
@@ -5879,13 +5878,6 @@ export default {
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/ads/overview") {
 			return json(await getAdsOverview(env));
-		}
-		// TEMPORARY diagnostic: post-sunset Google Ads access test without a
-		// developer token. Public but strictly read-only (one
-		// listAccessibleCustomers + one GAQL search, no mutations, no D1
-		// writes). Remove after the access-level verification completes.
-		if (request.method === "GET" && url.pathname === "/api/_diag/ads-no-token-test") {
-			return json(await testGoogleAdsNoTokenAccess(env));
 		}
 		// Parameterized live Google Ads metrics (canonical metrics layer).
 		// Owner-key gated by the operatingCenterApiRoute gate above.

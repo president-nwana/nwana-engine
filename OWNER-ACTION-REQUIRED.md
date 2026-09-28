@@ -7,26 +7,32 @@
 
 ---
 
-## 1. Google Ads — Developer Token
+## 1. Google Ads — RESOLVED 2026-09-28 (no owner action needed)
 
-**Need:** Google Ads API developer token, stored as Worker secret `GOOGLE_ADS_DEVELOPER_TOKEN`.
+**Status:** RESOLVED — verified live in production. Google sunset developer
+tokens on 2026-09-09: the `developer-token` header is optional and ignored by
+the API servers; production access is determined by the Google Cloud project
+that owns the OAuth client. The Engine's newly added
+`GOOGLE_ADS_DEVELOPER_TOKEN` requirement was obsolete and has been removed
+from the code (the legacy header is sent only if still configured, never
+required).
 
-**Why:** The Engine's Google Ads integration is OAuth-connected and code-complete, but the Google Ads API refuses ALL requests without a developer-token header. Until this token exists, every Ads metrics read returns `OWNER_ACTION_REQUIRED` instead of live data. This is the single blocker for verifying the 88 clicks / ~$895.60 Ad Grant figures in production.
+**Verified 2026-09-28 (live production API, no developer token sent):**
+- Cloud project number: `440660818183` (project "NWANA ChatGPT Connector")
+- OAuth: the Worker uses the stored "NWANA Engine Google Ads" OAuth
+  credentials — refresh succeeds; the client belongs to project 440660818183
+- `customers:listAccessibleCustomers` → `customers/6758500147`
+- GAQL campaign search 2026-08-26 → 2026-09-28
+- Aug 26 – Sep 28 account totals: **1599 impressions, 88 clicks, $895.64
+  cost, 99 conversions** — clicks and cost match the owner-verified UI
+  figures (88 / ~$895.60)
+- Production access confirmed working (at least Explorer level; the exact
+  tier — Explorer / Basic / Standard — is visible in Cloud Console → Google
+  Ads API Overview for project 440660818183)
 
-**Account:** The Google Ads account holding customer ID `6758500147` (or its Manager/MCC account — the token lives on the MCC).
-
-**Steps:**
-1. Open [ads.google.com](https://ads.google.com) and sign in as the Google Ads admin.
-2. If you do not have a Manager (MCC) account: go to [ads.google.com/home/tools/manager-accounts/](https://ads.google.com/home/tools/manager-accounts/) → "Create a manager account" (free, no ads required) → link the existing account `675-850-0147`: Accounts → Sub-account settings → **+** → Link existing account → enter the customer ID → accept the invitation from inside the regular Ads account.
-3. In the Manager account: **Admin** (or Tools & Settings → Setup) → **API Center**.
-4. Accept the Google Ads API Terms of Service. The developer token is issued immediately — copy it (reveal with "View token").
-5. In the API Center, expand **Access level** → click **"Apply for Basic Access"** → describe the use case: "Internal read-only reporting for our own nonprofit Ad Grant account — campaign performance metrics only, low request volume, no third-party accounts." Approval typically takes 24–48 hours. (New tokens start at test-account-only access; Basic Access is required for production data.)
-6. Send the token value back. I will store it as the Worker secret `GOOGLE_ADS_DEVELOPER_TOKEN` (never in chat, never in code).
-
-**Reversible:** Yes — the token can be regenerated or revoked in API Center at any time.
-
-**Send back:** The developer token string (via the secure credential flow I will provide), plus confirmation when Basic Access is approved.
-
+**Owner action:** none. To confirm or raise the tier, open
+`https://console.cloud.google.com/google/ads-apis/overview?project=440660818183`
+in the Cloud Console — the current level already serves production reads.
 ---
 
 ## 2. Threads — API Access
@@ -124,7 +130,7 @@
 
 | # | Platform | Need | Blocks | $0 | Reversible |
 |---|----------|------|--------|----|------------|
-| 1 | Google Ads | Developer token → secret `GOOGLE_ADS_DEVELOPER_TOKEN` | Live Ads metrics + verification of 88 clicks / $895.60 | Yes | Yes |
+| 1 | Google Ads | RESOLVED 2026-09-28 — no action needed (token sunset; access via Cloud project, verified live: 1599 impr / 88 clicks / $895.64 / 99 conv) | Live Ads metrics + verification of 88 clicks / $895.60 | No | — |
 | 2 | Threads | `threads_basic` token → secret `THREADS_ACCESS_TOKEN` | Threads followers/insights | Yes | Yes |
 | 3 | LinkedIn | Community Management API + token → secret `LINKEDIN_ACCESS_TOKEN` + org ID | LinkedIn followers/stats (replaces hardcoded "8") | Yes | Yes |
 | 4 | Moodle | Web services token → secret `MOODLE_API_TOKEN` | Academy users/enrollments/completions | Yes | Yes |
