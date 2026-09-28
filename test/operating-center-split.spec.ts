@@ -82,7 +82,8 @@ describe("operating center sponsorship in the Growth section (rebuild 2026-09-28
 	it("carries the sponsorship tab with the generate form and asset list with stage advancement", () => {
 		expect(html).toContain('data-tab="sponsorship"');
 		expect(html).toContain('id="sponsorship-generate-form"');
-		expect(html).toContain('id="sponsorship-assets"');
+		expect(html).toContain('id="sponsorship-det"');
+		expect(html).toContain('data-viewpanel="actions" data-func="sponsorship"');
 		expect(html).toContain("/api/operating-center/sponsorship-assets/generate");
 		expect(html).toContain("/api/operating-center/sponsorship-assets/advance");
 		expect(html).toContain("Move to ");
@@ -106,8 +107,8 @@ describe("operating center activity in the Operations section (rebuild 2026-09-2
 
 	it("carries the activity tab with the full feed with requires-reading and mark-as-read", () => {
 		expect(html).toContain('data-tab="activity"');
-		expect(html).toContain('id="activity-reading"');
-		expect(html).toContain('id="activity-new"');
+		expect(html).toContain('id="ops-act-reading"');
+		expect(html).toContain('id="ops-act-new"');
 		expect(html).toContain("Mark as read");
 		expect(html).toContain("/api/operating-center/activity");
 		expect(html).toContain("/api/operating-center/activity/acknowledge");

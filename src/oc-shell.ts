@@ -35,6 +35,125 @@ export interface OcTab {
 	reportId?: string;
 }
 
+/**
+ * One function block: a 1-2 line human description, three visible
+ * [ Summary ] [ Actions ] [ Details ] navigation buttons, and three
+ * SEPARATE views — only one visible at a time, never stacked.
+ * View loaders are `async function boot_<func>_<view>()` defined by the
+ * section (view = summary|actions|details); the view-routing script below
+ * calls them lazily on first activation.
+ */
+export function ocFunction(
+	id: string,
+	description: string,
+	summaryHtml: string,
+	actionsHtml: string,
+	detailsHtml: string,
+): string {
+	return (
+		`<p class="oc-func-desc">${description}</p>` +
+		`<nav class="oc-views" aria-label="Views" data-views="${id}">` +
+		`<button type="button" class="oc-view-btn oc-view-active" data-view="summary">Summary</button>` +
+		`<button type="button" class="oc-view-btn" data-view="actions">Actions</button>` +
+		`<button type="button" class="oc-view-btn" data-view="details">Details</button>` +
+		`</nav>` +
+		`<div class="oc-view" data-viewpanel="summary" data-func="${id}">${summaryHtml}</div>` +
+		`<div class="oc-view" data-viewpanel="actions" data-func="${id}" hidden>${actionsHtml}</div>` +
+		`<div class="oc-view" data-viewpanel="details" data-func="${id}" hidden>${detailsHtml}</div>`
+	);
+}
+
+/**
+ * View-routing script for sections that address tabs by the `tab` query
+ * parameter (queryTabs: true), deep-linking every function view as
+ * ?tab=<function>&view=<summary|actions|details>.
+ *
+ * Defines, all prefixed to avoid collisions:
+ *   - `__<prefix>SetView(tab, view, push)` — navigate to a view, updating
+ *     the URL (pushState when push is true). Call it from any tab script
+ *     for cross-tab links.
+ *   - `__<prefix>BootTab(tab)` — activate the view from the URL.
+ *   - `async function boot_<tabid>()` for every tab id — required by the
+ *     shell's tab activation.
+ *
+ * Overrides `window.__onTabNavigate` so tab-bar switches land on the
+ * Summary view. Also converts legacy `#tab` hashes to the query form and
+ * wires `[data-qa="tab|view|selector"]` quick-action buttons.
+ */
+export function ocViewScript(prefix: string, tabIds: string[]): string {
+	const setView = `__${prefix}SetView`;
+	const bootTab = `__${prefix}BootTab`;
+	const bootFns = tabIds
+		.map((t) => `async function boot_${t}(){${bootTab}('${t}');}`)
+		.join("\n");
+	const tabList = JSON.stringify(tabIds);
+	return `
+	var __${prefix}BootedViews={};
+	function __${prefix}ViewParam(){
+		try{var v=new URLSearchParams(location.search).get('view');return (v==='actions'||v==='details')?v:'summary';}
+		catch(e){return 'summary';}
+	}
+	function __${prefix}ActivateView(tab,view){
+		var panel=document.querySelector('#tabpanel-'+tab);
+		if(!panel)return;
+		var btns=panel.querySelectorAll('[data-views] .oc-view-btn');
+		for(var i=0;i<btns.length;i++){btns[i].classList.toggle('oc-view-active',btns[i].getAttribute('data-view')===view);}
+		var panels=panel.querySelectorAll('[data-viewpanel]');
+		for(var j=0;j<panels.length;j++){panels[j].hidden=panels[j].getAttribute('data-viewpanel')!==view;}
+		var key=tab+':'+view;
+		if(!__${prefix}BootedViews[key]){
+			__${prefix}BootedViews[key]=1;
+			var f=window['boot_'+tab+'_'+view];
+			if(typeof f==='function'){f().catch(function(e){var m=panel.querySelector('.oc-tab-error');if(m)m.textContent='Error: '+(e&&e.message||e);});}
+		}
+	}
+	function ${setView}(tab,view,push){
+		var u;try{u=new URL(location.href);}catch(e){return;}
+		u.searchParams.set('tab',tab);u.searchParams.set('view',view);
+		if(push){history.pushState({},'',u);}else{history.replaceState({},'',u);}
+		__activateTab(tab);
+		__${prefix}ActivateView(tab,view);
+	}
+	function ${bootTab}(tab){__${prefix}ActivateView(tab,__${prefix}ViewParam());}
+	${bootFns}
+	window.__onTabNavigate=function(id){${setView}(id,'summary',true);};
+	window.addEventListener('popstate',function(){
+		__activateInitialTab();
+		var active=document.querySelector('.oc-tab.oc-tab-active');
+		var tab=active?active.getAttribute('data-tab'):'${tabIds[0]}';
+		__${prefix}ActivateView(tab,__${prefix}ViewParam());
+	});
+	document.querySelector('#app').addEventListener('click',function(e){
+		var q=e.target.closest('[data-qa]');
+		if(q){
+			var parts=String(q.getAttribute('data-qa')).split('|');
+			var qtab=parts[0],qview=parts[1]||'summary',qsel=parts[2]||'';
+			${setView}(qtab,qview,true);
+			if(qsel){setTimeout(function(){var el=document.querySelector(qsel);if(el&&!el.hidden)el.scrollIntoView();},600);}
+			return;
+		}
+		var b=e.target.closest('.oc-views .oc-view-btn');
+		if(b){
+			var panel=b.closest('.oc-tabpanel');
+			var btab=panel?panel.getAttribute('data-tab'):'';
+			if(btab)${setView}(btab,b.getAttribute('data-view'),true);
+		}
+	});
+	(function(){
+		try{
+			var h=(location.hash||'').replace(/^#/,'').split('?')[0];
+			var tabs=${tabList};
+			var sp=new URLSearchParams(location.search);
+			if(!sp.get('tab')&&tabs.indexOf(h)>=0){
+				sp.set('tab',h);
+				if(!sp.get('view'))sp.set('view','summary');
+				history.replaceState({},'',location.pathname+'?'+sp.toString());
+			}
+		}catch(e){}
+	})();
+`;
+}
+
 export function ocSectionShell(opts: {
 	section: OperatingCenterPageId;
 	title: string;

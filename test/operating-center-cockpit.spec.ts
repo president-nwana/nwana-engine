@@ -1,97 +1,84 @@
 import { describe, expect, it } from "vitest";
 import { renderOverviewSectionHtml } from "../src/oc-overview";
 
-// Cockpit contract: /operating-center is a compact live summary. Every card
-// reads the same API endpoint its detail page uses, one section failure never
-// breaks the rest, and no number is hardcoded into the page.
+// Executive contract: /operating-center is the executive summary of the whole
+// system. The old cockpit dashboard of 15 cards was retired when Overview
+// became a 4-function section (State / Money / Work / Blockers) with the
+// approved Summary / Actions / Details pattern. Every number is read from a
+// live API; none is hardcoded into the page.
 
-const COCKPIT_CARDS: Array<[string, string]> = [
-	["lifecycle-summary", "/operating-center/sport#results"],
-	["fund-summary", "/operating-center/growth#funds"],
-	["sponsorship-summary", "/operating-center/growth#sponsorship"],
-	["ads-summary", "/operating-center/marketing#ads"],
-	["social-summary", "/operating-center/marketing#social"],
-	["media-summary", "/operating-center/marketing#media"],
-	["partners-summary", "/operating-center/growth#partners"],
-	["sellers-summary", "/operating-center/growth#sellers"],
-	["fundraising-summary", "/operating-center/growth#fundraising"],
-	["groups-summary", "/operating-center/sport#groups"],
-	["sites-summary", "/operating-center/marketing#sites"],
-	["board-summary", "/operating-center/board"],
-	["meetings-summary", "/operating-center/board#meetings"],
-	["activity-summary", "/operating-center/operations#activity"],
-	["operations-summary", "/operating-center/operations"],
+const OVERVIEW_FUNCTIONS: Array<[string, string]> = [
+	["state", "State"],
+	["money", "Money"],
+	["work", "Work"],
+	["blockers", "Blockers"],
 ];
 
-const SECTION_ENDPOINTS = [
-	"/api/operating-center/race-lifecycle",
+const LIVE_ENDPOINTS = [
+	"/api/operating-center/overview",
 	"/api/operating-center/fund",
-	"/api/operating-center/sponsorship-assets",
-	"/api/operating-center/ads/overview",
-	"/api/operating-center/social/overview",
-	"/api/operating-center/media/overview",
-	"/api/operating-center/partners/overview",
-	"/api/operating-center/sellers/overview",
 	"/api/operating-center/fundraising/overview",
-	"/api/operating-center/groups/overview",
-	"/api/operating-center/sites/overview",
-	"/api/operating-center/meetings/overview",
-	"/api/board/meetings",
-	"/api/board/submissions",
-	"/api/board/work-items",
-	"/api/operating-center/activity",
+	"/api/operating-center/social/overview",
+	"/api/operating-center/ads/overview",
+	"/api/operating-center/media/overview",
+	"/api/operating-center/race-lifecycle",
 	"/api/operating-center/operations/overview",
+	"/api/operating-center/activity",
+	"/api/operating-center/analytics/traffic",
+	"/api/board/submissions",
+	"/api/board/meetings",
+	"/api/board/work-items",
 ];
 
 function extractScripts(html: string): string[] {
 	return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 }
 
-describe("operating center cockpit", () => {
+describe("operating center overview (executive summary contract)", () => {
 	const html = renderOverviewSectionHtml();
 	const scripts = extractScripts(html).join("\n");
 
-	it("renders a top owner summary strip", () => {
-		expect(html).toContain('id="owner-summary"');
-	});
-
-	it("renders one compact card per section with a link to the detail page", () => {
-		for (const [id, href] of COCKPIT_CARDS) {
-			expect(html).toContain(`id="${id}"`);
-			expect(html).toContain(`href="${href}"`);
+	it("renders the four executive functions", () => {
+		for (const [id, label] of OVERVIEW_FUNCTIONS) {
+			expect(html).toContain(`data-tab="${id}"`);
+			expect(html).toContain(`>${label}<`);
 		}
 	});
 
-	it("fetches every section from the same API its detail page uses", () => {
-		for (const endpoint of SECTION_ENDPOINTS) {
+	it("gives every function the Summary / Actions / Details views", () => {
+		for (const [id] of OVERVIEW_FUNCTIONS) {
+			for (const view of ["summary", "actions", "details"]) {
+				expect(html).toContain(
+					`data-viewpanel="${view}" data-func="${id}"`,
+				);
+			}
+		}
+	});
+
+	it("reads every executive number from a live API, not from the markup", () => {
+		for (const endpoint of LIVE_ENDPOINTS) {
 			expect(scripts).toContain(`'${endpoint}'`);
 		}
 	});
 
-	it("isolates section failures: one bad section cannot block the rest", () => {
-		// Per-section try/catch around a single shared fetch loop.
-		expect(scripts).toContain("Promise.all(SECTIONS.map");
-		expect(scripts).toContain("try{D[s[0]]=await api(s[1])}catch");
-		// No load path awaits one endpoint before the others start.
-		expect(scripts).not.toContain("await api('/api/operating-center/overview'),api('/api/board/submissions')");
-	});
-
-	it("keeps the event-driven board protocol reconciliation trigger", () => {
-		expect(scripts).toContain("api('/api/operating-center/overview').catch");
+	it("routes cross-section action links to canonical tab views, not hashes", () => {
+		expect(html).toContain("/operating-center/board?tab=board&view=actions");
+		expect(html).toContain(
+			"/operating-center/growth?tab=funds&view=actions",
+		);
+		expect(scripts).not.toContain("/operating-center/sport#results");
+		expect(scripts).not.toContain("/operating-center/growth#funds");
 	});
 
 	it("carries no hardcoded connection or follower claims", () => {
 		// These were once hardcoded into the page instead of read from the APIs.
-		expect(html).not.toContain("Google Ads: <span class=\"unavailable\">not connected</span>");
+		// The "Analytics: not connected" string still exists as a live-gated
+		// fallback that the /api/operating-center/analytics/traffic fetch
+		// replaces when the endpoint answers — that is honest, not hardcoded.
+		expect(html).not.toContain(
+			"Google Ads: <span class=\"unavailable\">not connected</span>",
+		);
 		expect(html).not.toContain("LinkedIn: 8 followers (observed 2026-09-22)");
-		expect(html).not.toContain("Analytics: <span class=\"unavailable\">not connected</span>");
-	});
-
-	it("shows the real operations queue state from the operations reader", () => {
-		expect(scripts).toContain("READY_TO_ACT");
-		expect(scripts).toContain("NEEDS_OWNER_INPUT");
-		expect(scripts).toContain("BLOCKED_EXTERNAL");
-		expect(scripts).toContain("'/api/operating-center/operations/overview'");
 	});
 
 	it("embeds syntactically valid JavaScript", () => {

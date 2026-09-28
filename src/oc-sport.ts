@@ -1,28 +1,32 @@
-// Operating Center — Sport section (7-section rebuild).
+// Operating Center — Sport section.
 //
-// Thin shell around ocSectionShell with five tabs:
-//  1. results — Series 2026 race results: result publication (Publish
-//     buttons), per-distance race lifecycle with Confirm prep, sync status,
-//     and per-event/per-level result tables. Was renderRaceResultsHtml
-//     (src/operating-center.ts).
-//  2. series — series/championship/race creation packets + competition
-//     calendar (NEW).
-//  3. challenges — challenge creation packets + challenge calendar (NEW).
-//  4. groups — NW Groups network overview. Was renderGroupsHtml
-//     (src/operating-center-screens.ts); report id "groups" reused unchanged.
-//  5. creation — object creation packets + new-packet form + the packet
-//     detail (all 5 steps: verify/link race, credential probe, per-step
-//     APPLY_STEP confirm forms, manual last mile with Mark-done buttons).
-//     Was renderCreationHtml / renderCreationPacketHtml
-//     (src/operating-center-creation.ts); the packet detail is an inline
-//     panel shown only when ?packet_id= is present.
+// Five functions, each with a 1-2 line human description and three separate
+// views [ Summary ] [ Actions ] [ Details ] (one visible at a time),
+// deep-linkable as /operating-center/sport?tab=<function>&view=<summary|actions|details>.
+//
+//   1. results — Series 2026 race results: live lifecycle per distance,
+//      publication status, manual refresh sync, prep confirm, publish buttons.
+//   2. series — series/championship/race creation packets + competition
+//      calendar.
+//   3. challenges — challenge creation packets + challenge calendar.
+//   4. groups — NW Groups network overview (report id "groups").
+//   5. creation — object creation packets: summary counts, the new-packet
+//      form + packet list + the full 5-step packet detail inline in Actions,
+//      and the "what the machine can and cannot do" capability table in
+//      Details.
+//
+// Content rules: Summary = management summary only (live numbers, what the
+// Machine did, what needs attention — no tech tables). Actions = only real
+// manual owner actions that exist in the API today (verified; nothing
+// invented). Details = deep working data: tables, records, statuses.
 //
 // Tab scripts reuse the shell's global esc()/api(); the owner-key gate lives
-// in the shell, so no tab script touches the gate. The shell concatenates all
-// tab scripts into one <script> block, so every top-level name in them is
-// unique across the page (prefixed by tab id where needed).
+// in the shell, so no tab script touches the gate. The shell concatenates
+// all tab scripts into one <script> block, so every top-level name in them
+// is unique across the page (prefixed by tab id). The view-routing script
+// (ocViewScript, prefix "spo") is appended exactly once.
 
-import { ocSectionShell } from "./oc-shell";
+import { ocFunction, ocSectionShell, ocViewScript } from "./oc-shell";
 import {
 	OBJECT_CREATION_KINDS,
 	OBJECT_FIELD_CAPABILITIES,
@@ -78,8 +82,8 @@ function creationCapabilityTableHtml(): string {
 // ---------------------------------------------------------------------------
 
 // Custom classes used by the results tab that the shared shell does not
-// define (.ok/.err/.event/.sync-status/plain tables), scoped to this tabpanel
-// so they cannot leak into the other tabs.
+// define (.ok/.err/.event/.sync-status/plain tables/.btnrow), scoped to this
+// tabpanel so they cannot leak into the other tabs.
 const RESULTS_CSS = `<style>
 	#tabpanel-results .ok{color:#1c6b3a;font-weight:650}
 	#tabpanel-results .err{color:#a3322b;font-weight:650}
@@ -90,132 +94,201 @@ const RESULTS_CSS = `<style>
 	#tabpanel-results table{width:100%;border-collapse:collapse;margin-top:8px}
 	#tabpanel-results th,#tabpanel-results td{text-align:left;padding:8px 10px;border-bottom:1px solid #dce4df;font-size:14px}
 	#tabpanel-results th{color:#66736d;font-weight:650}
+	#tabpanel-results .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center}
+	#tabpanel-results .btnrow button{width:auto;margin-top:0}
 </style>`;
 
-const RESULTS_PANELS = RESULTS_CSS + `<section class="panel">
-			<h2>Result publication</h2>
-			<p class="meta">One click per ready result: publishes to 4 Meta destinations and the NWANA site news (winner announcement + next-race promo). Requires the owner key and an explicit confirmation. Already-published results are skipped automatically.</p>
-			<div id="pub-drafts">Loading…</div>
-		</section>
-		<section class="panel">
-			<h2>Series 2026 race lifecycle</h2>
-			<p class="meta">One row per distance. Stages: registration_open → awaiting_results → verifying (owner) → levels_computed → published → next_race_prep.</p>
-			<div><span class="message" id="lifecycle-message" aria-live="polite"></span></div>
-			<div id="lifecycle">Loading…</div>
-		</section>
-		<section class="panel">
-			<h2>Sync status</h2>
-			<div class="message" id="sync-message" aria-live="polite">Refreshing results from RunSignup…</div>
-			<div class="sync-status" id="sync-status"></div>
-		</section>
-		<div id="results">Loading…</div>`;
+const RESULTS_SUMMARY_HTML = RESULTS_CSS + `<section class="panel"><h2>Results summary</h2><div id="results-sum">Loading…</div></section>`;
+
+const RESULTS_ACTIONS_HTML = `<section class="panel"><h2>Results actions</h2>
+	<p class="meta"><strong>Machine (automatic):</strong> computes performance levels, points, and level places on demand and keeps the per-distance lifecycle. Syncing from RunSignup is manual — the Machine no longer syncs on page load. <strong>Owner (manual):</strong> the actions below. Publishing a result always needs your explicit confirmation.</p>
+	<div id="results-act">Loading…</div></section>`;
+
+const RESULTS_DETAILS_HTML = `<section class="panel"><h2>Sync status</h2><div class="sync-status" id="results-det-sync">Loading…</div></section>
+	<section class="panel"><h2>Full lifecycle</h2><div id="results-det-lifecycle">Loading…</div></section>
+	<section class="panel"><h2>Results by event and level</h2><div id="results-det-results">Loading…</div></section>`;
 
 const RESULTS_SCRIPT = `
 	const results_DISTANCES=['1K','3K','5K','10K','15K','20K'];
 	function results_publicationLabel(s){return s==='PUBLISHED'?'Published':s==='BASELINE'?'Historical baseline':'Not published yet'}
-	function results_renderSyncStatus(statuses){
-		document.querySelector('#sync-status').innerHTML=statuses.map(s=>
-			'<div><strong>'+esc(s.distance)+'</strong><br>'+
-			(s.ok?'<span class="ok">Synced</span>':'<span class="err">Sync failed</span><br><span class="meta">'+esc(s.error)+'</span>')+
-			'</div>').join('');
-	}
 	function results_renderLevelBlock(level,rows){
 		const body=rows.length?'<table><thead><tr><th>Athlete</th><th>Gender</th><th>Time</th><th>Level place</th></tr></thead><tbody>'+
 			rows.map(r=>'<tr><td>'+esc(r.athlete)+'</td><td>'+esc(r.gender)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.level_place)+'</td></tr>').join('')+'</tbody></table>'
 			:'<div class="unavailable">No finishers in this level.</div>';
 		return '<h4>'+esc(level.name)+' ('+esc(level.threshold)+')</h4>'+body;
 	}
-	function results_renderResults(data){
-		const box=document.querySelector('#results');
-		if(!data.distances.length){box.innerHTML='<div class="panel"><div class="unavailable">No results yet.</div></div>';return}
-		box.innerHTML=data.distances.map(d=>{
-			const levels=Array.isArray(d.levels)&&d.levels.length?d.levels:[];
-			const events=d.events.length?d.events.map(e=>{
-				const link=e.results_url?'<a href="'+esc(e.results_url)+'" target="_blank" rel="noopener">Full results on RunSignup</a>':'<span class="unavailable">RunSignup link not available</span>';
-				const blocks=levels.length?levels.map(l=>{
-					const rows=(e.results||[]).filter(r=>String(r.performance_level||'').indexOf(l.name)===0);
+	function results_resultsHtml(data){
+		if(!data.distances||!data.distances.length)return '<div class="unavailable">No results yet.</div>';
+		return data.distances.map(function(d){
+			var levels=Array.isArray(d.levels)&&d.levels.length?d.levels:[];
+			var events=d.events&&d.events.length?d.events.map(function(e){
+				var link=e.results_url?'<a href="'+esc(e.results_url)+'" target="_blank" rel="noopener">Full results on RunSignup</a>':'<span class="unavailable">RunSignup link not available</span>';
+				var blocks=levels.length?levels.map(function(l){
+					var rows=(e.results||[]).filter(function(r){return String(r.performance_level||'').indexOf(l.name)===0});
 					return results_renderLevelBlock(l,rows);
 				}).join(''):'<div class="unavailable">No results synced for this event yet.</div>';
 				return '<div class="event"><h3>'+esc(e.event_name||('Event '+e.event_id))+' · '+esc(e.event_date||'')+'</h3>'+
 					'<div class="meta">'+esc(String(e.result_count))+' results'+(e.finalized?' · finalized':'')+' · Publication: '+esc(results_publicationLabel(e.publication_status))+' · '+link+'</div>'+blocks+'</div>';
 			}).join(''):'<div class="unavailable">No past races with results yet.</div>';
-			return '<section class="panel"><h2>'+esc(d.distance)+' — '+esc(d.stage)+'</h2>'+
-				'<div class="meta">'+(d.synced_at?'Synced '+esc(d.synced_at):'Never synced')+'</div>'+
-				events+'</section>';
+			return '<div class="item"><h3 style="margin:0 0 4px">'+esc(d.distance)+' — '+esc(d.stage)+'</h3>'+
+				'<div class="meta">'+(d.synced_at?'Synced '+esc(d.synced_at):'Never synced')+'</div>'+events+'</div>';
 		}).join('');
 	}
-	async function results_loadLifecycle(){
-		const box=document.querySelector('#lifecycle');
+	async function results_fetchLifecycle(){return await api('/api/operating-center/race-lifecycle');}
+	async function results_fetchPreview(){
+		try{return await api('/sources/runsignup/series-2026/results-preview');}
+		catch(err){return {error:err.message||String(err)};}
+	}
+	async function boot_results_summary(){
+		const box=document.querySelector('#results-sum');
 		try{
-			const data=await api('/api/operating-center/race-lifecycle');
-			if(!data.distances.length){box.innerHTML='<div class="unavailable">No lifecycle state yet.</div>';return}
-			box.innerHTML=data.distances.map(d=>{
+			const life=await results_fetchLifecycle();
+			const prev=await results_fetchPreview();
+			const distances=life.distances||[];
+			let html='';
+			for(const d of distances){
 				const ev=d.active_event;
-				const action=(d.owner_action&&d.stage!=='next_race_prep')?'<div class="meta">Owner action: '+esc(d.owner_action)+'</div>':'';
-				const prep=(d.stage==='next_race_prep'&&d.prep)?'<div class="meta">'+esc(d.owner_action||'Prep needs review')+'. Drafts ready: announcement + email (Send stays manual). <button data-prep="'+esc(d.distance)+'" style="width:auto">Confirm prep</button></div>':'';
-				return '<div class="item"><strong>'+esc(d.distance)+' — '+esc(d.stage)+'</strong>'+
-					'<div class="meta">'+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||'')+' · ':'')+'write: '+esc(d.write_access)+' (dry_run)'+(d.synced_at?' · synced '+esc(d.synced_at):'')+'</div>'+
-					action+prep+'</div>';
-			}).join('');
-			box.querySelectorAll('[data-prep]').forEach(btn=>btn.addEventListener('click',async()=>{
-				const m=document.querySelector('#lifecycle-message');m.textContent='Confirming prep…';
-				try{await api('/api/operating-center/race-lifecycle/prep-confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:btn.dataset.prep})});m.textContent='Prep confirmed.';await results_loadLifecycle()}catch(err){m.textContent=err.message}
-			}));
+				html+='<div class="item"><strong>'+esc(d.distance)+' — '+esc(d.stage)+'</strong>'+
+					'<div class="detail">'+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||'')+' · ':'')+(d.synced_at?'synced '+esc(d.synced_at):'never synced')+'</div></div>';
+			}
+			if(prev.error){
+				html+='<div class="item"><strong>Publication status <span class="badge-warn">unavailable</span></strong><div class="detail">'+esc(prev.error)+'</div></div>';
+			}else{
+				const drafts=prev.drafts||[];
+				const ready=drafts.filter(x=>x.publication_required&&x.publication_status!=='PUBLISHED');
+				const published=drafts.filter(x=>x.publication_status==='PUBLISHED').length;
+				html+='<div class="item"><strong>Publication status</strong><div class="detail">'+ready.length+' result(s) ready to publish · '+published+' published</div></div>';
+			}
+			const prepCount=distances.filter(d=>d.stage==='next_race_prep'&&d.prep).length;
+			html+='<div class="item"><strong>Prep awaiting review</strong><div class="detail">'+(prepCount?prepCount+' race(s) in next-race prep — confirm in Actions.':'None.')+'</div></div>';
+			const attn=[];
+			for(const d of distances){
+				if(d.stage==='verifying')attn.push(d.distance+' is stuck in verifying — owner verification needed.');
+				if(!d.synced_at)attn.push(d.distance+' has never been synced from RunSignup.');
+			}
+			if(!prev.error){
+				const ready=(prev.drafts||[]).filter(x=>x.publication_required&&x.publication_status!=='PUBLISHED');
+				if(ready.length)attn.push(ready.length+' result(s) ready for publication — publish them in Actions.');
+			}
+			html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(esc).join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
+			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Computes performance levels, level places, and points from verified results and keeps the per-distance lifecycle (registration_open → awaiting_results → verifying → levels_computed → published → next_race_prep). Results are synced manually from Actions; nothing publishes without your confirmation.</div></div>';
+			box.innerHTML=html;
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
-	async function results_loadPubDrafts(){
-		const box=document.querySelector('#pub-drafts');
+	async function boot_results_actions(){
+		const box=document.querySelector('#results-act');
 		try{
-			const data=await api('/sources/runsignup/series-2026/results-preview');
-			const ready=(data.drafts||[]).filter(d=>d.publication_required);
-			if(!ready.length){box.innerHTML='<div class="unavailable">No results ready for publication.</div>';return}
-			box.innerHTML=ready.map(d=>{
-				const title=(d.editorial_draft&&d.editorial_draft.title)||d.publication_key;
-				const card='/result-publications/card/'+encodeURIComponent(d.publication_key)+'.jpg';
-				return '<div class="event"><strong>'+esc(title)+'</strong>'+
-					'<div class="meta">'+esc((d.source&&d.source.distance)||'')+' · Status: '+esc(d.publication_status)+'</div>'+
-					'<div><a href="'+esc(card)+'" target="_blank" rel="noopener">Preview card</a></div>'+
-					'<button data-pubkey="'+esc(d.publication_key)+'" style="width:auto">Publish result</button></div>';
-			}).join('');
-			box.querySelectorAll('[data-pubkey]').forEach(btn=>btn.addEventListener('click',async()=>{
-				const key=btn.dataset.pubkey;
-				if(!confirm('Publish this result?\\n\\nDestinations: 4 Meta pages + NWANA site news (winner announcement + next-race promo).\\nThis cannot be undone.'))return;
-				btn.disabled=true;
-				try{
-					const res=await api('/result-publications/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({publication_key:key,confirmation:'PUBLISH'})});
-					alert(res.already_published?'Already published.':'Published.');
-					await results_loadPubDrafts();
-				}catch(err){alert(err.message);btn.disabled=false}
-			}));
+			const life=await results_fetchLifecycle();
+			const prev=await results_fetchPreview();
+			const distances=life.distances||[];
+			let html='<h3>Refresh sync</h3><p class="meta">One POST per distance to /api/operating-center/race-lifecycle/sync. The Machine does not sync automatically.</p>'+
+				distances.map(d=>'<div class="item"><strong>'+esc(d.distance)+'</strong><div class="detail">'+(d.synced_at?'Last synced '+esc(d.synced_at):'Never synced')+'</div><div class="btnrow"><button type="button" class="secondary" data-sync="'+esc(d.distance)+'">Refresh '+esc(d.distance)+'</button></div><div class="message" aria-live="polite"></div></div>').join('');
+			const prep=distances.filter(d=>d.stage==='next_race_prep'&&d.prep);
+			html+='<h3>Confirm prep</h3>';
+			if(prep.length){
+				html+=prep.map(d=>'<div class="item"><strong>'+esc(d.distance)+' — next-race prep ready</strong><div class="detail">'+esc(d.owner_action||'Prep needs review')+'. Drafts: announcement + email (Send stays manual).</div><div class="btnrow"><button type="button" class="secondary" data-prep="'+esc(d.distance)+'">Confirm prep</button></div><div class="message" aria-live="polite"></div></div>').join('');
+			}else{
+				html+='<div class="unavailable">No race in prep review right now.</div>';
+			}
+			html+='<h3>Publish results</h3><div id="results-pub-actions"><div class="unavailable">Loading…</div></div>';
+			box.innerHTML=html;
+			box.querySelectorAll('[data-sync]').forEach(function(btn){
+				btn.addEventListener('click',async()=>{
+					const item=btn.closest('.item');const msg=item.querySelector('.message');msg.textContent='Syncing '+btn.dataset.sync+'…';
+					try{
+						await api('/api/operating-center/race-lifecycle/sync?distance='+encodeURIComponent(btn.dataset.sync),{method:'POST'});
+						msg.textContent='Synced.';
+					}catch(err){msg.textContent=err.message}
+				});
+			});
+			box.querySelectorAll('[data-prep]').forEach(function(btn){
+				btn.addEventListener('click',async()=>{
+					const item=btn.closest('.item');const msg=item.querySelector('.message');msg.textContent='Confirming prep…';
+					try{
+						await api('/api/operating-center/race-lifecycle/prep-confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:btn.dataset.prep})});
+						msg.textContent='Prep confirmed.';
+					}catch(err){msg.textContent=err.message}
+				});
+			});
+			const pubBox=box.querySelector('#results-pub-actions');
+			if(prev.error){pubBox.innerHTML='<div class="unavailable">'+esc(prev.error)+'</div>';}
+			else{
+				const ready=(prev.drafts||[]).filter(d=>d.publication_required);
+				if(!ready.length){pubBox.innerHTML='<div class="unavailable">No results ready for publication.</div>';}
+				else{
+					pubBox.innerHTML=ready.map(d=>{
+						const title=(d.editorial_draft&&d.editorial_draft.title)||d.publication_key;
+						return '<div class="item"><strong>'+esc(title)+'</strong>'+
+							'<div class="detail">'+esc((d.source&&d.source.distance)||'')+' · Status: '+esc(d.publication_status)+'</div>'+
+							'<div class="btnrow"><button type="button" class="secondary" data-pubkey="'+esc(d.publication_key)+'">Publish result</button></div></div>';
+					}).join('');
+					pubBox.querySelectorAll('[data-pubkey]').forEach(function(btn){
+						btn.addEventListener('click',async()=>{
+							const key=btn.dataset.pubkey;
+							if(!confirm('Publish this result?\\n\\nDestinations: 4 Meta pages + NWANA site news (winner announcement + next-race promo).\\nThis cannot be undone.'))return;
+							btn.disabled=true;
+							try{
+								const res=await api('/result-publications/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({publication_key:key,confirmation:'PUBLISH'})});
+								alert(res.already_published?'Already published.':'Published.');
+								btn.disabled=false;
+								const item=btn.closest('.item');if(item)item.remove();
+							}catch(err){alert(err.message);btn.disabled=false}
+						});
+					});
+				}
+			}
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
-	async function boot_results(){
-		const m=document.querySelector('#sync-message');
-		m.textContent='Refreshing results from RunSignup…';
-		const statuses=[];
-		for(const d of results_DISTANCES){
+	async function boot_results_details(){
+		try{
+			const life=await results_fetchLifecycle();
+			const distances=life.distances||[];
+			const syncBox=document.querySelector('#results-det-sync');
+			syncBox.innerHTML=distances.length?distances.map(d=>
+				'<div><strong>'+esc(d.distance)+'</strong><br>'+
+				(d.synced_at?'<span class="ok">Synced</span><br><span class="meta">'+esc(d.synced_at)+'</span>':'<span class="err">Never synced</span>')+
+				'</div>').join(''):'<div class="unavailable">No lifecycle state yet.</div>';
+			const lcBox=document.querySelector('#results-det-lifecycle');
+			lcBox.innerHTML=distances.length?distances.map(d=>{
+				const ev=d.active_event;
+				return '<div class="item"><strong>'+esc(d.distance)+' — '+esc(d.stage)+'</strong>'+
+					'<div class="detail">Active event: '+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||''): 'none')+'</div>'+
+					(d.owner_action?'<div class="detail">Owner action: '+esc(d.owner_action)+'</div>':'')+
+					'<div class="detail">Write access: '+esc(d.write_access)+' (dry_run)'+(d.prep?' · prep drafts ready':'')+'</div>'+
+					'<div class="meta">Synced: '+(d.synced_at?esc(d.synced_at):'never')+'</div></div>';
+			}).join(''):'<div class="unavailable">No lifecycle state yet.</div>';
+			const resBox=document.querySelector('#results-det-results');
 			try{
-				await api('/api/operating-center/race-lifecycle/sync?distance='+encodeURIComponent(d),{method:'POST'});
-				statuses.push({distance:d,ok:true});
-			}catch(err){statuses.push({distance:d,ok:false,error:err.message})}
-			results_renderSyncStatus(statuses);
+				const res=await api('/api/operating-center/race-results');
+				resBox.innerHTML=results_resultsHtml(res);
+			}catch(err){resBox.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		}catch(err){
+			const m=document.querySelector('#tabpanel-results .oc-tab-error');
+			if(m)m.textContent='Error: '+(err.message||err);
 		}
-		const failed=statuses.filter(s=>!s.ok);
-		m.textContent=failed.length
-			? 'Refresh finished with errors on '+failed.map(s=>s.distance).join(', ')+'. Showing the last synced results below.'
-			: 'Results are up to date.';
-		try{results_renderResults(await api('/api/operating-center/race-results'))}
-		catch(err){document.querySelector('#results').innerHTML='<div class="panel"><div class="unavailable">'+esc(err.message)+'</div></div>'}
-		await results_loadLifecycle();
-		await results_loadPubDrafts();
 	}
 `;
 
+const RESULTS_PANELS = ocFunction(
+	"results",
+	"Series 2026 race results — live lifecycle per distance, publication status, and sync state. The Machine computes levels and points; you refresh, confirm, and publish.",
+	RESULTS_SUMMARY_HTML,
+	RESULTS_ACTIONS_HTML,
+	RESULTS_DETAILS_HTML,
+);
+
 // ---------------------------------------------------------------------------
-// 2. Series (NEW)
+// 2. Series
 // ---------------------------------------------------------------------------
 
-const SERIES_PANELS = `<section class="panel"><h2>Series & championships</h2><div class="message" id="series-message"></div><div id="series-list">Loading…</div></section><section class="panel"><h2>Calendar</h2><div id="series-calendar">Loading…</div></section>`;
+const SERIES_SUMMARY_HTML = `<section class="panel"><h2>Series & championships summary</h2><div id="series-sum">Loading…</div></section>`;
+
+const SERIES_ACTIONS_HTML = `<section class="panel"><h2>Series actions</h2>
+	<p class="meta"><strong>Machine (automatic):</strong> builds each packet's dry-run plan and runs read-only probes; writing happens only through explicit confirms in the Creation tab. <strong>Owner (manual):</strong> the action below — packet creation itself lives in Creation.</p>
+	<div id="series-act">Loading…</div></section>`;
+
+const SERIES_DETAILS_HTML = `<section class="panel"><h2>Series, championship & race packets</h2><div id="series-det-packets">Loading…</div></section>
+	<section class="panel"><h2>Competition calendar</h2><div id="series-det-calendar">Loading…</div></section>`;
 
 const SERIES_SCRIPT = `
 	function series_statusBadge(status){
@@ -223,43 +296,85 @@ const SERIES_SCRIPT = `
 		if(status==='manual_pending')return '<span class="badge-warn">manual last mile</span>';
 		return '<span class="badge">in progress</span>';
 	}
-	async function boot_series(){
-		const msg=document.querySelector('#series-message');
-		const list=document.querySelector('#series-list');
-		const cal=document.querySelector('#series-calendar');
+	function series_packetLink(p){return '/operating-center/sport?tab=creation&view=actions&packet_id='+encodeURIComponent(p.packet_id);}
+	async function series_fetchPackets(){
+		const data=await api('/api/operating-center/object-creation/packets');
+		return (data.packets||[]).filter(p=>['series','championship','race'].indexOf(p.kind)>=0);
+	}
+	async function boot_series_summary(){
+		const box=document.querySelector('#series-sum');
 		try{
-			const data=await api('/api/operating-center/object-creation/packets');
-			const packets=(data.packets||[]).filter(p=>['series','championship','race'].indexOf(p.kind)>=0);
-			msg.textContent=packets.length?packets.length+' packet(s).':'';
-			if(!packets.length){list.innerHTML='<div class="unavailable">No series, championship, or race packets yet. Create one on the Creation tab.</div>'}
-			else{
-				list.innerHTML=packets.map(p=>
-					'<div class="item"><strong><a href="/operating-center/sport?packet_id='+encodeURIComponent(p.packet_id)+'#creation">'+esc(p.title)+'</a>'+series_statusBadge(p.status)+'</strong>'+
-					'<div class="detail"><b>Kind:</b> '+esc(p.kind_label||p.kind)+' · <b>Status:</b> '+esc(p.status)+'</div>'+
-					'<div class="detail"><b>Event date:</b> '+esc(p.event_date||'not recorded')+'</div></div>'
-				).join('');
+			const packets=await series_fetchPackets();
+			const byStatus={},byKind={};
+			for(const p of packets){byStatus[p.status]=(byStatus[p.status]||0)+1;byKind[p.kind]=(byKind[p.kind]||0)+1;}
+			let html='<div class="item"><strong>Creation packets</strong><div class="detail">'+packets.length+' series / championship / race packet(s)</div>';
+			if(packets.length){
+				html+='<div class="detail">By kind: '+Object.keys(byKind).map(k=>esc(k)+': '+byKind[k]).join(' · ')+'</div>';
+				html+='<div class="detail">By status: '+Object.keys(byStatus).map(s=>esc(s)+': '+byStatus[s]).join(' · ')+'</div>';
 			}
-		}catch(err){list.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+			html+='</div>';
+			try{
+				const cdata=await api('/api/operating-center/object-creation/calendar?kind=series');
+				const rows=cdata.competition||[];
+				html+='<div class="item"><strong>Competition calendar</strong><div class="detail">'+rows.length+' entr'+(rows.length===1?'y':'ies')+'</div>';
+				if(rows.length)html+='<div class="detail">'+rows.slice(0,5).map(r=>'&bull; '+esc(r.title)+(r.event_date?' · '+esc(r.event_date):'')).join('<br>')+'</div>';
+				html+='</div>';
+			}catch(err){html+='<div class="item"><strong>Competition calendar <span class="badge-warn">unavailable</span></strong><div class="detail">'+esc(err.message)+'</div></div>';}
+			const attn=packets.filter(p=>p.status!=='complete'&&p.status!=='manual_pending');
+			html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(p=>'<a href="'+esc(series_packetLink(p))+'">'+esc(p.title)+'</a> ('+esc(p.status)+')').join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
+			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Keeps the packet lifecycle and the competition calendar from live packet data. Creating the object itself is always a dashboard step; the Machine never claims otherwise.</div></div>';
+			box.innerHTML=html;
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_series_actions(){
+		const box=document.querySelector('#series-act');
+		box.innerHTML='<div class="item"><strong>Create a series / championship / race packet</strong>'+
+			'<div class="detail">Packet creation lives in the Creation tab: the Machine builds the dry-run plan there and you confirm each write.</div>'+
+			'<div class="btnrow" style="display:flex;gap:8px;margin-top:8px"><button type="button" class="secondary" id="series-new-packet">New packet in Creation</button></div></div>';
+		const btn=box.querySelector('#series-new-packet');
+		if(btn)btn.addEventListener('click',function(){__spoSetView('creation','actions',true);});
+	}
+	async function boot_series_details(){
+		const pb=document.querySelector('#series-det-packets');
+		try{
+			const packets=await series_fetchPackets();
+			pb.innerHTML=packets.length?packets.map(p=>
+				'<div class="item"><strong><a href="'+esc(series_packetLink(p))+'">'+esc(p.title)+'</a>'+series_statusBadge(p.status)+'</strong>'+
+				'<div class="detail"><b>Kind:</b> '+esc(p.kind_label||p.kind)+' · <b>Status:</b> '+esc(p.status)+'</div>'+
+				'<div class="detail"><b>Event date:</b> '+esc(p.event_date||'not recorded')+(p.runsignup_race_id?' · <b>Race ID:</b> '+esc(p.runsignup_race_id):' · race not linked yet')+'</div></div>'
+			).join(''):'<div class="unavailable">No series, championship, or race packets yet. Create one in the Creation tab.</div>';
+		}catch(err){pb.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		const cb=document.querySelector('#series-det-calendar');
 		try{
 			const cdata=await api('/api/operating-center/object-creation/calendar?kind=series');
 			const rows=cdata.competition||[];
-			if(!rows.length){cal.innerHTML='<div class="unavailable">No competition calendar entries.</div>'}
-			else{
-				cal.innerHTML=rows.map(r=>
-					'<div class="item"><strong>'+esc(r.title)+'</strong>'+
-					'<div class="detail"><b>Event date:</b> '+esc(r.event_date||'not recorded')+' · <b>Status:</b> '+esc(r.status||'not recorded')+'</div>'+
-					(r.url?'<div class="detail"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">Public page</a></div>':'')+'</div>'
-				).join('');
-			}
-		}catch(err){cal.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+			cb.innerHTML=rows.length?'<table class="data"><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Public page</th></tr></thead><tbody>'+
+				rows.map(r=>'<tr><td>'+esc(r.title)+'</td><td>'+esc(r.event_date||'—')+'</td><td>'+esc(r.status||'—')+'</td><td>'+(r.url?'<a href="'+esc(r.url)+'" target="_blank" rel="noopener">Open</a>':'—')+'</td></tr>').join('')+'</tbody></table>'
+				:'<div class="unavailable">No competition calendar entries.</div>';
+		}catch(err){cb.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
 `;
 
+const SERIES_PANELS = ocFunction(
+	"series",
+	"Series, championships, and individual races — creation packets by status and kind plus the competition calendar. Packet creation lives in the Creation tab.",
+	SERIES_SUMMARY_HTML,
+	SERIES_ACTIONS_HTML,
+	SERIES_DETAILS_HTML,
+);
+
 // ---------------------------------------------------------------------------
-// 3. Challenges (NEW)
+// 3. Challenges
 // ---------------------------------------------------------------------------
 
-const CHALLENGES_PANELS = `<section class="panel"><h2>Challenges</h2><div class="message" id="challenges-message"></div><div id="challenges-list">Loading…</div></section><section class="panel"><h2>Calendar</h2><div id="challenges-calendar">Loading…</div></section>`;
+const CHALLENGES_SUMMARY_HTML = `<section class="panel"><h2>Challenges summary</h2><div id="challenges-sum">Loading…</div></section>`;
+
+const CHALLENGES_ACTIONS_HTML = `<section class="panel"><h2>Challenges actions</h2>
+	<p class="meta"><strong>Machine (automatic):</strong> builds each challenge packet's dry-run plan and runs read-only probes; writing happens only through explicit confirms in the Creation tab. <strong>Owner (manual):</strong> the action below — packet creation itself lives in Creation.</p>
+	<div id="challenges-act">Loading…</div></section>`;
+
+const CHALLENGES_DETAILS_HTML = `<section class="panel"><h2>Challenge packets</h2><div id="challenges-det-packets">Loading…</div></section>
+	<section class="panel"><h2>Challenge calendar</h2><div id="challenges-det-calendar">Loading…</div></section>`;
 
 const CHALLENGES_SCRIPT = `
 	function challenges_statusBadge(status){
@@ -267,62 +382,141 @@ const CHALLENGES_SCRIPT = `
 		if(status==='manual_pending')return '<span class="badge-warn">manual last mile</span>';
 		return '<span class="badge">in progress</span>';
 	}
-	async function boot_challenges(){
-		const msg=document.querySelector('#challenges-message');
-		const list=document.querySelector('#challenges-list');
-		const cal=document.querySelector('#challenges-calendar');
+	function challenges_packetLink(p){return '/operating-center/sport?tab=creation&view=actions&packet_id='+encodeURIComponent(p.packet_id);}
+	async function challenges_fetchPackets(){
+		const data=await api('/api/operating-center/object-creation/packets');
+		return (data.packets||[]).filter(p=>p.kind==='challenge');
+	}
+	async function boot_challenges_summary(){
+		const box=document.querySelector('#challenges-sum');
 		try{
-			const data=await api('/api/operating-center/object-creation/packets');
-			const packets=(data.packets||[]).filter(p=>p.kind==='challenge');
-			msg.textContent=packets.length?packets.length+' packet(s).':'';
-			if(!packets.length){list.innerHTML='<div class="unavailable">No challenge packets yet. Create one on the Creation tab.</div>'}
-			else{
-				list.innerHTML=packets.map(p=>
-					'<div class="item"><strong><a href="/operating-center/sport?packet_id='+encodeURIComponent(p.packet_id)+'#creation">'+esc(p.title)+'</a>'+challenges_statusBadge(p.status)+'</strong>'+
-					'<div class="detail"><b>Kind:</b> '+esc(p.kind_label||p.kind)+' · <b>Status:</b> '+esc(p.status)+'</div>'+
-					'<div class="detail"><b>Event date:</b> '+esc(p.event_date||'not recorded')+'</div></div>'
-				).join('');
-			}
-		}catch(err){list.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+			const packets=await challenges_fetchPackets();
+			const byStatus={};
+			for(const p of packets){byStatus[p.status]=(byStatus[p.status]||0)+1;}
+			let html='<div class="item"><strong>Challenge packets</strong><div class="detail">'+packets.length+' challenge packet(s)</div>';
+			if(packets.length)html+='<div class="detail">By status: '+Object.keys(byStatus).map(s=>esc(s)+': '+byStatus[s]).join(' · ')+'</div>';
+			html+='</div>';
+			try{
+				const cdata=await api('/api/operating-center/object-creation/calendar?kind=challenge');
+				const rows=cdata.challenge||[];
+				html+='<div class="item"><strong>Challenge calendar</strong><div class="detail">'+rows.length+' entr'+(rows.length===1?'y':'ies')+'</div>';
+				if(rows.length)html+='<div class="detail">'+rows.slice(0,5).map(r=>'&bull; '+esc(r.title)+(r.event_date?' · '+esc(r.event_date):'')).join('<br>')+'</div>';
+				html+='</div>';
+			}catch(err){html+='<div class="item"><strong>Challenge calendar <span class="badge-warn">unavailable</span></strong><div class="detail">'+esc(err.message)+'</div></div>';}
+			const attn=packets.filter(p=>p.status!=='complete'&&p.status!=='manual_pending');
+			html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(p=>'<a href="'+esc(challenges_packetLink(p))+'">'+esc(p.title)+'</a> ('+esc(p.status)+')').join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
+			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Keeps the challenge packet lifecycle and the challenge calendar from live packet data. Creating the object itself is always a dashboard step; the Machine never claims otherwise.</div></div>';
+			box.innerHTML=html;
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_challenges_actions(){
+		const box=document.querySelector('#challenges-act');
+		box.innerHTML='<div class="item"><strong>Create a challenge packet</strong>'+
+			'<div class="detail">Packet creation lives in the Creation tab: the Machine builds the dry-run plan there and you confirm each write.</div>'+
+			'<div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="secondary" id="challenges-new-packet">New packet in Creation</button></div></div>';
+		const btn=box.querySelector('#challenges-new-packet');
+		if(btn)btn.addEventListener('click',function(){__spoSetView('creation','actions',true);});
+	}
+	async function boot_challenges_details(){
+		const pb=document.querySelector('#challenges-det-packets');
+		try{
+			const packets=await challenges_fetchPackets();
+			pb.innerHTML=packets.length?packets.map(p=>
+				'<div class="item"><strong><a href="'+esc(challenges_packetLink(p))+'">'+esc(p.title)+'</a>'+challenges_statusBadge(p.status)+'</strong>'+
+				'<div class="detail"><b>Kind:</b> '+esc(p.kind_label||p.kind)+' · <b>Status:</b> '+esc(p.status)+'</div>'+
+				'<div class="detail"><b>Event date:</b> '+esc(p.event_date||'not recorded')+(p.runsignup_race_id?' · <b>Race ID:</b> '+esc(p.runsignup_race_id):' · race not linked yet')+'</div></div>'
+			).join(''):'<div class="unavailable">No challenge packets yet. Create one in the Creation tab.</div>';
+		}catch(err){pb.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		const cb=document.querySelector('#challenges-det-calendar');
 		try{
 			const cdata=await api('/api/operating-center/object-creation/calendar?kind=challenge');
 			const rows=cdata.challenge||[];
-			if(!rows.length){cal.innerHTML='<div class="unavailable">No challenge calendar entries.</div>'}
-			else{
-				cal.innerHTML=rows.map(r=>
-					'<div class="item"><strong>'+esc(r.title)+'</strong>'+
-					'<div class="detail"><b>Event date:</b> '+esc(r.event_date||'not recorded')+' · <b>Status:</b> '+esc(r.status||'not recorded')+'</div>'+
-					(r.url?'<div class="detail"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">Public page</a></div>':'')+'</div>'
-				).join('');
-			}
-		}catch(err){cal.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+			cb.innerHTML=rows.length?'<table class="data"><thead><tr><th>Challenge</th><th>Date</th><th>Status</th><th>Public page</th></tr></thead><tbody>'+
+				rows.map(r=>'<tr><td>'+esc(r.title)+'</td><td>'+esc(r.event_date||'—')+'</td><td>'+esc(r.status||'—')+'</td><td>'+(r.url?'<a href="'+esc(r.url)+'" target="_blank" rel="noopener">Open</a>':'—')+'</td></tr>').join('')+'</tbody></table>'
+				:'<div class="unavailable">No challenge calendar entries.</div>';
+		}catch(err){cb.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
 `;
+
+const CHALLENGES_PANELS = ocFunction(
+	"challenges",
+	"Challenges — creation packets by status plus the challenge calendar. Packet creation lives in the Creation tab.",
+	CHALLENGES_SUMMARY_HTML,
+	CHALLENGES_ACTIONS_HTML,
+	CHALLENGES_DETAILS_HTML,
+);
 
 // ---------------------------------------------------------------------------
 // 4. Groups
 // ---------------------------------------------------------------------------
 
-const GROUPS_PANELS = `<section class="panel">
-			<h2>Group network</h2>
-			<div id="groups-list">Loading…</div>
-		</section>`;
+const GROUPS_SUMMARY_HTML = `<section class="panel"><h2>Groups summary</h2><div id="groups-sum">Loading…</div></section>`;
+
+const GROUPS_ACTIONS_HTML = `<section class="panel"><h2>Groups actions</h2>
+	<p class="meta"><strong>Machine (automatic):</strong> shows the public ladder and funnel below. <strong>Owner (manual):</strong> there are no group mutations in the API — groups register themselves through the public funnel. The buttons below open the funnel pages.</p>
+	<div id="groups-act">Loading…</div></section>`;
+
+const GROUPS_DETAILS_HTML = `<section class="panel"><h2>Ladder detail</h2><div id="groups-det-ladder">Loading…</div></section>
+	<section class="panel"><h2>Public funnel</h2><div id="groups-det-funnel">Loading…</div></section>`;
 
 const GROUPS_SCRIPT = `
-	async function boot_groups(){
-		const box=document.querySelector('#groups-list');
+	async function groups_fetchOverview(){
+		return await api('/api/operating-center/groups/overview');
+	}
+	async function boot_groups_summary(){
+		const box=document.querySelector('#groups-sum');
 		try{
-			const data=await api('/api/operating-center/groups/overview');
-			let html='<h3>How groups scale the federation</h3>';
+			const data=await groups_fetchOverview();
+			let html='<div class="item"><strong>Growth ladder</strong>';
 			for(const s of (data.ladder||[])){
-				html+='<div class="item"><strong>'+esc(s.step)+'</strong><div class="detail">'+esc(s.description)+'</div></div>';
+				html+='<div class="detail">&bull; <b>'+esc(s.step)+'</b> — '+esc(s.description)+'</div>';
 			}
-			html+='<h3>Public funnel</h3><div class="detail"><a href="'+esc(data.funnel.member_org)+'" target="_blank" rel="noopener">'+esc(data.funnel.member_org)+'</a><br><a href="'+esc(data.funnel.register)+'" target="_blank" rel="noopener">'+esc(data.funnel.register)+'</a></div>';
-			html+='<div class="item"><strong>Group statistics<span class="badge-warn">Not yet tracked</span></strong><div class="detail">'+esc(data.stats.note)+'</div></div>';
+			html+='</div>';
+			const f=data.funnel||{};
+			html+='<div class="item"><strong>Public funnel</strong><div class="detail"><a href="'+esc(f.member_org)+'" target="_blank" rel="noopener">'+esc(f.member_org)+'</a><br><a href="'+esc(f.register)+'" target="_blank" rel="noopener">'+esc(f.register)+'</a></div></div>';
+			html+='<div class="item"><strong>Group counts <span class="badge-warn">not yet tracked</span></strong><div class="detail">'+esc(data.stats&&data.stats.note||'No group statistics are tracked yet.')+'</div></div>';
+			html+='<div class="item"><strong>Needs attention</strong><div class="detail">Group counts are not tracked yet — the next step is to start counting registered groups so the network size is visible here.</div></div>';
+			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Keeps this overview from the live groups configuration. Groups register through the public funnel; the Machine does not create them.</div></div>';
 			box.innerHTML=html;
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
+	async function boot_groups_actions(){
+		const box=document.querySelector('#groups-act');
+		try{
+			const data=await groups_fetchOverview();
+			const f=data.funnel||{};
+			box.innerHTML='<div class="item"><strong>Member organization page</strong><div class="detail">Public page groups use to join the network.</div><div style="margin-top:8px"><a class="oc-view-btn" style="text-decoration:none;display:inline-block" href="'+esc(f.member_org)+'" target="_blank" rel="noopener">Open member page</a></div></div>'+
+				'<div class="item"><strong>Group registration</strong><div class="detail">Public registration funnel for new groups.</div><div style="margin-top:8px"><a class="oc-view-btn" style="text-decoration:none;display:inline-block" href="'+esc(f.register)+'" target="_blank" rel="noopener">Open registration</a></div></div>'+
+				'<div class="item"><strong>No other group actions exist</strong><div class="detail">The API has no group create/update/delete operations. If a mutation is needed, it happens manually on the public site — nothing here is wired to a fake endpoint.</div></div>';
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_groups_details(){
+		try{
+			const data=await groups_fetchOverview();
+			const lb=document.querySelector('#groups-det-ladder');
+			lb.innerHTML=(data.ladder||[]).length?(data.ladder||[]).map(function(s){
+				return '<div class="item"><strong>'+esc(s.step)+'</strong><div class="detail">'+esc(s.description)+'</div></div>';
+			}).join(''):'<div class="unavailable">No ladder steps configured.</div>';
+			const f=data.funnel||{};
+			const fb=document.querySelector('#groups-det-funnel');
+			fb.innerHTML='<table class="data"><tbody>'+
+				'<tr><th>Member organization page</th><td><a href="'+esc(f.member_org)+'" target="_blank" rel="noopener">'+esc(f.member_org)+'</a></td></tr>'+
+				'<tr><th>Group registration</th><td><a href="'+esc(f.register)+'" target="_blank" rel="noopener">'+esc(f.register)+'</a></td></tr>'+
+				'</tbody></table>';
+		}catch(err){
+			const m=document.querySelector('#tabpanel-groups .oc-tab-error');
+			if(m)m.textContent='Error: '+(err.message||err);
+		}
+	}
 `;
+
+const GROUPS_PANELS = ocFunction(
+	"groups",
+	"NW Groups — the public ladder, the registration funnel, and what the network needs next. Groups register themselves; group counts are not tracked yet.",
+	GROUPS_SUMMARY_HTML,
+	GROUPS_ACTIONS_HTML,
+	GROUPS_DETAILS_HTML,
+);
 
 // ---------------------------------------------------------------------------
 // 5. Creation (list + new-packet form + packet detail, all 5 steps)
@@ -338,16 +532,91 @@ const CREATION_CSS = `<style>
 	#tabpanel-creation ol.steps{margin:8px 0;padding-left:22px}
 	#tabpanel-creation .row{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
 	@media(max-width:700px){#tabpanel-creation .row{grid-template-columns:1fr}}
+	#tabpanel-creation .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center}
+	#tabpanel-creation .btnrow button{width:auto;margin-top:0}
 </style>`;
 
-const CREATION_LIST_SCRIPT = `
-	async function boot_creation(){
-		const box=document.querySelector('#packet-list');
-		const msg=document.querySelector('#packet-message');
+const CREATION_SUMMARY_HTML = CREATION_CSS + `<section class="panel"><h2>Creation summary</h2><div id="creation-sum">Loading…</div></section>`;
+
+const CREATION_ACTIONS_HTML = `<section class="panel"><h2>New object packet</h2>
+		<p class="meta"><strong>Machine (automatic):</strong> builds the 5-step dry-run plan, runs the read-only credential probe, and applies API steps only after your typed APPLY_STEP confirmation. Creating the object itself is always a dashboard step. <strong>Owner (manual):</strong> the actions below.</p>
+		<form id="new-packet-form">
+			<label for="np-kind">Object kind</label>
+			<select id="np-kind" name="kind">${OBJECT_CREATION_KINDS.map(
+				(k) => `<option value="${escHtml(k.kind)}">${escHtml(k.label)}</option>`,
+			).join("")}</select>
+			<label for="np-title">Title</label>
+			<input id="np-title" name="title" required maxlength="200" placeholder="e.g. NWANA Open 5K — Orlando">
+			<div class="row">
+				<div><label for="np-date">Event date</label><input id="np-date" name="event_date" placeholder="YYYY-MM-DD"></div>
+				<div><label for="np-distance">Distance</label><input id="np-distance" name="distance" placeholder="e.g. 5K"></div>
+			</div>
+			<div class="row">
+				<div><label for="np-format">Format</label><input id="np-format" name="format" placeholder="in-person / virtual"></div>
+				<div><label for="np-fb">Facebook page ID</label><input id="np-fb" name="facebook_page_id" placeholder="optional"></div>
+			</div>
+			<label for="np-desc">Description</label>
+			<textarea id="np-desc" name="description" placeholder="Written to the RunSignup race via API after the race is linked."></textarea>
+			<div class="row">
+				<div><label for="np-url">External race URL</label><input id="np-url" name="external_race_url" placeholder="https://…"></div>
+				<div><label for="np-results">External results URL</label><input id="np-results" name="external_results_url" placeholder="https://…"></div>
+			</div>
+			<div class="row">
+				<div><label for="np-parent">Parent series / championship object ID</label><input id="np-parent" name="parent_object_id" placeholder="optional — e.g. RUNSIGNUP-RACE-123"></div>
+				<div><label class="check"><input type="checkbox" id="np-news" name="announce_news"> Announce on the public site (news item)</label></div>
+			</div>
+			<label for="np-notes">Notes</label>
+			<textarea id="np-notes" name="notes" placeholder="Internal notes for the owner."></textarea>
+			<button type="submit">Create packet</button>
+			<div class="message" id="new-packet-message" aria-live="polite"></div>
+		</form>
+		<p class="note">Registration periods, age-based pricing, questions, and coupons can be added on the packet page after creation.</p>
+	</section>
+	<section class="panel"><h2>Creation packets</h2><div id="packet-list">Loading…</div><div class="message" id="packet-message"></div></section>
+	<section class="panel"><h2>Packet detail</h2>
+		<div class="message" id="packet-detail-hint">Select a packet to open its 5-step detail.</div>
+		<div id="packet-detail-wrap" hidden><div id="packet-body">Loading…</div></div>
+	</section>`;
+
+const CREATION_DETAILS_HTML = creationCapabilityTableHtml() +
+	`<section class="panel"><h2>Packet records</h2><div id="creation-det-packets">Loading…</div></section>`;
+
+const CREATION_SCRIPT = `
+	function creation_packetId(){try{return new URLSearchParams(location.search).get('packet_id')||''}catch(e){return ''}}
+	function creation_packetLink(p){return '/operating-center/sport?tab=creation&view=actions&packet_id='+encodeURIComponent(p.packet_id);}
+	function creation_stepBadge(s){
+		if(s==='done')return '<span class="badge-ok">done</span>';
+		if(s==='error')return '<span class="badge-err">error</span>';
+		if(s==='skipped')return '<span class="badge">skipped</span>';
+		return '<span class="badge">pending</span>';
+	}
+	function creation_prettify(v){try{return JSON.stringify(v,null,2)}catch(e){return String(v)}}
+	async function creation_fetchPackets(){return await api('/api/operating-center/object-creation/packets');}
+	async function boot_creation_summary(){
+		const box=document.querySelector('#creation-sum');
 		try{
-			const data=await api('/api/operating-center/object-creation/packets');
+			const data=await creation_fetchPackets();
 			const packets=data.packets||[];
-			if(!packets.length){box.innerHTML='<div class="unavailable">No creation packets yet. Create the first one below.</div>'}
+			const byStatus={},byKind={};
+			for(const p of packets){byStatus[p.status]=(byStatus[p.status]||0)+1;byKind[p.kind]=(byKind[p.kind]||0)+1;}
+			let html='<div class="item"><strong>Creation packets</strong><div class="detail">'+packets.length+' packet(s) in total</div>';
+			if(packets.length){
+				html+='<div class="detail">By status: '+Object.keys(byStatus).map(s=>esc(s)+': '+byStatus[s]).join(' · ')+'</div>';
+				html+='<div class="detail">By kind: '+Object.keys(byKind).map(k=>esc(k)+': '+byKind[k]).join(' · ')+'</div>';
+			}
+			html+='</div>';
+			html+='<div class="item"><strong>What the Machine does</strong><div class="detail">Builds a dry-run plan for every packet (verify/link race → read-only credential probe → per-step API applies with typed APPLY_STEP confirmation → manual last mile). Nothing is applied without your explicit confirmation per step; creating the object itself always stays a dashboard step.</div></div>';
+			const stuck=packets.filter(p=>p.status!=='complete'&&p.status!=='manual_pending');
+			html+='<div class="item"><strong>Needs attention</strong>'+(stuck.length?'<div class="detail">&bull; '+stuck.map(p=>'<a href="'+esc(creation_packetLink(p))+'">'+esc(p.title)+'</a> ('+esc(p.status)+')').join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
+			box.innerHTML=html;
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_creation_actions(){
+		const box=document.querySelector('#packet-list');
+		try{
+			const data=await creation_fetchPackets();
+			const packets=data.packets||[];
+			if(!packets.length){box.innerHTML='<div class="unavailable">No creation packets yet. Create the first one above.</div>'}
 			else{
 				box.innerHTML=packets.map(p=>{
 					const statusBadge=p.status==='complete'
@@ -356,42 +625,35 @@ const CREATION_LIST_SCRIPT = `
 						?'<span class="badge-warn">manual last mile</span>'
 						:'<span class="badge">in progress</span>';
 					const race=p.runsignup_race_id?'<div class="detail"><b>Race ID:</b> '+esc(p.runsignup_race_id)+(p.runsignup_race_name?' — '+esc(p.runsignup_race_name):'')+'</div>':'<div class="detail"><b>Race ID:</b> not linked yet</div>';
-					return '<div class="item"><strong><a href="/operating-center/sport?packet_id='+encodeURIComponent(p.packet_id)+'#creation">'+esc(p.title)+'</a>'+statusBadge+'</strong>'+
-						'<div class="detail"><b>Kind:</b> '+esc(p.kind_label)+' · <b>Status:</b> '+esc(p.status)+'</div>'+race+'</div>';
+					return '<div class="item"><strong><a href="'+esc(creation_packetLink(p))+'">'+esc(p.title)+'</a>'+statusBadge+'</strong>'+
+						'<div class="detail"><b>Kind:</b> '+esc(p.kind_label||p.kind)+' · <b>Status:</b> '+esc(p.status)+'</div>'+race+'</div>';
 				}).join('');
 			}
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
-		const pid=new URLSearchParams(location.search).get('packet_id')||'';
+		const form=document.querySelector('#new-packet-form');
+		if(form&&!form.dataset.wired){
+			form.dataset.wired='1';
+			form.addEventListener('submit',async e=>{
+				e.preventDefault();
+				const m=document.querySelector('#new-packet-message');m.textContent='Creating…';
+				const f=new FormData(e.currentTarget);
+				const body={};
+				['kind','title','description','event_date','distance','format','external_race_url','external_results_url','facebook_page_id','notes'].forEach(k=>{const v=String(f.get(k)||'').trim();if(v)body[k]=v});
+				const parent=String(f.get('parent_object_id')||'').trim();if(parent)body.parent_object_id=parent;
+				body.announce_news=f.get('announce_news')==='on';
+				try{
+					const data=await api('/api/operating-center/object-creation/packets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+					location.href='/operating-center/sport?tab=creation&view=actions&packet_id='+encodeURIComponent(data.packet.packet_id);
+				}catch(err){m.textContent=err.message}
+			});
+		}
+		const pid=creation_packetId();
 		const wrap=document.querySelector('#packet-detail-wrap');
 		const hint=document.querySelector('#packet-detail-hint');
 		if(wrap)wrap.hidden=!pid;
 		if(hint)hint.hidden=!!pid;
 		if(pid){await boot_creation_detail()}
 	}
-	document.querySelector('#new-packet-form').addEventListener('submit',async e=>{
-		e.preventDefault();
-		const m=document.querySelector('#new-packet-message');m.textContent='Creating…';
-		const f=new FormData(e.currentTarget);
-		const body={};
-		['kind','title','description','event_date','distance','format','external_race_url','external_results_url','facebook_page_id','notes'].forEach(k=>{const v=String(f.get(k)||'').trim();if(v)body[k]=v});
-		const parent=String(f.get('parent_object_id')||'').trim();if(parent)body.parent_object_id=parent;
-		body.announce_news=f.get('announce_news')==='on';
-		try{
-			const data=await api('/api/operating-center/object-creation/packets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-			location.href='/operating-center/sport?packet_id='+encodeURIComponent(data.packet.packet_id)+'#creation';
-		}catch(err){m.textContent=err.message}
-	});
-`;
-
-const CREATION_DETAIL_SCRIPT = `
-	function creation_packetId(){return new URLSearchParams(location.search).get('packet_id')||''}
-	function creation_stepBadge(s){
-		if(s==='done')return '<span class="badge-ok">done</span>';
-		if(s==='error')return '<span class="badge-err">error</span>';
-		if(s==='skipped')return '<span class="badge">skipped</span>';
-		return '<span class="badge">pending</span>';
-	}
-	function creation_prettify(v){try{return JSON.stringify(v,null,2)}catch(e){return String(v)}}
 	async function boot_creation_detail(){
 		const pid=creation_packetId();
 		const box=document.querySelector('#packet-body');
@@ -413,8 +675,6 @@ const CREATION_DETAIL_SCRIPT = `
 				:'<div class="detail"><b>RunSignup race:</b> not linked yet</div>')+
 			(plan.probe_note?'<div class="detail"><b>Probe:</b> '+esc(plan.probe_note)+'</div>':'')+
 			'<div class="detail meta">'+esc(plan.report||'')+'</div>';
-		// Published surfaces: where the linked object automatically appeared
-		// (fan-out ran inside the link action — no second manual entry).
 		if(meta.fanout){
 			const f=meta.fanout;
 			const items=[];
@@ -446,9 +706,8 @@ const CREATION_DETAIL_SCRIPT = `
 				(s.endpoint?'<div class="detail"><b>Endpoint:</b> '+esc(s.endpoint)+'</div>':'')+
 				(s.replace_semantics?'<div class="detail"><b>Semantics:</b> '+esc(s.replace_semantics)+'</div>':'')+
 				(s.warnings&&s.warnings.length?'<div class="detail warn">'+s.warnings.map(w=>'⚠ '+esc(w)).join('<br>')+'</div>':'')+
-				(s.needs_event_id?'<div class="detail warn">Waiting for the Event ID: set it in section 1 after creating the event in the dashboard.</div>':'')+
-				(s.payload_preview!=null?'<pre class="payload">'+esc(creation_prettify(s.payload_preview))+'</pre>':'')+
-				(s.status==='error'&&meta.steps?('<div class="detail warn">Last error is shown on the packet record.</div>'):'');
+				(s.needs_event_id?'<div class="detail warn">Waiting for the Event ID: set it in section 1 after creating the event in the dashboard.</div>':'');
+			if(s.payload_preview!=null){h+='<pre class="payload">'+esc(creation_prettify(s.payload_preview))+'</pre>'}
 			if(s.status==='pending'||s.status==='error'){
 				h+='<form class="apply-form" data-step="'+esc(s.step_id)+'"><label>Type APPLY_STEP to confirm this write</label>'+
 					'<input name="confirm" placeholder="APPLY_STEP" autocomplete="off">'+
@@ -546,65 +805,42 @@ const CREATION_DETAIL_SCRIPT = `
 			try{await api('/api/operating-center/object-creation/fields',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});m.textContent='Saved.';boot_creation_detail()}catch(err){m.textContent=err.message}
 		});
 	}
+	async function boot_creation_details(){
+		const box=document.querySelector('#creation-det-packets');
+		try{
+			const data=await creation_fetchPackets();
+			const packets=data.packets||[];
+			box.innerHTML=packets.length?'<table class="data"><thead><tr><th>Packet</th><th>Kind</th><th>Status</th><th>Event date</th><th>RunSignup race</th></tr></thead><tbody>'+
+				packets.map(p=>'<tr><td><a href="'+esc(creation_packetLink(p))+'">'+esc(p.title)+'</a></td><td>'+esc(p.kind_label||p.kind)+'</td><td>'+esc(p.status)+'</td><td>'+esc(p.event_date||'—')+'</td><td>'+(p.runsignup_race_id?esc(p.runsignup_race_id)+(p.runsignup_race_name?' — '+esc(p.runsignup_race_name):''):'not linked')+'</td></tr>').join('')+'</tbody></table>'
+				:'<div class="unavailable">No creation packets yet.</div>';
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
 `;
+
+const CREATION_PANELS = ocFunction(
+	"creation",
+	"Object creation — the Machine's 5-step pipeline for races, series, championships, and challenges: dry-run plans, read-only probes, confirmed writes, and the manual last mile.",
+	CREATION_SUMMARY_HTML,
+	CREATION_ACTIONS_HTML,
+	CREATION_DETAILS_HTML,
+);
 
 // ---------------------------------------------------------------------------
 // Section export
 // ---------------------------------------------------------------------------
 
 export function renderSportSectionHtml(): string {
-	const kindOptions = OBJECT_CREATION_KINDS.map(
-		(k) => `<option value="${escHtml(k.kind)}">${escHtml(k.label)}</option>`,
-	).join("");
-	const creationPanels =
-		CREATION_CSS +
-		`<section class="panel"><h2>Creation packets</h2><div id="packet-list">Loading…</div><div class="message" id="packet-message"></div></section>` +
-		`<section class="panel"><h2>New object packet</h2>
-			<form id="new-packet-form">
-				<label for="np-kind">Object kind</label>
-				<select id="np-kind" name="kind">${kindOptions}</select>
-				<label for="np-title">Title</label>
-				<input id="np-title" name="title" required maxlength="200" placeholder="e.g. NWANA Open 5K — Orlando">
-				<div class="row">
-					<div><label for="np-date">Event date</label><input id="np-date" name="event_date" placeholder="YYYY-MM-DD"></div>
-					<div><label for="np-distance">Distance</label><input id="np-distance" name="distance" placeholder="e.g. 5K"></div>
-				</div>
-				<div class="row">
-					<div><label for="np-format">Format</label><input id="np-format" name="format" placeholder="in-person / virtual"></div>
-					<div><label for="np-fb">Facebook page ID</label><input id="np-fb" name="facebook_page_id" placeholder="optional"></div>
-				</div>
-				<label for="np-desc">Description</label>
-				<textarea id="np-desc" name="description" placeholder="Written to the RunSignup race via API after the race is linked."></textarea>
-				<div class="row">
-					<div><label for="np-url">External race URL</label><input id="np-url" name="external_race_url" placeholder="https://…"></div>
-					<div><label for="np-results">External results URL</label><input id="np-results" name="external_results_url" placeholder="https://…"></div>
-				</div>
-				<div class="row">
-					<div><label for="np-parent">Parent series / championship object ID</label><input id="np-parent" name="parent_object_id" placeholder="optional — e.g. RUNSIGNUP-RACE-123"></div>
-					<div><label class="check"><input type="checkbox" id="np-news" name="announce_news"> Announce on the public site (news item)</label></div>
-				</div>
-				<label for="np-notes">Notes</label>
-				<textarea id="np-notes" name="notes" placeholder="Internal notes for the owner."></textarea>
-				<button type="submit">Create packet</button>
-				<div class="message" id="new-packet-message" aria-live="polite"></div>
-			</form>
-			<p class="note">Registration periods, age-based pricing, questions, and coupons can be added on the packet page after creation.</p>
-			</section>` +
-		creationCapabilityTableHtml() +
-		`<section class="panel"><h2>Packet detail</h2>
-			<div class="message" id="packet-detail-hint">Select a packet to open its 5-step detail.</div>
-			<div id="packet-detail-wrap" hidden><div id="packet-body">Loading…</div></div>
-		</section>`;
 	return ocSectionShell({
 		section: "sport",
 		title: "Sport",
 		subtitle: "Results, competitions, groups, and creation.",
+		queryTabs: true,
 		tabs: [
 			{ id: "results", label: "Results", panelsHtml: RESULTS_PANELS, script: RESULTS_SCRIPT },
 			{ id: "series", label: "Series", panelsHtml: SERIES_PANELS, script: SERIES_SCRIPT },
 			{ id: "challenges", label: "Challenges", panelsHtml: CHALLENGES_PANELS, script: CHALLENGES_SCRIPT },
 			{ id: "groups", label: "Groups", panelsHtml: GROUPS_PANELS, script: GROUPS_SCRIPT, reportId: "groups" },
-			{ id: "creation", label: "Creation", panelsHtml: creationPanels, script: CREATION_LIST_SCRIPT + CREATION_DETAIL_SCRIPT },
+			{ id: "creation", label: "Creation", panelsHtml: CREATION_PANELS, script: CREATION_SCRIPT + ocViewScript("spo", ["results", "series", "challenges", "groups", "creation"]) },
 		],
 	});
 }
