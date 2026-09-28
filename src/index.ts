@@ -5902,7 +5902,7 @@ export default {
 			if (url.pathname === "/operating-center/news/review")
 				return redirect301("/operating-center/marketing?tab=media&view=actions" + (url.search ? "&" + url.search.slice(1) : ""));
 			if (url.pathname === "/operating-center/creation/packet")
-				return redirect301("/operating-center/sport" + url.search + "#creation");
+				return redirect301("/operating-center/sport?tab=creation&view=actions" + (url.search ? "&" + url.search.slice(1) : ""));
 		}
 
 
