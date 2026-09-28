@@ -207,6 +207,18 @@ describe("decideTrigger", () => {
 		expect(d.unregisteredResults.map((r) => r.athlete)).toEqual(["Stranger Danger"]);
 	});
 
+	it("does NOT treat approved results as unregistered when the registration feed is empty (unknown, not zero)", () => {
+		const d = decideTrigger({
+			registrations: [],
+			results,
+			approvedResultIds: ["1", "2", "3"],
+			deadline: null,
+		});
+		expect(d.fire).toBe(true);
+		expect(d.reason).toBe("all_approved");
+		expect(d.unregisteredResults).toEqual([]);
+	});
+
 	it("does not fire on an empty result set", () => {
 		const d = decideTrigger({
 			registrations: regs,

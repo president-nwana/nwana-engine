@@ -242,7 +242,9 @@ export interface TriggerInputs {
  *      approved (the rest become exceptions).
  * A result with no owner decision stays Submitted and blocks A.
  * Never fire when a result comes from an athlete with no active
- * registration — that is an owner exception, not an auto-process case.
+ * registration — that is an owner exception, not an auto-process case —
+ * but only when registration data is actually present. An empty
+ * registration list means "unknown", not "unregistered".
  */
 export function decideTrigger(input: TriggerInputs): {
 	fire: boolean;
@@ -270,9 +272,16 @@ export function decideTrigger(input: TriggerInputs): {
 	const unapprovedResults = input.results.filter(
 		(r) => !approved.has(r.result_id) && !disqualified.has(r.result_id),
 	);
-	const unregisteredResults = input.results.filter(
-		(r) => r.athlete && !regNames.has(r.athlete.toLowerCase()),
-	);
+	// Unregistered-athlete exception only applies when we actually HAVE
+	// registration data. An empty registration list means "unknown" (the
+	// RunSignup participants feed has never returned data in production),
+	// not "zero registered athletes". Blocking on unknown data would freeze
+	// every event forever; the owner's approval is the verification.
+	const unregisteredResults = input.registrations.length > 0
+		? input.results.filter(
+			(r) => r.athlete && !regNames.has(r.athlete.toLowerCase()),
+		)
+		: [];
 
 	if (unregisteredResults.length > 0) {
 		return {
