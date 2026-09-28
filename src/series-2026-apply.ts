@@ -70,6 +70,10 @@ export interface ApplyLevelsInput {
 	distance: string;
 	eventId: number;
 	confirmation: string;
+	// Result ids the owner explicitly disqualified (ADR-0043): excluded
+	// from standings (0 points) and written with empty Performance Level /
+	// Level Place fields. Absence from this set is not a disqualification.
+	disqualifiedResultIds?: string[];
 	// Chunked rebuild controls (REBUILD_DISTANCE only). The Free plan caps
 	// external subrequests at 50/invocation, so a full distance is rebuilt
 	// in chunks; progress is tracked in series_rebuild_progress.
@@ -372,10 +376,12 @@ export function buildResultFieldRows(
 	registrationIds: ReadonlyArray<number | null>,
 	levelFieldId: number,
 	placeFieldId: number,
+	disqualifiedResultIds?: Set<string>,
 ): Array<Record<string, unknown>> {
 	if (registrationIds.length !== computed.length) {
 		throw new Error("registration_ids count does not match results.");
 	}
+	const dsq = disqualifiedResultIds ?? new Set<string>();
 	return computed.map((row, index) => {
 		const raw = rawRows[index] ?? {};
 		const resultId = row.result_id ?? text(raw.result_id);
@@ -388,6 +394,7 @@ export function buildResultFieldRows(
 				`Result row ${index} has no registration_id; cannot map it to a series participant.`,
 			);
 		}
+		const isDsq = dsq.has(String(resultId));
 		const out: Record<string, unknown> = {
 			result_id: resultId,
 			registration_id: registrationId,
@@ -406,8 +413,10 @@ export function buildResultFieldRows(
 		for (const [key, value] of Object.entries(raw)) {
 			if (key.startsWith("custom-field-")) out[key] = value;
 		}
-		out[`custom-field-${levelFieldId}`] = row.level_display;
-		out[`custom-field-${placeFieldId}`] = String(row.level_place);
+		// Disqualified results (ADR-0043): no Performance Level / Level Place —
+		// 0 points, excluded from scoring; the row keeps its time and identity.
+		out[`custom-field-${levelFieldId}`] = isDsq ? "" : row.level_display;
+		out[`custom-field-${placeFieldId}`] = isDsq ? "" : String(row.level_place);
 		return out;
 	});
 }
@@ -458,6 +467,7 @@ export async function applyEventResultSet(
 	scoringIds: Map<string, number>,
 	accessToken: string,
 	push: (step: ApplyStepResult) => void,
+	disqualifiedResultIds?: Set<string>,
 ): Promise<{ computed: ComputedLifecycleResult[]; resultCount: number }> {
 	const live = await readEventResultSet(source, eventId, resultSetId, accessToken);
 	push({
@@ -466,17 +476,28 @@ export async function applyEventResultSet(
 		detail: `${live.computed.length} result(s) from set ${resultSetId} (event ${eventId}); levels computed.`,
 	});
 
+	// Disqualified results (ADR-0043): excluded from scoring entirely —
+	// no standings upload (0 points), no participant resolution needed.
+	const dsq = disqualifiedResultIds ?? new Set<string>();
+	const validIndexes = live.computed
+		.map((row, index) => ({ row, index }))
+		.filter(({ row }) => !dsq.has(String(row.result_id ?? "")))
+		.map(({ index }) => index);
+	const validComputed = validIndexes.map((i) => live.computed[i]);
+	const validRegistrationIds = validIndexes.map((i) => live.registrationIds[i]);
+	const dsqCount = live.computed.length - validComputed.length;
+
 	const participantIds = await resolveSeriesParticipants(
-		source, eventId, live.registrationIds, accessToken,
+		source, eventId, validRegistrationIds, accessToken,
 	);
 	push({
 		step: "resolve_participants",
 		status: "ok",
-		detail: `${participantIds.length} result(s) mapped to series participants (event ${eventId}).`,
+		detail: `${participantIds.length} result(s) mapped to series participants (event ${eventId})${dsqCount > 0 ? `; ${dsqCount} disqualified result(s) excluded from scoring` : ""}.`,
 	});
 
 	const standings = await uploadSeriesStandings(
-		source, eventId, live.computed, participantIds, scoringIds, accessToken,
+		source, eventId, validComputed, participantIds, scoringIds, accessToken,
 	);
 	push({
 		step: "upload_standings",
@@ -495,8 +516,22 @@ export async function applyEventResultSet(
 			: `Both fields already existed on set ${resultSetId}; nothing created.`,
 	});
 
+	// DSQ rows without a registration_id cannot be written back to RunSignup
+	// (no mapping exists); they are already excluded from scoring above, so
+	// there is nothing to write for them. Non-DSQ rows keep the legacy
+	// strict behavior: a missing registration_id aborts the event.
+	const fieldWriteIndexes = live.computed
+		.map((_, i) => i)
+		.filter((i) => {
+			const id = String(live.computed[i].result_id ?? "");
+			if (!dsq.has(id)) return true;
+			return live.registrationIds[i] !== null;
+		});
 	const rows = buildResultFieldRows(
-		live.computed, live.rawRows, live.registrationIds, fields.levelFieldId, fields.placeFieldId,
+		fieldWriteIndexes.map((i) => live.computed[i]),
+		fieldWriteIndexes.map((i) => live.rawRows[i]),
+		fieldWriteIndexes.map((i) => live.registrationIds[i]),
+		fields.levelFieldId, fields.placeFieldId, dsq,
 	);
 	await writeResultFields(source, eventId, resultSetId, rows, accessToken);
 	push({
@@ -904,6 +939,28 @@ export async function applySeries2026Levels(
 	// inside this full-scope rebuild, so no event's series standings can be
 	// orphaned. Per-event failures are collected (legacy: $errors++ and
 	// continue); legacy cleanup runs only when the whole distance is clean.
+	// Disqualifications (ADR-0043) are per event; the full-distance rebuild
+	// must respect every event's decisions, not just the trigger event's.
+	const dsqRows = await input.db
+		.prepare(
+			`SELECT event_id AS eventId, result_id AS resultId
+			 FROM series_result_disqualifications
+			 WHERE series = 'SERIES_2026' AND distance = ?`,
+		)
+		.bind(input.distance)
+		.all<{ eventId: number; resultId: string }>();
+	const dsqByEvent = new Map<number, Set<string>>();
+	for (const row of dsqRows.results ?? []) {
+		let set = dsqByEvent.get(row.eventId);
+		if (!set) { set = new Set<string>(); dsqByEvent.set(row.eventId, set); }
+		set.add(String(row.resultId));
+	}
+	for (const id of input.disqualifiedResultIds ?? []) {
+		let set = dsqByEvent.get(input.eventId);
+		if (!set) { set = new Set<string>(); dsqByEvent.set(input.eventId, set); }
+		set.add(String(id));
+	}
+
 	let eventErrors = 0;
 
 	try {
@@ -976,6 +1033,7 @@ export async function applySeries2026Levels(
 				try {
 					const applied = await applyEventResultSet(
 						source, eventId, set.result_set_id, scoring.ids, input.accessToken, push,
+						dsqByEvent.get(eventId),
 					);
 					if (eventId === input.eventId) {
 						base.result_set_id = set.result_set_id;

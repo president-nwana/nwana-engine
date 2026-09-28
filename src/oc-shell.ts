@@ -208,8 +208,8 @@ export function ocSectionShell(opts: {
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width,initial-scale=1">
 	<title>${escHtml(opts.title)} — NWANA Operating Center</title>
-	<link rel="icon" type="image/png" href="/operating-center/icon-180.png">
-	<link rel="apple-touch-icon" href="/operating-center/icon-180.png">
+	<link rel="icon" type="image/png" href="/operating-center/icon-180.v2.png">
+	<link rel="apple-touch-icon" href="/operating-center/icon-180.v2.png">
 	<style>
 		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9;--warn:#b35400}
 		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
@@ -254,7 +254,7 @@ export function ocSectionShell(opts: {
 	</style>
 </head>
 <body>
-	<header><img src="/operating-center/icon-180.png" alt="NWANA Operating Center icon" width="64" height="64"><div><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></div></header>
+	<header><img src="/operating-center/icon-180.v2.png" alt="NWANA Operating Center icon" width="64" height="64"><div><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></div></header>
 	${operatingCenterMenu(opts.section)}
 	${opts.aboveTabsHtml ? `<div class="oc-quick">${opts.aboveTabsHtml}</div>` : ""}
 	${tabBar}

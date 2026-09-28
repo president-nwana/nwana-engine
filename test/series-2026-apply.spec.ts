@@ -167,4 +167,25 @@ describe("apply payload builders", () => {
 		]);
 		expect(() => buildResultFieldRows(computed, [{}], [777], 1, 2)).toThrow("result_id");
 	});
+
+	it("writes empty level fields for disqualified results (ADR-0043)", () => {
+		const computed = computeSeries2026Levels("3K", [
+			{
+				result_id: 232501676,
+				first_name: "ALBERT",
+				last_name: "FATIKHOV",
+				gender: "M",
+				chip_time: "",
+				clock_time: "18:54",
+			},
+		]);
+		const rows = buildResultFieldRows(
+			computed, [{ result_id: 232501676 }], [777], 654103, 654104,
+			new Set(["232501676"]),
+		);
+		expect(rows[0]["custom-field-654103"]).toBe("");
+		expect(rows[0]["custom-field-654104"]).toBe("");
+		// Identity fields are preserved: the row keeps its time and athlete.
+		expect(rows[0].result_id).toBe(232501676);
+	});
 });

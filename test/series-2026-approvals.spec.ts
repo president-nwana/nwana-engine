@@ -217,6 +217,45 @@ describe("decideTrigger", () => {
 		expect(d.fire).toBe(false);
 		expect(d.reason).toBe("waiting");
 	});
+
+	it("fires all_approved when the remaining results are disqualified (DSQ needs no approval)", () => {
+		const d = decideTrigger({
+			registrations: regs,
+			results,
+			approvedResultIds: ["1", "2"],
+			disqualifiedResultIds: ["3"],
+			deadline: null,
+		});
+		expect(d.fire).toBe(true);
+		expect(d.reason).toBe("all_approved");
+		expect(d.unapprovedResults).toEqual([]);
+	});
+
+	it("a disqualified result is not listed as unapproved after the deadline", () => {
+		const d = decideTrigger({
+			registrations: regs,
+			results,
+			approvedResultIds: ["1"],
+			disqualifiedResultIds: ["3"],
+			deadline: new Date(Date.now() - 1000).toISOString(),
+		});
+		expect(d.fire).toBe(true);
+		expect(d.reason).toBe("deadline_reached");
+		expect(d.unapprovedResults.map((r) => r.result_id)).toEqual(["2"]);
+	});
+
+	it("absence of a decision is not a disqualification: undecided results still block all_approved", () => {
+		const d = decideTrigger({
+			registrations: regs,
+			results,
+			approvedResultIds: ["1", "2"],
+			disqualifiedResultIds: [],
+			deadline: null,
+		});
+		expect(d.fire).toBe(false);
+		expect(d.reason).toBe("waiting");
+		expect(d.unapprovedResults.map((r) => r.result_id)).toEqual(["3"]);
+	});
 });
 
 describe("isEventPublished (cron guard)", () => {

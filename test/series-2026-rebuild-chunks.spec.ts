@@ -41,6 +41,10 @@ function makeDb() {
 							}
 							return lifecycleRow;
 						},
+						async all() {
+							// series_result_disqualifications: no DSQ rows in these legacy-parity fixtures.
+							return { results: [] };
+						},
 						async run() {
 							if (sql.includes("series_rebuild_progress")) {
 								const key = `${args[0]}:${args[1]}`;

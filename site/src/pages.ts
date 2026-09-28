@@ -4,10 +4,8 @@ import {
 	CalendarItem,
 	DISTANCES,
 	Distance,
-	LEVEL_NAMES,
 	NewsItem,
 	RaceEvent,
-	StandingRow,
 	genderLabel,
 	getCalendarForSeries,
 	getChallengeCalendar,
@@ -17,13 +15,16 @@ import {
 	getNewsItem,
 	getPastResults,
 	getSeasonStats,
-	getStandings,
 	getUpcoming,
 	levelNameOf,
 	levelThresholdLabels,
 	registrationUrl,
 	winnersOf,
 } from "./data";
+import {
+	getPublicProgression,
+	type PublicProgressionResult,
+} from "./progression-data";
 import {
 	DONATE_URL,
 	esc,
@@ -370,27 +371,113 @@ function eventResultsHtml(event: RaceEvent): string {	const levels = levelThresh
   </div>`;
 }
 
-function standingsHtml(standings: StandingRow[]): string {
-	return LEVEL_NAMES.map((level) => {
-		const rows = standings.filter((s) => s.level === level);
-		if (rows.length === 0) {
-			return `<div class="level-head"><h3>${esc(level)}</h3></div>${emptyState("No athletes in the standings for this level yet.")}`;
-		}
-		const rankCounters = new Map<string, number>();
-		const trs = rows
-			.map((s) => {
-				const g = s.gender ?? "";
-				const rank = (rankCounters.get(g) ?? 0) + 1;
-				rankCounters.set(g, rank);
-				return `<tr><td><strong>${rank}</strong></td><td>${esc(s.athlete)}</td><td>${esc(genderLabel(s.gender))}</td><td>${s.races}</td><td><strong>${s.points.toLocaleString("en-US")}</strong></td><td>${esc(s.bestTime ?? "")}</td></tr>`;
-			})
-			.join("");
-		return `<div class="level-head"><h3>${esc(level)}</h3></div>
-      <table class="results"><thead><tr><th>Rank</th><th>Athlete</th><th>Division</th><th>Races</th><th>Points</th><th>Best time</th></tr></thead><tbody>${trs}</tbody></table>`;
-	}).join("");
+// ---------------------------------------------------------------------------
+// Season standings: athlete progression matrix (ADR-0043).
+// Rows = athletes, columns = events of the distance in date order, then
+// Races / Best Time / Level-Division / Points / Rank. Standings stay bucketed
+// by Performance Level + Gender: an athlete who scored in several levels gets
+// one line per level, levels are never mixed into one fake total.
+// The public matrix shows only final results, DNS and DSQ.
+// ---------------------------------------------------------------------------
+
+const PMAT_CSS = `<style>
+.pmat-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:18px 0}
+.pmat-controls input[type=search]{padding:10px 16px;border:1.5px solid var(--line);border-radius:999px;font-size:15px;min-width:240px}
+.pmat-controls button{padding:10px 22px;font-size:15px}
+.pmat-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 6px 18px rgba(10,31,61,.05)}
+table.pmat{min-width:max-content;border-collapse:separate;border-spacing:0}
+table.pmat th,table.pmat td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:14px;white-space:nowrap}
+table.pmat thead th{background:var(--navy);color:#fff;font-size:12.5px;letter-spacing:.4px;text-align:left;position:sticky;top:0}
+table.pmat th.sticky,table.pmat td.sticky{position:sticky;left:0;z-index:2;box-shadow:1px 0 0 var(--line)}
+table.pmat td.sticky{background:#fff;font-weight:700}
+table.pmat thead th.sticky{z-index:3}
+table.pmat td.cell-final{font-weight:700}
+.pmat-sub{display:block;font-weight:400;font-size:12px;color:var(--muted)}
+.pmat-empty{color:var(--muted)}
+.pmat-event-date{display:block;font-weight:400;font-size:11.5px;color:#c6d2e8}
+.pmat-summary-lines span{display:block;padding:2px 0}
+.pmat-pager{display:flex;gap:12px;align-items:center;justify-content:center;margin:22px 0 6px;font-size:15px}
+.pmat-pager a{padding:8px 18px;border:1.5px solid var(--navy);border-radius:999px;color:var(--navy);text-decoration:none;font-weight:700}
+.pmat-pager a:hover{background:var(--gold-soft)}
+.pmat-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:14px 0 4px}
+</style>`;
+
+function matrixCellHtml(state: string, cell: { time: string | null; level: string | null; points: number | null }): string {
+	if (state === "final") {
+		return `<td class="cell-final">${esc(cell.time ?? "")}<span class="pmat-sub">${esc(cell.level ?? "")} · ${cell.points?.toLocaleString("en-US") ?? ""} pts</span></td>`;
+	}
+	if (state === "dns") return `<td><span class="badge soft">DNS</span></td>`;
+	if (state === "dsq") return `<td><span class="badge">DSQ</span></td>`;
+	return `<td><span class="pmat-empty">—</span></td>`;
 }
 
-export async function resultsPage(db: D1Database, distance: string | null, view: string | null): Promise<string> {
+function progressionMatrixHtml(matrix: PublicProgressionResult, baseParams: string): string {
+	const events = matrix.events;
+	const head = events
+		.map((e) => `<th>${esc(e.event_name ?? "Race")}<span class="pmat-event-date">${esc(formatDate(e.event_date))}</span></th>`)
+		.join("");
+	const rows = matrix.rows
+		.map((row) => {
+			const cells = events
+				.map((e) => matrixCellHtml(row.cells[String(e.event_id)]?.state ?? "empty", row.cells[String(e.event_id)] ?? { time: null, level: null, points: null }))
+				.join("");
+			const bucketLines = row.buckets.length > 0
+				? row.buckets.map((b) => `<span>${esc(b.level)} · ${esc(b.gender)}</span>`).join("")
+				: `<span class="pmat-empty">—</span>`;
+			const pointsLines = row.buckets.length > 0
+				? row.buckets.map((b) => `<span><strong>${b.points.toLocaleString("en-US")}</strong></span>`).join("")
+				: `<span class="pmat-empty">—</span>`;
+			const rankLines = row.buckets.length > 0
+				? row.buckets.map((b) => `<span><strong>#${b.rank}</strong></span>`).join("")
+				: `<span class="pmat-empty">—</span>`;
+			return `<tr>
+        <td class="sticky">${esc(row.name)}</td>
+        ${cells}
+        <td style="text-align:center"><strong>${row.races}</strong></td>
+        <td>${esc(row.best_time ?? "—")}</td>
+        <td><span class="pmat-summary-lines">${bucketLines}</span></td>
+        <td><span class="pmat-summary-lines">${pointsLines}</span></td>
+        <td><span class="pmat-summary-lines">${rankLines}</span></td>
+      </tr>`;
+		})
+		.join("");
+	const table = rows.length > 0
+		? `<div class="pmat-scroll"><table class="results pmat"><thead><tr><th class="sticky">Athlete</th>${head}<th>Races</th><th>Best time</th><th>Level / Division</th><th>Points</th><th>Rank</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="pmat-legend">
+        <span><span class="badge soft">DNS</span> registered, no result after the deadline</span>
+        <span><span class="badge">DSQ</span> result disqualified by the federation</span>
+        <span>Races counts verified finishes only</span>
+      </div>`
+		: emptyState("No athletes found for this search. Try a different name.");
+
+	const buckets = matrix.buckets
+		.map((bucket) => {
+			const trs = bucket.entries
+				.map((e) => `<tr><td><strong>${e.rank}</strong></td><td>${esc(e.name)}</td><td><strong>${e.points.toLocaleString("en-US")}</strong></td><td>${e.races}</td><td>${esc(e.best_time ?? "")}</td></tr>`)
+				.join("");
+			return `<div class="level-head"><h3>${esc(bucket.level)} · ${esc(bucket.gender)}</h3></div>
+        <table class="results"><thead><tr><th>Rank</th><th>Athlete</th><th>Points</th><th>Races</th><th>Best time</th></tr></thead><tbody>${trs}</tbody></table>`;
+		})
+		.join("");
+
+	return `${PMAT_CSS}${table}${buckets.length > 0 ? `<h2 style="margin-top:38px">Season standings by level and division</h2>${buckets}` : ""}`;
+}
+
+function progressionPagerHtml(matrix: PublicProgressionResult, baseParams: string): string {
+	const { page, total_pages, total } = matrix.pagination;
+	if (total_pages <= 1) return "";
+	const prev = page > 1 ? `<a href="/results?${baseParams}&page=${page - 1}">← Previous</a>` : "";
+	const next = page < total_pages ? `<a href="/results?${baseParams}&page=${page + 1}">Next →</a>` : "";
+	return `<div class="pmat-pager">${prev}<span>Page ${page} of ${total_pages} · ${total.toLocaleString("en-US")} athletes</span>${next}</div>`;
+}
+
+export async function resultsPage(
+	db: D1Database,
+	distance: string | null,
+	view: string | null,
+	search: string | null,
+	page: number,
+): Promise<string> {
 	const picked = (DISTANCES as readonly string[]).includes(distance ?? "") ? (distance as Distance) : null;
 	const events = await getPastResults(db, picked ?? undefined, 40);
 	const activeDistance = picked ?? (events[0]?.distance as Distance | undefined) ?? "10K";
@@ -407,11 +494,25 @@ export async function resultsPage(db: D1Database, distance: string | null, view:
 	let body: string;
 	let explainer: string;
 	if (standingsView) {
-		const standings = await getStandings(db, activeDistance);
-		explainer = `<div class="note"><strong>How standings work.</strong> Points are earned per race inside the performance level and division: 1000 for 1st in level, 999 for 2nd, and so on. Season points accumulate across races. When athletes tie on points, the faster approved result decides.</div>`;
-		body = standings.length > 0
-			? standingsHtml(standings)
-			: emptyState("No standings for this distance yet. As soon as verified races accumulate, the tables appear here.");
+		const matrix = await getPublicProgression(db, activeDistance, {
+			search: search ?? undefined,
+			page,
+		});
+		explainer = `<div class="note"><strong>How standings work.</strong> Points are earned per race inside the performance level and division: 1000 for 1st in level, 999 for 2nd, and so on. Season points accumulate across races. When athletes tie on points, the faster approved result decides. Races counts verified finishes only.</div>`;
+		if (!matrix || matrix.events.length === 0) {
+			body = emptyState("No standings for this distance yet. As soon as verified races accumulate, the tables appear here.");
+		} else {
+			const safeSearch = esc(search ?? "");
+			const baseParams = `view=standings&distance=${activeDistance}${search ? `&search=${encodeURIComponent(search)}` : ""}`;
+			const searchForm = `<form method="get" action="/results" class="pmat-controls" role="search">
+          <input type="hidden" name="view" value="standings">
+          <input type="hidden" name="distance" value="${esc(activeDistance)}">
+          <input type="search" name="search" value="${safeSearch}" placeholder="Search athletes" aria-label="Search athletes">
+          <button class="btn btn-navy" type="submit">Search</button>
+          ${search ? `<a class="card-link" href="/results?view=standings&distance=${activeDistance}">Clear</a>` : ""}
+        </form>`;
+			body = searchForm + progressionMatrixHtml(matrix, baseParams) + progressionPagerHtml(matrix, baseParams);
+		}
 	} else {
 		explainer = `<div class="note"><strong>Fair by design.</strong> Every finisher is placed in one of five performance levels by time, so a slower athlete wins their own level instead of finishing second behind the champion by minutes per kilometer. Thresholds are per distance and published with every result.</div>`;
 		body = shown.length > 0

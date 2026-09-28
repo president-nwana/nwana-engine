@@ -11,7 +11,13 @@ import {
         type DistributionRule,
 } from "./distribution-planner";
 import { applySeries2026PublicationHistory, previewSeries2026ResultPublications, SERIES_2026_SOURCES } from "./series-2026-results";
+import { getDistanceProgression } from "./series-2026-progression-data";
 import { getEventApprovals, recordResultApproval } from "./series-2026-approvals";
+import {
+	clearResultDecision,
+	getEventDisqualifications,
+	recordResultDisqualification,
+} from "./series-2026-decisions";
 import {
 	autoProcessEvent,
 	evaluateEventTrigger,
@@ -110,6 +116,7 @@ import { renderOverviewSectionHtml } from "./oc-overview";
 import { renderMarketingSectionHtml } from "./oc-marketing";
 import { OC_ICON_1024_BASE64 } from "./assets/oc-icon-1024";
 import { OC_ICON_180_BASE64 } from "./assets/oc-icon-180";
+import { OC_ICON_180_ROUND_BASE64 } from "./assets/oc-icon-180-round";
 import { renderGrowthSectionHtml } from "./oc-growth";
 import { renderSportSectionHtml } from "./oc-sport";
 import { renderAcademySectionHtml } from "./oc-academy";
@@ -5734,8 +5741,11 @@ export default {
 			return pngFromBase64(OC_ICON_1024_BASE64);
 		if (request.method === "GET" && url.pathname === "/operating-center/icon-180.png")
 			return pngFromBase64(OC_ICON_180_BASE64);
+		// Round transparent NWANA logo favicon, v2 (cache-busted path).
+		if (request.method === "GET" && url.pathname === "/operating-center/icon-180.v2.png")
+			return pngFromBase64(OC_ICON_180_ROUND_BASE64);
 		if (request.method === "GET" && url.pathname === "/favicon.ico")
-			return pngFromBase64(OC_ICON_180_BASE64);
+			return pngFromBase64(OC_ICON_180_ROUND_BASE64);
 		if (request.method === "GET" && url.pathname === "/operating-center/marketing") return htmlPage(renderMarketingSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/growth") return htmlPage(renderGrowthSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/sport") return htmlPage(renderSportSectionHtml);
@@ -6287,6 +6297,7 @@ export default {
 				};
 				const live = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
 				const approvals = await getEventApprovals(env.nwana_engine_db, distance, eventId);
+				const disquals = await getEventDisqualifications(env.nwana_engine_db, distance, eventId);
 				const trigger = await evaluateEventTrigger(autoEnv, { distance, raceId: source.raceId, eventId });
 				return json({
 					ok: true,
@@ -6299,6 +6310,8 @@ export default {
 						time: r.time,
 						approved: approvals.has(r.result_id),
 						approved_at: approvals.get(r.result_id)?.approvedAt ?? null,
+						disqualified: disquals.has(r.result_id),
+						disqualification_reason: disquals.get(r.result_id)?.reason ?? null,
 					})),
 					trigger: {
 						fire: trigger.fire,
@@ -6371,6 +6384,92 @@ export default {
 			}
 		}
 
+		// Owner sports decision: Disqualify (ADR-0043). The second of the two
+		// owner decisions (Approve / Disqualify). 0 points, excluded from
+		// scoring, displayed as DSQ. Any existing approval on the same result
+		// is superseded. After the decision, the event trigger is evaluated
+		// and the downstream runs immediately when fired.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/results/disqualify") {
+			try {
+				const body = await request.json() as { distance?: string; event_id?: number; result_ids?: string[]; reason?: string };
+				const distance = body.distance ?? "";
+				const eventId = Number(body.event_id);
+				const resultIds = Array.isArray(body.result_ids) ? body.result_ids.filter((id) => typeof id === "string") : [];
+				const reason = typeof body.reason === "string" && body.reason.trim() !== "" ? body.reason.trim() : null;
+				const source = SERIES_2026_SOURCES.find((s) => s.distance === distance);
+				if (!source || !Number.isInteger(eventId) || resultIds.length === 0) {
+					return json({ ok: false, error: "distance, event_id and result_ids[] are required" }, 400);
+				}
+				if (!reason) {
+					return json({ ok: false, error: "A disqualification reason is required (owner audit)" }, 400);
+				}
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const autoEnv = {
+					db: env.nwana_engine_db,
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					metaToken: env.NWANA_META_TOKEN,
+					apiCallerToken: env.RUNSIGNUP_API_REG,
+					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+					publicBaseUrl: new URL(request.url).origin,
+				};
+				const live = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				const liveById = new Map(live.map((r) => [r.result_id, r]));
+				const recorded = [];
+				for (const resultId of resultIds) {
+					const row = liveById.get(resultId);
+					if (!row) {
+						return json({ ok: false, error: `Result ${resultId} is not in the live RunSignup result set; refusing to disqualify unseen data` }, 409);
+					}
+					recorded.push(await recordResultDisqualification(env.nwana_engine_db, {
+						distance,
+						raceId: source.raceId,
+						eventId,
+						resultId,
+						athlete: row.athlete,
+						time: row.time,
+						reason,
+						source: "oc",
+					}));
+				}
+				const trigger = await evaluateEventTrigger(autoEnv, { distance, raceId: source.raceId, eventId });
+				let process: unknown = null;
+				if (trigger.fire) {
+					process = await autoProcessEvent(autoEnv, { distance, raceId: source.raceId, eventId, trigger });
+				}
+				return json({
+					ok: true,
+					disqualified: recorded.length,
+					trigger: { fire: trigger.fire, reason: trigger.reason, detail: trigger.detail },
+					process,
+				});
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Disqualification failed" }, 500);
+			}
+		}
+
+		// Owner correction: clear a previous Approve/Disqualify decision so
+		// the result returns to Submitted. Does not itself trigger processing.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/results/clear-decision") {
+			try {
+				const body = await request.json() as { distance?: string; event_id?: number; result_id?: string };
+				const distance = body.distance ?? "";
+				const eventId = Number(body.event_id);
+				const resultId = typeof body.result_id === "string" ? body.result_id : "";
+				const source = SERIES_2026_SOURCES.find((s) => s.distance === distance);
+				if (!source || !Number.isInteger(eventId) || !resultId) {
+					return json({ ok: false, error: "distance, event_id and result_id are required" }, 400);
+				}
+				const cleared = await clearResultDecision(env.nwana_engine_db, { distance, eventId, resultId });
+				return json({ ok: true, ...cleared });
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Clear decision failed" }, 500);
+			}
+		}
+
 		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/results/process-now") {
 			try {
 				const body = await request.json() as { distance?: string; event_id?: number };
@@ -6427,6 +6526,35 @@ export default {
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Pipeline view failed" }, 500);
+			}
+		}
+
+		// Athlete progression matrix (ADR-0043): rows = athletes, columns =
+		// events of the distance by date, then Races / Best Time / Level /
+		// Points / Rank. One shared model with the public site. Server-side
+		// search + pagination; buckets (Level + Gender standings) are global.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/series-2026/results/progression") {
+			try {
+				const distance = url.searchParams.get("distance") ?? "";
+				const source = SERIES_2026_SOURCES.find((s) => s.distance === distance);
+				if (!source) {
+					return json({ ok: false, error: "distance is required" }, 400);
+				}
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const result = await getDistanceProgression(env.nwana_engine_db, env.RUNSIGNUP_ACCESS_TOKEN, {
+					distance,
+					search: url.searchParams.get("search") ?? undefined,
+					page: Number(url.searchParams.get("page") ?? "1"),
+					perPage: Number(url.searchParams.get("per_page") ?? "50"),
+					from: url.searchParams.get("from") ?? undefined,
+					to: url.searchParams.get("to") ?? undefined,
+				});
+				return json(result);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Progression view failed" }, 500);
 			}
 		}
 
@@ -7480,6 +7608,15 @@ if (
 		env: Env,
 		ctx: ExecutionContext,
 	): Promise<void> {
+		// The daily 06:17 UTC cron is the only scheduled entry point. The
+		// normal fully-approved path is event-driven (approve endpoint);
+		// this cron is the fallback: deadline processing, missed events,
+		// future deadline-based objects. Any other cron schedule is ignored
+		// by design.
+		if (controller.cron !== "17 6 * * *") {
+			console.log(`[series-2026-cron] ignoring unexpected schedule ${controller.cron}`);
+			return;
+		}
 		if (!env.RUNSIGNUP_ACCESS_TOKEN) {
 			console.log("[series-2026-cron] skipped: RUNSIGNUP_ACCESS_TOKEN not configured");
 			return;
@@ -7493,29 +7630,51 @@ if (
 			publicBaseUrl: env.PUBLIC_BASE_URL ?? "https://nwana-engine.nwana-engine.workers.dev",
 		};
 		const rows = await env.nwana_engine_db
-			.prepare(`SELECT distance, race_id, active_event_id FROM race_lifecycle WHERE series = ? AND active_event_id IS NOT NULL`)
+			.prepare(`SELECT distance, race_id, active_event_id, events_json FROM race_lifecycle WHERE series = ?`)
 			.bind(RACE_LIFECYCLE_SERIES)
-			.all<{ distance: string; race_id: number; active_event_id: number }>();
+			.all<{ distance: string; race_id: number; active_event_id: number | null; events_json: string | null }>();
+		// Fallback coverage: every event of every distance that is not yet
+		// published — the active event plus any missed past events (a past
+		// event whose results were never fully processed is evaluated here).
+		const eventsToCheck: Array<{ distance: string; raceId: number; eventId: number }> = [];
 		for (const row of (rows.results ?? [])) {
-			const label = `${row.distance}/${row.active_event_id}`;
+			const seen = new Set<number>();
+			if (row.active_event_id) {
+				eventsToCheck.push({ distance: row.distance, raceId: row.race_id, eventId: row.active_event_id });
+				seen.add(row.active_event_id);
+			}
 			try {
-				if (await isEventPublished(env.nwana_engine_db, row.race_id, row.active_event_id)) {
+				const events = row.events_json ? JSON.parse(row.events_json) as Array<{ event_id: number; publication: string }> : [];
+				for (const event of events) {
+					if (event.publication === "PUBLISHED") continue;
+					if (seen.has(event.event_id)) continue;
+					seen.add(event.event_id);
+					eventsToCheck.push({ distance: row.distance, raceId: row.race_id, eventId: event.event_id });
+				}
+			} catch {
+				// events_json unreadable: the active event above is still covered.
+			}
+		}
+		for (const item of eventsToCheck) {
+			const label = `${item.distance}/${item.eventId}`;
+			try {
+				if (await isEventPublished(env.nwana_engine_db, item.raceId, item.eventId)) {
 					console.log(`[series-2026-cron] ${label}: already PUBLISHED, skipping`);
 					continue;
 				}
 				const trigger = await evaluateEventTrigger(autoEnv, {
-					distance: row.distance,
-					raceId: row.race_id,
-					eventId: row.active_event_id,
+					distance: item.distance,
+					raceId: item.raceId,
+					eventId: item.eventId,
 				});
 				if (!trigger.fire) {
 					console.log(`[series-2026-cron] ${label}: not fired (${trigger.reason})`);
 					continue;
 				}
 				const result = await autoProcessEvent(autoEnv, {
-					distance: row.distance,
-					raceId: row.race_id,
-					eventId: row.active_event_id,
+					distance: item.distance,
+					raceId: item.raceId,
+					eventId: item.eventId,
 					trigger,
 				});
 				console.log(`[series-2026-cron] ${label}: processed ok=${result.ok} steps=${result.steps.map((s) => s.step + ":" + s.status).join(",")}`);

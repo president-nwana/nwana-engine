@@ -68,14 +68,25 @@ describe("operating center sport: Summary/Actions/Details", () => {
 		expect(html).not.toContain("/operating-center/sport?packet_id=");
 	});
 
-	it("wires the result-approval endpoint as the only standard owner action (ADR-0042)", () => {
-		// Approval is the single owner decision per event; the Machine runs
-		// levels, standings, publication, winner news, social, and next-race
-		// promo by itself. No manual publish button remains in Actions.
+	it("wires the result-decision endpoints as the only standard owner actions (ADR-0042/0043)", () => {
+		// Approve / Disqualify are the two owner decisions per result; the
+		// Machine runs levels, standings, publication, winner news, social,
+		// and next-race promo by itself. No manual publish button remains.
 		expect(html).toContain("/api/operating-center/series-2026/results/approve");
+		expect(html).toContain("/api/operating-center/series-2026/results/disqualify");
+		expect(html).toContain("/api/operating-center/series-2026/results/clear-decision");
 		expect(html).toContain("/api/operating-center/series-2026/results/pending");
+		expect(html).toContain("/api/operating-center/series-2026/results/progression");
 		expect(html).toContain("confirm('Approve ");
 		expect(html).not.toContain("race-lifecycle/apply-levels");
+	});
+
+	it("shows the athlete progression matrix in Details instead of the old pipeline/results tables", () => {
+		expect(html).toContain("results-det-matrix");
+		expect(html).toContain("Athlete progression matrix");
+		expect(html).not.toContain("results-det-pipeline");
+		expect(html).not.toContain("results-det-results");
+		expect(html).not.toContain("Results by event and level");
 	});
 
 	it("contains no Cyrillic", () => {

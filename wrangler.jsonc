@@ -10,10 +10,13 @@
 	// ADR-0042: one daily trigger evaluates the Series 2026 result-processing
 	// trigger for every event (deadline wake-up). 1 execution = 1 request
 	// against the 100k/day Workers Free allowance: VERIFIED $0.
-	// The pre-existing */5 trigger is preserved untouched (no handler in
-	// code; origin unknown).
+	// ADR-0043: the */5 trigger was removed. History (resolved 2026-09-28):
+	// Sep 9 it was added for the Trust Engine automation; Sep 18 Albert
+	// removed it as "unnecessary"; ADR-0042 re-added it conservatively
+	// ("origin unknown"). Origin is now known, so the removal stands.
+	// scheduled() additionally ignores any schedule except 17 6 * * *.
 	"triggers": {
-		"crons": ["*/5 * * * *", "17 6 * * *"]
+		"crons": ["17 6 * * *"]
 	},
 	"observability": {
 		"enabled": true

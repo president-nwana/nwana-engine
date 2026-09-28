@@ -96,13 +96,26 @@ const RESULTS_CSS = `<style>
 	#tabpanel-results th{color:#66736d;font-weight:650}
 	#tabpanel-results .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center}
 	#tabpanel-results .btnrow button{width:auto;margin-top:0}
+	#tabpanel-results .badge-err{display:inline-block;background:#fbe4e4;border-radius:6px;padding:2px 8px;font-size:13px;color:#a4262c;font-weight:650}
+	#tabpanel-results .matrix-wrap{overflow-x:auto;margin-top:8px;border:1px solid #dce4df;border-radius:9px}
+	#tabpanel-results table.matrix{width:max-content;min-width:100%;margin-top:0}
+	#tabpanel-results table.matrix th,#tabpanel-results table.matrix td{white-space:nowrap;vertical-align:top}
+	#tabpanel-results table.matrix th.stickycol,#tabpanel-results table.matrix td.stickycol{position:sticky;left:0;z-index:2;background:#fff;box-shadow:1px 0 0 #dce4df;min-width:170px;max-width:230px;white-space:normal}
+	#tabpanel-results table.matrix thead th.stickycol{background:#f5f7f5}
+	#tabpanel-results table.matrix .badge,#tabpanel-results table.matrix .badge-warn,#tabpanel-results table.matrix .badge-err{margin-left:0}
+	#tabpanel-results .matrix-ctl{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:8px}
+	#tabpanel-results .matrix-ctl label{font-size:13px;color:#66736d;display:block;margin-bottom:2px}
+	#tabpanel-results .matrix-ctl input,#tabpanel-results .matrix-ctl select{width:auto;margin-top:0}
+	#tabpanel-results .matrix-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:13px;color:#66736d}
+	#tabpanel-results .pager{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
+	#tabpanel-results .pager button{width:auto;margin-top:0}
 </style>`;
 
 const RESULTS_SUMMARY_HTML = RESULTS_CSS + `<section class="panel"><h2>Results summary</h2><div id="results-sum">Loading…</div></section>
 <section class="panel"><h2>Registrations vs results — four separate metrics</h2><div id="results-reg">Loading…</div></section>`;
 
 const RESULTS_ACTIONS_HTML = `<section class="panel"><h2>Results actions</h2>
-	<p class="meta"><strong>Your one decision per event:</strong> review and approve results below. <strong>After approval the Machine runs everything itself</strong> — levels, level places, points, standings, publication, winner news, social congratulations, next-race promotion. No separate confirmations below this line. <strong>Machine (automatic):</strong> computes performance levels, points, and level places on demand and keeps the per-distance lifecycle. <strong>Owner (manual):</strong> approving results, refreshing sync, confirming prep.</p>
+	<p class="meta"><strong>Your one decision per result:</strong> approve it or disqualify it (with a reason) below. <strong>After your decision the Machine runs everything itself</strong> — levels, level places, points, standings, publication, winner news, social congratulations, next-race promotion. No separate confirmations below this line. A disqualified result scores 0 points and is excluded from standings. <strong>Machine (automatic):</strong> computes performance levels, points, and level places on demand and keeps the per-distance lifecycle. <strong>Owner (manual):</strong> result decisions, refreshing sync, confirming prep.</p>
 	<h3>Approve results</h3>
 	<div id="results-approve-actions"><div class="unavailable">Loading…</div></div>
 	<div id="results-act">Loading…</div>
@@ -110,35 +123,123 @@ const RESULTS_ACTIONS_HTML = `<section class="panel"><h2>Results actions</h2>
 	<div class="item"><strong>Registration sync</strong><div class="detail" id="results-reg-sync-status">Not synced in this session.</div><div class="btnrow"><button type="button" class="secondary" id="results-reg-sync-btn">Sync registrations now</button></div><div class="message" aria-live="polite"></div></div></section>`;
 
 const RESULTS_DETAILS_HTML = `<section class="panel"><h2>Sync status</h2><div class="sync-status" id="results-det-sync">Loading…</div></section>
-	<section class="panel"><h2>Athlete pipeline — Registered → Submitted → Approved → Processed → Published</h2><div id="results-det-pipeline">Loading…</div></section>
-	<section class="panel"><h2>Full lifecycle</h2><div id="results-det-lifecycle">Loading…</div></section>
-	<section class="panel"><h2>Results by event and level</h2><div id="results-det-results">Loading…</div></section>`;
+	<section class="panel"><h2>Athlete progression matrix</h2><p class="meta">One row per athlete, one column per event of the distance (left to right by date), then season totals. The same model feeds the public Results page. Races counts valid approved finishes only — DNS, DSQ, and registrations without a valid result never count. Standings stay separate per Performance Level and division.</p><div id="results-det-matrix">Loading…</div></section>
+	<section class="panel"><h2>Full lifecycle</h2><div id="results-det-lifecycle">Loading…</div></section>`;
 
 const RESULTS_SCRIPT = `
 	const results_DISTANCES=['1K','3K','5K','10K','15K','20K'];
-	function results_publicationLabel(s){return s==='PUBLISHED'?'Published':s==='BASELINE'?'Historical baseline':'Not published yet'}
-	function results_renderLevelBlock(level,rows){
-		const body=rows.length?'<table><thead><tr><th>Athlete</th><th>Gender</th><th>Time</th><th>Level place</th></tr></thead><tbody>'+
-			rows.map(r=>'<tr><td>'+esc(r.athlete)+'</td><td>'+esc(r.gender)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.level_place)+'</td></tr>').join('')+'</tbody></table>'
-			:'<div class="unavailable">No finishers in this level.</div>';
-		return '<h4>'+esc(level.name)+' ('+esc(level.threshold)+')</h4>'+body;
+	// --- Athlete progression matrix (ADR-0043): rows = athletes, columns =
+	// events of the distance by date, then season totals. One shared model
+	// with the public site; server-side search + pagination.
+	let results_matrixPage=1;
+	function results_matrixCellHtml(c){
+		switch(c.state){
+			case 'registered':return '<span class="badge">Registered</span>';
+			case 'submitted':return '<span class="badge-warn">Submitted</span>';
+			case 'approved':return '<span class="badge">Approved · Processing</span>';
+			case 'exception':return '<span class="badge-err">Exception</span>';
+			case 'dns':return '<span class="badge">DNS</span>';
+			case 'dsq':return '<span class="badge-err">DSQ</span>';
+			case 'final':return '<strong>'+esc(c.time||'—')+'</strong><div class="meta">'+esc(c.level||'')+' · '+esc(c.points==null?'':String(c.points))+' pts</div>';
+			default:return '<span class="meta">—</span>';
+		}
 	}
-	function results_resultsHtml(data){
-		if(!data.distances||!data.distances.length)return '<div class="unavailable">No results yet.</div>';
-		return data.distances.map(function(d){
-			var levels=Array.isArray(d.levels)&&d.levels.length?d.levels:[];
-			var events=d.events&&d.events.length?d.events.map(function(e){
-				var link=e.results_url?'<a href="'+esc(e.results_url)+'" target="_blank" rel="noopener">Full results on RunSignup</a>':'<span class="unavailable">RunSignup link not available</span>';
-				var blocks=levels.length?levels.map(function(l){
-					var rows=(e.results||[]).filter(function(r){return String(r.performance_level||'').indexOf(l.name)===0});
-					return results_renderLevelBlock(l,rows);
-				}).join(''):'<div class="unavailable">No results synced for this event yet.</div>';
-				return '<div class="event"><h3>'+esc(e.event_name||('Event '+e.event_id))+' · '+esc(e.event_date||'')+'</h3>'+
-					'<div class="meta">'+esc(String(e.result_count))+' results'+(e.finalized?' · finalized':'')+' · Publication: '+esc(results_publicationLabel(e.publication_status))+' · '+link+'</div>'+blocks+'</div>';
-			}).join(''):'<div class="unavailable">No past races with results yet.</div>';
-			return '<div class="item"><h3 style="margin:0 0 4px">'+esc(d.distance)+' — '+esc(d.stage)+'</h3>'+
-				'<div class="meta">'+(d.synced_at?'Synced '+esc(d.synced_at):'Never synced')+'</div>'+events+'</div>';
-		}).join('');
+	function results_matrixShortName(e){
+		const name=String(e.event_name||('Event '+e.event_id));
+		return name.length>24?name.slice(0,23)+'…':name;
+	}
+	function results_matrixTableHtml(data){
+		const events=data.events||[];
+		const rows=data.rows||[];
+		const pg=data.pagination||{page:1,total_pages:1,total:0,per_page:50};
+		if(!events.length)return '<div class="unavailable">No events found for this distance.</div>';
+		let h='<div class="meta">'+esc(String(pg.total))+' athlete(s) · generated '+esc(data.generated_at||'')+'</div>';
+		h+='<div class="matrix-wrap"><table class="matrix"><thead><tr><th class="stickycol">Athlete</th>';
+		for(const e of events){
+			h+='<th>'+esc(results_matrixShortName(e))+'<br><span class="meta">'+esc(e.event_date||'')+'</span></th>';
+		}
+		h+='<th>Races</th><th>Best time</th><th>Level / Division</th><th>Points</th><th>Rank</th></tr></thead><tbody>';
+		if(!rows.length){
+			h+='<tr><td class="stickycol" colspan="'+(events.length+6)+'"><div class="unavailable">No athletes match.</div></td></tr>';
+		}
+		for(const r of rows){
+			h+='<tr><td class="stickycol"><strong>'+esc(r.name)+'</strong>'+(r.gender?'<br><span class="meta">'+esc(r.gender)+'</span>':'')+'</td>';
+			for(const e of events){
+				const c=(r.cells||{})[String(e.event_id)]||{state:'empty'};
+				h+='<td>'+results_matrixCellHtml(c)+'</td>';
+			}
+			const buckets=r.buckets||[];
+			const stack=buckets.length?buckets.map(b=>'<div>'+esc(b.level)+' '+esc(b.gender)+'</div>').join(''):'<span class="meta">—</span>';
+			const pts=buckets.length?buckets.map(b=>'<div>'+esc(String(b.points))+'</div>').join(''):'<span class="meta">—</span>';
+			const ranks=buckets.length?buckets.map(b=>'<div>#'+esc(String(b.rank))+'</div>').join(''):'<span class="meta">—</span>';
+			h+='<td>'+esc(String(r.races))+'</td><td>'+esc(r.best_time||'—')+'</td><td>'+stack+'</td><td>'+pts+'</td><td>'+ranks+'</td></tr>';
+		}
+		h+='</tbody></table></div>';
+		h+='<div class="pager"><button type="button" class="secondary" data-mxpage="'+(pg.page-1)+'"'+(pg.page<=1?' disabled':'')+'>Prev</button>'+
+			'<span class="meta">Page '+esc(String(pg.page))+' of '+esc(String(pg.total_pages))+' · '+esc(String(pg.total))+' athletes</span>'+
+			'<button type="button" class="secondary" data-mxpage="'+(pg.page+1)+'"'+(pg.page>=pg.total_pages?' disabled':'')+'>Next</button></div>';
+		const bkts=data.buckets||[];
+		if(bkts.length){
+			h+='<h3 style="margin-top:16px">Standings by level and division</h3>';
+			for(const b of bkts){
+				const entries=(b.entries||[]).slice(0,20);
+				h+='<h4>'+esc(b.level)+' — '+esc(b.gender)+'</h4>'+
+					'<table><thead><tr><th>Rank</th><th>Athlete</th><th>Points</th><th>Races</th><th>Best time</th></tr></thead><tbody>'+
+					entries.map(e=>'<tr><td>#'+esc(String(e.rank))+'</td><td>'+esc(e.name)+'</td><td>'+esc(String(e.points))+'</td><td>'+esc(String(e.races))+'</td><td>'+esc(e.best_time||'—')+'</td></tr>').join('')+
+					'</tbody></table>';
+				if((b.entries||[]).length>20)h+='<div class="meta">Top 20 of '+esc(String(b.entries.length))+' shown.</div>';
+			}
+		}
+		return h;
+	}
+	async function results_matrixFetch(page){
+		const box=document.querySelector('#results-det-matrix');
+		if(!box)return;
+		const out=box.querySelector('#results-mx-out');
+		const distance=box.querySelector('#results-mx-distance').value;
+		const search=box.querySelector('#results-mx-search').value.trim();
+		const from=box.querySelector('#results-mx-from').value;
+		const to=box.querySelector('#results-mx-to').value;
+		const per_page=box.querySelector('#results-mx-perpage').value;
+		results_matrixPage=page||1;
+		out.innerHTML='<div class="unavailable">Loading…</div>';
+		try{
+			const qs=new URLSearchParams({distance:distance,page:String(results_matrixPage),per_page:String(per_page)});
+			if(search)qs.set('search',search);
+			if(from)qs.set('from',from);
+			if(to)qs.set('to',to);
+			const data=await api('/api/operating-center/series-2026/results/progression?'+qs.toString());
+			out.innerHTML=results_matrixTableHtml(data);
+			out.querySelectorAll('[data-mxpage]').forEach(function(btn){
+				btn.addEventListener('click',function(){results_matrixFetch(Number(btn.dataset.mxpage));});
+			});
+		}catch(err){out.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_results_matrix(){
+		const box=document.querySelector('#results-det-matrix');
+		if(!box)return;
+		box.innerHTML=
+			'<div class="matrix-ctl">'+
+			'<div><label>Distance</label><select id="results-mx-distance">'+results_DISTANCES.map(d=>'<option value="'+d+'"'+(d==='5K'?' selected':'')+'>'+d+'</option>').join('')+'</select></div>'+
+			'<div><label>Athlete search</label><input id="results-mx-search" placeholder="name…" style="min-width:150px"></div>'+
+			'<div><label>Events from</label><input id="results-mx-from" type="date"></div>'+
+			'<div><label>Events to</label><input id="results-mx-to" type="date"></div>'+
+			'<div><label>Rows per page</label><select id="results-mx-perpage"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option><option value="200">200</option></select></div>'+
+			'<div><button type="button" class="secondary" id="results-mx-load">Load matrix</button></div>'+
+			'</div>'+
+			'<div class="matrix-legend">'+
+			'<span><span class="badge">Registered</span> signed up, no result yet</span>'+
+			'<span><span class="badge-warn">Submitted</span> result in, awaiting your decision</span>'+
+			'<span><span class="badge">Approved · Processing</span> decided, the Machine is running</span>'+
+			'<span><span class="badge-err">Exception</span> result without registration</span>'+
+			'<span><span class="badge">DNS</span> registered, no result after the deadline</span>'+
+			'<span><span class="badge-err">DSQ</span> disqualified by you</span>'+
+			'<span><strong>time · level · pts</strong> final approved result</span>'+
+			'</div>'+
+			'<div id="results-mx-out" style="margin-top:8px"><div class="unavailable">Loading…</div></div>';
+		box.querySelector('#results-mx-load').addEventListener('click',function(){results_matrixFetch(1);});
+		box.querySelector('#results-mx-search').addEventListener('keydown',function(e){if(e.key==='Enter')results_matrixFetch(1);});
+		await results_matrixFetch(1);
 	}
 	async function results_fetchLifecycle(){return await api('/api/operating-center/race-lifecycle');}
 	async function results_fetchPreview(){
@@ -254,11 +355,18 @@ const RESULTS_SCRIPT = `
 						const data=await api('/api/operating-center/series-2026/results/pending?distance='+encodeURIComponent(distance)+'&event_id='+encodeURIComponent(eventId));
 						const rows=data.results||[];
 						if(!rows.length){tbl.innerHTML='<div class="unavailable">No results on RunSignup for this event.</div>';return;}
-						tbl.innerHTML='<table><thead><tr><th></th><th>Athlete</th><th>Time</th><th>Approved</th></tr></thead><tbody>'+
-							rows.map(r=>'<tr><td>'+(r.approved?'':'<input type="checkbox" data-rid="'+esc(r.result_id)+'">')+'</td><td>'+esc(r.athlete)+'</td><td>'+esc(r.time||'—')+'</td><td>'+(r.approved?'<span class="ok">Approved</span>':'<span class="err">Pending</span>')+'</td></tr>').join('')+
+						tbl.innerHTML='<table><thead><tr><th></th><th>Athlete</th><th>Time</th><th>Decision</th><th></th></tr></thead><tbody>'+
+							rows.map(r=>'<tr><td>'+(r.disqualified||r.approved?'':'<input type="checkbox" data-rid="'+esc(r.result_id)+'">')+'</td><td>'+esc(r.athlete)+'</td><td>'+esc(r.time||'—')+'</td>'+
+								'<td>'+(r.disqualified
+									?'<span class="warn">Disqualified</span>'+(r.disqualification_reason?' — '+esc(r.disqualification_reason):'')
+									:(r.approved?'<span class="ok">Approved</span>':'<span class="err">Pending</span>'))+'</td>'+
+								'<td>'+(r.disqualified||r.approved
+									?'<button type="button" class="secondary" data-clear="'+esc(r.result_id)+'">Clear decision</button>'
+									:'<button type="button" class="secondary" data-dsq="'+esc(r.result_id)+'">Disqualify</button>')+'</td></tr>').join('')+
 							'</tbody></table>'+
 							'<div class="meta">Trigger: '+esc(data.trigger.detail)+'</div>'+
-							'<div class="btnrow"><button type="button" class="secondary" id="results-approve-sel">Approve selected</button><button type="button" class="secondary" id="results-approve-all">Approve all pending</button><button type="button" class="secondary" id="results-approve-retry">Process now (retry)</button></div>';
+							'<div class="meta">Your two sports decisions: Approve, or Disqualify with a reason. A disqualified result scores 0 points and is excluded from standings.</div>'+
+							'<div class="btnrow"><button type="button" class="secondary" id="results-approve-sel">Approve selected</button><button type="button" class="secondary" id="results-approve-all">Approve all pending</button><button type="button" class="secondary" id="results-dsq-sel">Disqualify selected</button><button type="button" class="secondary" id="results-approve-retry">Process now (retry)</button></div>';
 						async function doApprove(ids){
 							if(!ids.length){msg.textContent='Nothing selected.';return;}
 							if(!confirm('Approve '+ids.length+' result(s)?\\n\\nAfter approval the Machine runs the full downstream lifecycle automatically: levels, points, standings, publication, winner news, social congratulations, next-race promotion.'))return;
@@ -273,6 +381,36 @@ const RESULTS_SCRIPT = `
 						}
 						tbl.querySelector('#results-approve-sel').addEventListener('click',()=>doApprove(Array.from(tbl.querySelectorAll('input[data-rid]:checked')).map(c=>c.dataset.rid)));
 						tbl.querySelector('#results-approve-all').addEventListener('click',()=>doApprove(Array.from(tbl.querySelectorAll('input[data-rid]')).map(c=>c.dataset.rid)));
+						async function doDisqualify(ids){
+							if(!ids.length){msg.textContent='Nothing selected.';return;}
+							const reason=prompt('Disqualification reason (required, recorded in the audit trail):');
+							if(reason===null)return;
+							if(!reason.trim()){msg.textContent='A disqualification reason is required.';return;}
+							if(!confirm('Disqualify '+ids.length+' result(s)?\n\nReason: '+reason.trim()+'\n\nA disqualified result scores 0 points and is excluded from standings. After your decision the Machine re-evaluates the event and runs the downstream lifecycle when the trigger fires.'))return;
+							msg.textContent='Recording disqualification… the Machine is re-evaluating the event. This may take a minute.';
+							try{
+								const res=await api('/api/operating-center/series-2026/results/disqualify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:distance,event_id:Number(eventId),result_ids:ids,reason:reason.trim()})});
+								if(res.process&&res.process.ok){msg.textContent='Done: disqualified '+res.disqualified+', trigger '+res.trigger.reason+', all steps ok.';}
+								else if(res.process){msg.textContent='Disqualified '+res.disqualified+', but processing failed: '+(res.process.error||'see Details');}
+								else{msg.textContent='Disqualified '+res.disqualified+'. Trigger not fired: '+res.trigger.detail;}
+								loadBtn.click();
+							}catch(err){msg.textContent=err.message}
+						}
+						tbl.querySelector('#results-dsq-sel').addEventListener('click',()=>doDisqualify(Array.from(tbl.querySelectorAll('input[data-rid]:checked')).map(c=>c.dataset.rid)));
+						tbl.querySelectorAll('[data-dsq]').forEach(function(btn){
+							btn.addEventListener('click',function(){doDisqualify([btn.dataset.dsq]);});
+						});
+						tbl.querySelectorAll('[data-clear]').forEach(function(btn){
+							btn.addEventListener('click',async function(){
+								if(!confirm('Clear your decision on this result? It returns to Submitted (no approval, no disqualification).'))return;
+								msg.textContent='Clearing decision…';
+								try{
+									const res=await api('/api/operating-center/series-2026/results/clear-decision',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:distance,event_id:Number(eventId),result_id:btn.dataset.clear})});
+									msg.textContent=(res.clearedApproval||res.clearedDisqualification)?'Decision cleared — the result is Submitted again.':'No decision was recorded for this result.';
+									loadBtn.click();
+								}catch(err){msg.textContent=err.message}
+							});
+						});
 						tbl.querySelector('#results-approve-retry').addEventListener('click',async()=>{
 							msg.textContent='Evaluating trigger…';
 							try{
@@ -317,33 +455,7 @@ const RESULTS_SCRIPT = `
 					'<div class="detail">Write access: '+esc(d.write_access)+' (dry_run)'+(d.prep?' · prep drafts ready':'')+'</div>'+
 					'<div class="meta">Synced: '+(d.synced_at?esc(d.synced_at):'never')+'</div></div>';
 			}).join(''):'<div class="unavailable">No lifecycle state yet.</div>';
-			const resBox=document.querySelector('#results-det-results');
-			try{
-				const res=await api('/api/operating-center/race-results');
-				resBox.innerHTML=results_resultsHtml(res);
-			}catch(err){resBox.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
-			const pipeBox=document.querySelector('#results-det-pipeline');
-			try{
-				const evs=distances.map(d=>({distance:d.distance,event:d.active_event})).filter(x=>x.event&&x.event.event_id);
-				if(!evs.length){pipeBox.innerHTML='<div class="unavailable">No active events.</div>';}
-				else{
-					pipeBox.innerHTML='<div class="btnrow"><select id="results-pipe-event">'+evs.map(x=>'<option value="'+esc(x.distance)+'|'+x.event.event_id+'">'+esc(x.distance)+' — '+esc(x.event.event_name||('Event '+x.event.event_id))+'</option>').join('')+'</select><button type="button" class="secondary" id="results-pipe-load">Load pipeline</button></div><div id="results-pipe-table" style="margin-top:8px"></div>';
-					pipeBox.querySelector('#results-pipe-load').addEventListener('click',async()=>{
-						const sel=pipeBox.querySelector('#results-pipe-event').value.split('|');
-						const tbl=pipeBox.querySelector('#results-pipe-table');
-						tbl.innerHTML='<div class="unavailable">Loading…</div>';
-						try{
-							const data=await api('/api/operating-center/series-2026/results/pipeline?distance='+encodeURIComponent(sel[0])+'&event_id='+encodeURIComponent(sel[1]));
-							const rows=data.athletes||[];
-							if(!rows.length){tbl.innerHTML='<div class="unavailable">No athletes in this pipeline yet.</div>';return;}
-							const dot=v=>v?'<span class="ok">●</span>':'<span class="meta">○</span>';
-							tbl.innerHTML='<table><thead><tr><th>Athlete</th><th>Reg.</th><th>Sub.</th><th>Appr.</th><th>Proc.</th><th>Publ.</th><th>Result</th><th>Level</th><th>Level place</th><th>Points</th></tr></thead><tbody>'+
-								rows.map(r=>'<tr><td>'+esc(r.athlete)+'</td><td>'+dot(r.registered)+'</td><td>'+dot(r.submitted)+'</td><td>'+dot(r.approved)+'</td><td>'+dot(r.processed)+'</td><td>'+dot(r.published)+'</td><td>'+esc(r.result||'—')+'</td><td>'+esc(r.level||'—')+'</td><td>'+esc(r.levelPlace||'—')+'</td><td>'+(r.points==null?'—':esc(String(r.points)))+'</td></tr>').join('')+
-								'</tbody></table>';
-						}catch(err){tbl.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
-					});
-				}
-			}catch(err){pipeBox.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+			await boot_results_matrix();
 		}catch(err){
 			const m=document.querySelector('#tabpanel-results .oc-tab-error');
 			if(m)m.textContent='Error: '+(err.message||err);
@@ -353,7 +465,7 @@ const RESULTS_SCRIPT = `
 
 const RESULTS_PANELS = ocFunction(
 	"results",
-	"Series 2026 race results — live lifecycle per distance, athlete pipeline, and approval actions. You approve results; the Machine runs the rest.",
+	"Series 2026 race results — live lifecycle per distance, athlete progression matrix, and result decisions. You approve or disqualify results; the Machine runs the rest.",
 	RESULTS_SUMMARY_HTML,
 	RESULTS_ACTIONS_HTML,
 	RESULTS_DETAILS_HTML,

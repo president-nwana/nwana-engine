@@ -95,7 +95,14 @@ export default {
 				return html(await homePage(env.nwana_site_db));
 			}
 			if (request.method === "GET" && path === "/results") {
-				return html(await resultsPage(env.nwana_site_db, url.searchParams.get("distance"), url.searchParams.get("view")));
+				const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
+				return html(await resultsPage(
+					env.nwana_site_db,
+					url.searchParams.get("distance"),
+					url.searchParams.get("view"),
+					url.searchParams.get("search"),
+					page,
+				));
 			}
 			if (request.method === "GET" && path === "/about") {
 				return html(await aboutPage());

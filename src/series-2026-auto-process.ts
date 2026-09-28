@@ -19,6 +19,7 @@ import {
 	allResultsApproved,
 	getEventApprovals,
 } from "./series-2026-approvals";
+import { getEventDisqualifications } from "./series-2026-decisions";
 import {
 	applySeries2026Levels,
 	AUTO_APPROVED_CONFIRMATION,
@@ -223,19 +224,23 @@ export interface TriggerInputs {
 	registrations: EventRegistration[];
 	results: LiveEventResult[];
 	approvedResultIds: string[];
+	/** Result ids the owner explicitly disqualified. Decided: need no
+	 * approval, give 0 points, never block the trigger. */
+	disqualifiedResultIds?: string[];
 	deadline: string | null;
 	now?: number;
 }
 
 /**
- * Pure trigger decision (ADR-0042). No I/O: given the facts, decide whether
- * the Machine may run the downstream lifecycle.
+ * Pure trigger decision (ADR-0042, ADR-0043). No I/O: given the facts, decide
+ * whether the Machine may run the downstream lifecycle.
  *
  * Fire when:
- *   A. every live result is owner-approved AND every active registration
- *      has a submitted result; or
+ *   A. every submitted result is decided (approved, or explicitly
+ *      disqualified) AND every active registration has a submitted result; or
  *   B. the official submission deadline passed AND at least one result is
  *      approved (the rest become exceptions).
+ * A result with no owner decision stays Submitted and blocks A.
  * Never fire when a result comes from an athlete with no active
  * registration — that is an owner exception, not an auto-process case.
  */
@@ -249,6 +254,7 @@ export function decideTrigger(input: TriggerInputs): {
 } {
 	const now = input.now ?? Date.now();
 	const approved = new Set(input.approvedResultIds);
+	const disqualified = new Set(input.disqualifiedResultIds ?? []);
 	const regNames = new Set(
 		input.registrations.map((r) =>
 			`${r.first_name ?? ""} ${r.last_name ?? ""}`.trim().toLowerCase(),
@@ -261,7 +267,9 @@ export function decideTrigger(input: TriggerInputs): {
 				!resultNames.has(`${r.first_name ?? ""} ${r.last_name ?? ""}`.trim().toLowerCase()),
 		)
 		.map((r) => `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim());
-	const unapprovedResults = input.results.filter((r) => !approved.has(r.result_id));
+	const unapprovedResults = input.results.filter(
+		(r) => !approved.has(r.result_id) && !disqualified.has(r.result_id),
+	);
 	const unregisteredResults = input.results.filter(
 		(r) => r.athlete && !regNames.has(r.athlete.toLowerCase()),
 	);
@@ -281,10 +289,11 @@ export function decideTrigger(input: TriggerInputs): {
 		unapprovedResults.length === 0 &&
 		missingSubmissions.length === 0
 	) {
+		const decided = input.results.length;
 		return {
 			fire: true,
 			reason: "all_approved",
-			detail: `All ${input.results.length} submitted results are owner-approved and every registered athlete submitted.`,
+			detail: `All ${decided} submitted results are decided (approved${disqualified.size > 0 ? `, ${disqualified.size} disqualified` : ""}) and every registered athlete submitted.`,
 			missingSubmissions,
 			unapprovedResults,
 			unregisteredResults,
@@ -327,6 +336,7 @@ export interface TriggerEvaluation {
 	registrations: EventRegistration[];
 	results: LiveEventResult[];
 	approvedResultIds: string[];
+	disqualifiedResultIds: string[];
 	missingSubmissions: string[];
 	unapprovedResults: LiveEventResult[];
 	unregisteredResults: LiveEventResult[];
@@ -350,6 +360,10 @@ export async function evaluateEventTrigger(
 	const approvedResultIds = results
 		.filter((r) => approvals.has(r.result_id))
 		.map((r) => r.result_id);
+	const disqualifications = await getEventDisqualifications(db, input.distance, input.eventId);
+	const disqualifiedResultIds = results
+		.filter((r) => disqualifications.has(r.result_id))
+		.map((r) => r.result_id);
 
 	const { deadline, source } = await fetchSubmissionDeadline(
 		db,
@@ -363,6 +377,7 @@ export async function evaluateEventTrigger(
 		registrations,
 		results,
 		approvedResultIds,
+		disqualifiedResultIds,
 		deadline,
 	});
 
@@ -371,6 +386,7 @@ export async function evaluateEventTrigger(
 		registrations,
 		results,
 		approvedResultIds,
+		disqualifiedResultIds,
 		deadline,
 		deadlineSource: source,
 	};
@@ -477,11 +493,16 @@ export async function autoProcessEvent(
 	}
 
 	// Step 2: levels / level places / points / standings (full-distance rebuild).
+	// Disqualified results need no approval; they are excluded from the
+	// approval check and from scoring (0 points).
+	const decidableResultIds = input.trigger.results
+		.map((r) => r.result_id)
+		.filter((id) => !input.trigger.disqualifiedResultIds.includes(id));
 	const approvedNow = await allResultsApproved(
 		db,
 		input.distance,
 		input.eventId,
-		input.trigger.results.map((r) => r.result_id),
+		decidableResultIds,
 	);
 	if (!approvedNow) {
 		return fail("verify_approvals", "Approvals changed mid-run; refusing to apply without a complete approval set.");
@@ -492,6 +513,7 @@ export async function autoProcessEvent(
 		distance: input.distance,
 		eventId: input.eventId,
 		confirmation: AUTO_APPROVED_CONFIRMATION,
+		disqualifiedResultIds: input.trigger.disqualifiedResultIds,
 	});
 	if (!applyResult.ok) {
 		return fail("apply_levels", applyResult.error ?? "Levels apply failed");

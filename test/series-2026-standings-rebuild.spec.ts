@@ -33,6 +33,10 @@ function makeDb(lifecycleRow: Row | null) {
 						async first() {
 							return lifecycleRow;
 						},
+						async all() {
+							// series_result_disqualifications: no DSQ rows in these fixtures.
+							return { results: [] };
+						},
 						async run() {
 							inserts.push({ sql, args });
 							return { success: true };

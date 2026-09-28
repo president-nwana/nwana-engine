@@ -84,17 +84,17 @@ describe("operating center shell: favicon and English UI", () => {
 	it("links the NWANA icon as favicon and apple-touch-icon on every section", () => {
 		for (const html of sections) {
 			expect(html).toContain(
-				'<link rel="icon" type="image/png" href="/operating-center/icon-180.png">',
+				'<link rel="icon" type="image/png" href="/operating-center/icon-180.v2.png">',
 			);
 			expect(html).toContain(
-				'<link rel="apple-touch-icon" href="/operating-center/icon-180.png">',
+				'<link rel="apple-touch-icon" href="/operating-center/icon-180.v2.png">',
 			);
 		}
 	});
 
 	it("uses the served icon file for the header logo (no data URI)", () => {
 		for (const html of sections) {
-			expect(html).toContain('src="/operating-center/icon-180.png"');
+			expect(html).toContain('src="/operating-center/icon-180.v2.png"');
 			expect(html).not.toContain("data:image/png;base64");
 		}
 	});
