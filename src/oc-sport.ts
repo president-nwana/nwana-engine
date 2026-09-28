@@ -98,11 +98,14 @@ const RESULTS_CSS = `<style>
 	#tabpanel-results .btnrow button{width:auto;margin-top:0}
 </style>`;
 
-const RESULTS_SUMMARY_HTML = RESULTS_CSS + `<section class="panel"><h2>Results summary</h2><div id="results-sum">Loading…</div></section>`;
+const RESULTS_SUMMARY_HTML = RESULTS_CSS + `<section class="panel"><h2>Results summary</h2><div id="results-sum">Loading…</div></section>
+<section class="panel"><h2>Registrations vs results — four separate metrics</h2><div id="results-reg">Loading…</div></section>`;
 
 const RESULTS_ACTIONS_HTML = `<section class="panel"><h2>Results actions</h2>
 	<p class="meta"><strong>Machine (automatic):</strong> computes performance levels, points, and level places on demand and keeps the per-distance lifecycle. Syncing from RunSignup is manual — the Machine no longer syncs on page load. <strong>Owner (manual):</strong> the actions below. Publishing a result always needs your explicit confirmation.</p>
-	<div id="results-act">Loading…</div></section>`;
+	<div id="results-act">Loading…</div>
+	<h3 style="margin-top:16px">Sync registrations</h3><p class="meta">One POST to /api/series-2026/registrations/sync — pulls RunSignup participant records for all 6 Series 2026 races into the registration data layer (separate from results). Manual only.</p>
+	<div class="item"><strong>Registration sync</strong><div class="detail" id="results-reg-sync-status">Not synced in this session.</div><div class="btnrow"><button type="button" class="secondary" id="results-reg-sync-btn">Sync registrations now</button></div><div class="message" aria-live="polite"></div></div></section>`;
 
 const RESULTS_DETAILS_HTML = `<section class="panel"><h2>Sync status</h2><div class="sync-status" id="results-det-sync">Loading…</div></section>
 	<section class="panel"><h2>Full lifecycle</h2><div id="results-det-lifecycle">Loading…</div></section>
@@ -139,6 +142,23 @@ const RESULTS_SCRIPT = `
 		try{return await api('/sources/runsignup/series-2026/results-preview');}
 		catch(err){return {error:err.message||String(err)};}
 	}
+	async function results_fetchParticipation(){
+		try{return await api('/api/series-2026/registrations/totals');}
+		catch(err){return {error:err.message||String(err)};}
+	}
+	function results_participationHtml(data){
+		if(data.error)return '<div class="unavailable">'+esc(data.error)+'</div>';
+		const reg=data.registrations||{};
+		const rows=(reg.byRace||[]).map(function(r){
+			return '<tr><td>'+esc(r.distance)+'</td><td>'+esc(String(r.registrations))+'</td><td>'+esc(String(r.activeRegistrations))+'</td><td>'+esc(String(r.registeredParticipants))+'</td></tr>';
+		}).join('');
+		return '<div class="item"><strong>Registrations</strong><div class="detail">'+esc(String(reg.totalRegistrations||0))+' total · '+esc(String(reg.activeRegistrations||0))+' active. One registration = one RunSignup registration record.</div></div>'+
+			'<div class="item"><strong>Registered participants</strong><div class="detail">'+esc(String(reg.uniqueRegisteredParticipants||0))+' distinct RunSignup users with at least one active registration.</div></div>'+
+			'<div class="item"><strong>Athletes with verified finishes</strong><div class="detail">'+esc(String(data.uniqueAthletesWithResults||0))+' distinct athletes in finalized results (from race_event_results — not registrations).</div></div>'+
+			'<div class="item"><strong>Verified finishes</strong><div class="detail">'+esc(String(data.verifiedFinishes||0))+' finalized result records (from race_event_results — not registrations).</div></div>'+
+			(rows?'<table><thead><tr><th>Distance</th><th>Registrations</th><th>Active</th><th>Participants</th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="unavailable">No registration data yet — run the sync from Actions.</div>')+
+			'<div class="meta">Registrations last synced: '+esc((reg.lastSyncAt)||'never')+' · computed '+esc(data.computedAt||'')+'</div>';
+	}
 	async function boot_results_summary(){
 		const box=document.querySelector('#results-sum');
 		try{
@@ -173,6 +193,10 @@ const RESULTS_SCRIPT = `
 			html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(esc).join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
 			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Computes performance levels, level places, and points from verified results and keeps the per-distance lifecycle (registration_open → awaiting_results → verifying → levels_computed → published → next_race_prep). Results are synced manually from Actions; nothing publishes without your confirmation.</div></div>';
 			box.innerHTML=html;
+			try{
+				const part=await results_fetchParticipation();
+				document.querySelector('#results-reg').innerHTML=results_participationHtml(part);
+			}catch(err){document.querySelector('#results-reg').innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
 	async function boot_results_actions(){
@@ -236,6 +260,19 @@ const RESULTS_SCRIPT = `
 						});
 					});
 				}
+			}
+			const regBtn=box.querySelector('#results-reg-sync-btn');
+			if(regBtn){
+				regBtn.addEventListener('click',async()=>{
+					const item=regBtn.closest('.item');const msg=item.querySelector('.message');const status=box.querySelector('#results-reg-sync-status');
+					msg.textContent='Syncing registrations from RunSignup…';regBtn.disabled=true;
+					try{
+						const res=await api('/api/series-2026/registrations/sync',{method:'POST'});
+						msg.textContent=res.ok?('Synced: '+res.totalFetched+' fetched, '+res.totalStored+' stored.'):('Sync finished with errors — check the response.');
+						if(status)status.textContent='Last sync attempt: '+new Date().toISOString()+' · '+res.totalFetched+' fetched / '+res.totalStored+' stored';
+					}catch(err){msg.textContent=err.message}
+					regBtn.disabled=false;
+				});
 			}
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}

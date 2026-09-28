@@ -38,7 +38,7 @@ function statBand(stats: { finishes: number; events: number; athletes: number })
     <div class="stat"><div class="n">6</div><div class="l">Race distances, 1K to 20K</div></div>
     <div class="stat"><div class="n">5</div><div class="l">Performance levels, fair for every pace</div></div>
     <div class="stat"><div class="n">${stats.finishes.toLocaleString("en-US")}</div><div class="l">Verified finishes this season</div></div>
-    <div class="stat"><div class="n">${stats.athletes.toLocaleString("en-US")}</div><div class="l">Athletes on the start line</div></div>
+    <div class="stat"><div class="n">${stats.athletes.toLocaleString("en-US")}</div><div class="l">Athletes with verified finishes</div></div>
   </div></div>`;
 }
 

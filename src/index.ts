@@ -19,6 +19,10 @@ import {
 	testSeries2026WriteAccess,
 } from "./race-lifecycle";
 import { applySeries2026Levels } from "./series-2026-apply";
+import {
+	getSeries2026ParticipationOverview,
+	syncSeries2026Registrations,
+} from "./series-2026-registrations";
 import { getFacebookPageToken, publishFacebookResult, publishInstagramResult, RESULT_DESTINATIONS } from "./meta-result-publisher";
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
@@ -6962,6 +6966,61 @@ export default {
 							error instanceof Error
 								? error.message
 								: "Unknown Series 2026 result preview error",
+					},
+					500,
+				);
+			}
+		}
+
+		// Series 2026 registration / participant data layer (separate from results).
+		if (
+			request.method === "POST" &&
+			url.pathname === "/api/series-2026/registrations/sync"
+		) {
+			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
+				return json({ ok: false, error: "Unauthorized" }, 401);
+			}
+			try {
+				const summary = await syncSeries2026Registrations(env.nwana_engine_db, {
+					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					apiCallerToken: env.RUNSIGNUP_API_REG,
+					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
+				});
+				return json({ ...summary });
+			} catch (error) {
+				console.error(error);
+				return json(
+					{
+						ok: false,
+						error:
+							error instanceof Error
+								? error.message
+								: "Unknown Series 2026 registration sync error",
+					},
+					500,
+				);
+			}
+		}
+
+		if (
+			request.method === "GET" &&
+			url.pathname === "/api/series-2026/registrations/totals"
+		) {
+			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
+				return json({ ok: false, error: "Unauthorized" }, 401);
+			}
+			try {
+				const overview = await getSeries2026ParticipationOverview(env.nwana_engine_db);
+				return json({ ok: true, ...overview });
+			} catch (error) {
+				console.error(error);
+				return json(
+					{
+						ok: false,
+						error:
+							error instanceof Error
+								? error.message
+								: "Unknown Series 2026 registration totals error",
 					},
 					500,
 				);
