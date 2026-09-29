@@ -386,7 +386,7 @@ const RESULTS_SCRIPT = `
 							const reason=prompt('Disqualification reason (required, recorded in the audit trail):');
 							if(reason===null)return;
 							if(!reason.trim()){msg.textContent='A disqualification reason is required.';return;}
-							if(!confirm('Disqualify '+ids.length+' result(s)?\n\nReason: '+reason.trim()+'\n\nA disqualified result scores 0 points and is excluded from standings. After your decision the Machine re-evaluates the event and runs the downstream lifecycle when the trigger fires.'))return;
+							if(!confirm('Disqualify '+ids.length+' result(s)?\\n\\nReason: '+reason.trim()+'\\n\\nA disqualified result scores 0 points and is excluded from standings. After your decision the Machine re-evaluates the event and runs the downstream lifecycle when the trigger fires.'))return;
 							msg.textContent='Recording disqualification… the Machine is re-evaluating the event. This may take a minute.';
 							try{
 								const res=await api('/api/operating-center/series-2026/results/disqualify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:distance,event_id:Number(eventId),result_ids:ids,reason:reason.trim()})});
