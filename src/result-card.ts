@@ -151,7 +151,7 @@ export function buildResultCardSvg(input: ResultCardInput): string {
 		${levelRows(levels)}
 		<text x="70" y="1040" class="footer">OFFICIAL NWANA SERIES RESULTS</text>
 		<style>
-			text { font-family: Arial, Helvetica, sans-serif; fill: #fff; }
+			text { font-family: "Liberation Sans", Arial, Helvetica, sans-serif; fill: #fff; }
 			.series { font-size: 23px; font-weight: 800; letter-spacing: 2px; }
 			.date { font-size: 22px; font-weight: 700; fill: #9fe6e6; letter-spacing: 1px; }
 			.record { font-size: 25px; font-weight: 900; fill: #ff555a; letter-spacing: 2px; }

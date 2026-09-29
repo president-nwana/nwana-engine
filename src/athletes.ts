@@ -13,6 +13,31 @@
 //   Excluded: DSQ/DNS/DNF/blank times, non-finalized records,
 //   owner-disqualified results (series_result_disqualifications).
 //   Source of truth = official finalized competition results.
+//
+// ARCHITECTURAL RULE — CANONICAL ATHLETE STATUS vs RACE PERFORMANCE LEVEL
+// (Albert, 2026-09-29):
+//   NWANA Elite Athlete / Elite Athletes Club member = canonical athlete
+//   status. Source of truth = athlete_profiles.athlete_role +
+//   athlete_profiles.credentials_json (type="club", e.g. "NWANA Elite Athletes
+//   Club member"). This is a verified persistent record, NOT derived from
+//   race results.
+//
+//   Elite / High Performance / Performance / Competitive / Open = performance
+//   level of a SPECIFIC RESULT in a SPECIFIC RACE. This is per-race sports
+//   data, stored in race_event_results.results_json[].performance_level.
+//
+//   These two concepts MUST NEVER be mixed:
+//   - Sponsor/report/export views MUST take athlete status ONLY from the
+//     canonical athlete profile (athlete_role + verified club credential).
+//   - NEVER output or "prove" athlete status via percentage/count of
+//     Elite-level results.
+//   - Performance-level statistics (e.g. "16 victories at Elite performance
+//     level") are sports statistics ONLY. They may be displayed separately
+//     as athletic achievements, but NEVER as the source of athlete status.
+//   - Example: Sven Thorslund is Elite Athletes Club member via verified
+//     international credentials, even with zero Elite-level results in the
+//     current NWANA Series. His status comes from the profile, not from
+//     race data.
 
 export interface AthleteCredential {
 	type:
@@ -45,6 +70,23 @@ export interface AthleteComputedStats {
 	season: Record<string, DistanceStats>;
 	by_distance: Record<string, DistanceStats>;
 	best_times: Record<string, string>; // {"5K": "30:38"} official finalized only
+	// Sports statistics ONLY — NEVER use as athlete status.
+	// Canonical athlete status comes from athlete_profiles.athlete_role +
+	// verified club credential, not from performance levels.
+	// Example: "16 victories at Elite performance level" is an athletic
+	// achievement stat, not proof of Elite Athlete status.
+	wins_by_performance_level: Record<string, number>; // {"Elite (< 33:00)": 18}
+	// Performance profile across ALL finalized finishes, all distances.
+	// Sports statistics ONLY — NEVER use as athlete status. Canonical status
+	// comes from athlete_profiles.athlete_role + verified club credential.
+	// performance_distribution: share of finalized finishes per canonical level.
+	// {"Elite": 64, "High Performance": 8, "Performance": 4, "Competitive": 20, "Open": 4}
+	performance_distribution: Record<string, number>;
+	// dominant_performance_level: the level with an absolute majority (>50%)
+	// of finalized finishes. NULL when no level has >50% — the Machine shows
+	// the distribution and does NOT invent a single level (unless a separately
+	// approved NWANA tie/mixed rule applies).
+	dominant_performance_level: string | null;
 	last_event_date: string | null;
 	finalized_events: number;
 	computed_at: string; // ISO
@@ -67,6 +109,41 @@ export interface AthleteProfile {
 }
 
 const NON_FINISH = new Set(["", "DNS", "DNF", "DSQ", "DQ", "NS"]);
+
+// The five canonical performance level categories. Raw D1 values look like
+// "Elite (< 6:00)" — the base name before the parenthesis is the category.
+const CANONICAL_PERFORMANCE_LEVELS = [
+	"Elite",
+	"High Performance",
+	"Performance",
+	"Competitive",
+	"Open",
+] as const;
+
+/**
+ * Normalize a raw performance_level value ("Elite (< 33:00)") to its canonical
+ * category ("Elite"). Returns null for unrecognized values.
+ */
+export function normalizePerformanceLevel(raw: string | null | undefined): string | null {
+	const base = (raw || "").trim().split("(")[0].trim();
+	return (CANONICAL_PERFORMANCE_LEVELS as readonly string[]).includes(base) ? base : null;
+}
+
+/**
+ * Compute the dominant performance level from a distribution.
+ * Returns the level only when it holds an absolute majority (>50%).
+ * Otherwise returns null — the Machine must show the distribution and NOT
+ * invent a single level (unless a separately approved NWANA tie/mixed rule
+ * applies). NEVER use the result as athlete status.
+ */
+export function computeDominantPerformanceLevel(
+	distribution: Record<string, number>,
+): string | null {
+	for (const [level, share] of Object.entries(distribution)) {
+		if (share > 50) return level;
+	}
+	return null;
+}
 
 function timeToSeconds(t: string): number | null {
 	const m = t.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d+))?$/);
@@ -97,6 +174,7 @@ interface ResultEntry {
 	athlete?: string;
 	time?: string;
 	level_place?: string | null;
+	performance_level?: string | null;
 	result_id?: string | number | null;
 }
 
@@ -127,6 +205,13 @@ export async function computeAthleteStats(
 	const byDistance: Record<string, DistanceStats> = {};
 	const seasonWins: Record<string, number> = {};
 	const bestSec: Record<string, number> = {};
+	// Sports statistics ONLY — wins broken down by performance level.
+	// NEVER use as athlete status. Canonical status comes from
+	// athlete_profiles.athlete_role + verified club credential.
+	const winsByLevel: Record<string, number> = {};
+	// Performance distribution across ALL finalized finishes, all distances.
+	// Sports statistics ONLY — NEVER use as athlete status.
+	const finishesByLevel: Record<string, number> = {};
 	let lastEventDate: string | null = null;
 	let finalizedEvents = 0;
 	const seenEvents = new Set<string>();
@@ -161,12 +246,22 @@ export async function computeAthleteStats(
 				s.finishes += 1;
 				const sec = timeToSeconds(time)!;
 				if (!(dist in bestSec) || sec < bestSec[dist]) bestSec[dist] = sec;
+				// Performance distribution: every finalized finish counts,
+				// across all distances. Normalized to canonical categories.
+				const normLevel = normalizePerformanceLevel(e.performance_level);
+				if (normLevel) {
+					finishesByLevel[normLevel] = (finishesByLevel[normLevel] ?? 0) + 1;
+				}
 			}
 			if (isWin) {
 				total.wins += 1;
 				d.wins += 1;
 				s.wins += 1;
 				seasonWins[seasonKey] = (seasonWins[seasonKey] ?? 0) + 1;
+				// Track wins by performance level as sports statistics ONLY.
+				// NEVER use to derive athlete status.
+				const level = (e.performance_level || "unknown").trim();
+				winsByLevel[level] = (winsByLevel[level] ?? 0) + 1;
 			}
 			if (isPodium) {
 				total.podiums += 1;
@@ -183,6 +278,20 @@ export async function computeAthleteStats(
 	const best_times: Record<string, string> = {};
 	for (const [dist, sec] of Object.entries(bestSec)) best_times[dist] = secondsToTime(sec);
 
+	// Build the performance distribution (percentages) and the dominant level.
+	// Denominator: finalized finishes with a recognized performance level.
+	const distTotal = Object.values(finishesByLevel).reduce((a, b) => a + b, 0);
+	const performance_distribution: Record<string, number> = {};
+	if (distTotal > 0) {
+		for (const level of CANONICAL_PERFORMANCE_LEVELS) {
+			const count = finishesByLevel[level] ?? 0;
+			if (count > 0) {
+				performance_distribution[level] = Math.round((count / distTotal) * 1000) / 10;
+			}
+		}
+	}
+	const dominant_performance_level = computeDominantPerformanceLevel(performance_distribution);
+
 	return {
 		starts: total.starts,
 		finishes: total.finishes,
@@ -192,6 +301,9 @@ export async function computeAthleteStats(
 		season,
 		by_distance: byDistance,
 		best_times,
+		wins_by_performance_level: winsByLevel,
+		performance_distribution,
+		dominant_performance_level,
 		last_event_date: lastEventDate,
 		finalized_events: finalizedEvents,
 		computed_at: new Date().toISOString(),
@@ -247,6 +359,44 @@ export async function getAthleteProfile(
 		stats,
 		stats_computed_at: row.stats_computed_at,
 		updated_at: row.updated_at,
+	};
+}
+
+/**
+ * Get the canonical athlete status from the athlete profile.
+ *
+ * ARCHITECTURAL RULE (Albert, 2026-09-29): canonical athlete status
+ * (e.g. "NWANA Elite Athletes Club member") comes ONLY from
+ * athlete_profiles.athlete_role + verified credentials (type="club").
+ * It is NEVER derived from race performance levels.
+ *
+ * Use this function in all sponsor/report/export views that need to display
+ * athlete status. Do NOT infer status from wins_by_performance_level or any
+ * other performance statistics.
+ */
+export function getCanonicalAthleteStatus(profile: AthleteProfile | null): {
+	athlete_role: string | null;
+	is_elite_club_member: boolean;
+	club_credentials: AthleteCredential[];
+} {
+	if (!profile) {
+		return { athlete_role: null, is_elite_club_member: false, club_credentials: [] };
+	}
+	const clubCredentials = (profile.credentials ?? []).filter(
+		(c) => c.type === "club"
+	);
+	// Check for Elite Athletes Club membership in verified credentials
+	// or in the athlete_role string (both are canonical sources)
+	const hasClubCredential = clubCredentials.some(
+		(c) => c.title.toLowerCase().includes("elite athletes club")
+	);
+	const hasRoleMention = (profile.athlete_role ?? "")
+		.toLowerCase()
+		.includes("elite athletes club");
+	return {
+		athlete_role: profile.athlete_role,
+		is_elite_club_member: hasClubCredential || hasRoleMention,
+		club_credentials: clubCredentials,
 	};
 }
 

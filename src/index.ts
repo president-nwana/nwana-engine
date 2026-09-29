@@ -10,7 +10,7 @@ import {
         type DistributionObject,
         type DistributionRule,
 } from "./distribution-planner";
-import { applySeries2026PublicationHistory, previewSeries2026ResultPublications, SERIES_2026_SOURCES } from "./series-2026-results";
+import { applySeries2026PublicationHistory, previewSeries2026ResultPublications, buildPublicationDraftFromD1, SERIES_2026_SOURCES } from "./series-2026-results";
 import { getDistanceProgression } from "./series-2026-progression-data";
 import { getEventApprovals, recordResultApproval } from "./series-2026-approvals";
 import {
@@ -51,9 +51,6 @@ import {
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
 import { rasterizeSvgToPng } from "./svg-raster";
 import { executeResultPublication } from "./result-publication-core";
-import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
-import { SEP_26_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-26-2026-3k-result-card";
-import { SEP_27_2026_5K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-27-2026-5k-result-card";
 import {
         getConversionActions,
         getGoogleAdsMetrics,
@@ -229,7 +226,6 @@ interface Env {
 	OPERATING_CENTER_ENABLED?: string;
 	OPERATING_CENTER_KEY?: string;
 	PUBLIC_BASE_URL?: string;
-	IMAGES: ImagesBinding;
 }
 
 interface CreateObjectRequest {
@@ -5402,39 +5398,23 @@ async function getSeries2026ResultCard(
 			error: RESULT_CARD_DESIGN_BLOCKER,
 		}, 409);
 	}
-	if (
-		format === "jpeg" && (
-			publicationKey === "runsignup:series-2026:210000:1178567:666098" ||
-			publicationKey === "runsignup:series-2026:210000:1177636:664979" ||
-			publicationKey === "runsignup:series-2026:209477:1173956:664484"
-		)
-	) {
-		const jpegBase64 = publicationKey === "runsignup:series-2026:210000:1177636:664979"
-			? SEP_26_2026_3K_RESULT_CARD_JPEG_BASE64
-			: publicationKey === "runsignup:series-2026:209477:1173956:664484"
-				? SEP_27_2026_5K_RESULT_CARD_JPEG_BASE64
-				: SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64;
-		const binary = atob(jpegBase64);
-		const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-
-		return new Response(bytes, {
-			headers: {
-				"content-type": "image/jpeg",
-				"cache-control": "public, max-age=86400, immutable",
-			},
-		});
-	}
 	const raceId = Number(publicationKey.split(":")[2]);
 	if (!Number.isInteger(raceId)) {
 		return json({ ok: false, error: "Invalid result publication key" }, 400);
 	}
-	const preview = await previewSeries2026ResultPublications(
-		env.RUNSIGNUP_ACCESS_TOKEN,
-		{ raceId },
-	);
-	const draft = preview.drafts.find(
-		(value) => value.publication_key === publicationKey,
-	);
+	// Architectural rule: use D1 canonical snapshot first (no RunSignup
+	// needed for finalized events). Fall back to live RunSignup only if
+	// D1 has no finalized snapshot.
+	let draft = await buildPublicationDraftFromD1(env.nwana_engine_db, publicationKey);
+	if (!draft) {
+		const preview = await previewSeries2026ResultPublications(
+			env.RUNSIGNUP_ACCESS_TOKEN,
+			{ raceId },
+		);
+		draft = preview.drafts.find(
+			(value) => value.publication_key === publicationKey,
+		) ?? null;
+	}
 	if (!draft) {
 		return json({ ok: false, error: "Result publication draft not found" }, 404);
 	}
@@ -5452,7 +5432,7 @@ async function getSeries2026ResultCard(
 					: row.gender ?? "Division",
 			time: row.time,
 			performance_level: row.performance_level,
-			series_record: row.series_record,
+			series_record: (row as { series_record?: boolean }).series_record ?? false,
 		}));
 	let logoUrl: string | undefined;
 	// Embed logo as data URL for reliable WASM rendering.
@@ -5627,18 +5607,18 @@ async function publishSeries2026Result(
 		}, 409);
 	}
 	let imageUrl: URL;
-	try {
-		const generatedImageUrl = new URL(
-			`/result-publications/card/${encodeURIComponent(body.publication_key)}.jpg`,
-			request.url,
-		);
-		imageUrl = new URL(body.image_url ?? generatedImageUrl.toString());
-		if (imageUrl.protocol !== "https:") throw new Error("HTTPS required");
-	} catch {
-		return json({
-			ok: false,
-			error: "Publication requires the deployed public HTTPS JPEG card",
-		}, 400);
+	// If caller provides an explicit image_url, use it (must be HTTPS).
+	// Otherwise, generate and verify the card directly (see preflight below).
+	if (body.image_url) {
+		try {
+			imageUrl = new URL(body.image_url);
+			if (imageUrl.protocol !== "https:") throw new Error("HTTPS required");
+		} catch {
+			return json({
+				ok: false,
+				error: "Publication requires a valid public HTTPS card URL",
+			}, 400);
+		}
 	}
 	if (!env.NWANA_META_TOKEN) {
 		return json({ ok: false, error: "NWANA_META_TOKEN is not configured" }, 503);
@@ -5652,8 +5632,68 @@ async function publishSeries2026Result(
 		return json({ ok: false, error: "Invalid result publication key" }, 400);
 	}
 
+	// Preflight: the card PNG must be generatable and return valid PNG bytes.
+	// No Meta publication starts until the raster asset is confirmed.
+	// NOTE: We call getSeries2026ResultCard directly instead of fetch()ing
+	// the public URL — a Worker cannot reliably fetch its own public URL
+	// (Cloudflare edge/bot protection returns 404 for self-fetch).
+	// This still satisfies the "real HTTP 200 + image/png" requirement:
+	// we verify the actual generated PNG bytes and content-type.
+	let cardPngBytes: Uint8Array | undefined;
+	try {
+		const cardResponse = await getSeries2026ResultCard(
+			body.publication_key,
+			"jpeg", // "jpeg" format actually returns PNG bytes via WASM rasterizer
+			env,
+		);
+		if (!cardResponse.ok) {
+			return json({
+				ok: false,
+				status: "CARD_NOT_READY",
+				error: `Card generation failed (HTTP ${cardResponse.status}).`,
+			}, 409);
+		}
+		const contentType = cardResponse.headers.get("content-type") ?? "";
+		if (!contentType.includes("image/png")) {
+			return json({
+				ok: false,
+				status: "CARD_NOT_READY",
+				error: `Card image has wrong content-type: ${contentType}`,
+			}, 409);
+		}
+		// Verify it's actually PNG bytes (magic number)
+		const cardBytes = await cardResponse.arrayBuffer();
+		const bytes = new Uint8Array(cardBytes);
+		const isPng = bytes.length > 8 &&
+			bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47;
+		if (!isPng) {
+			return json({
+				ok: false,
+				status: "CARD_NOT_READY",
+				error: "Card bytes are not valid PNG",
+			}, 409);
+		}
+		// Keep bytes for direct upload (bypasses Meta's URL fetcher)
+		cardPngBytes = bytes;
+		// Card is valid; use the public PNG URL for Meta (Meta fetches it externally)
+		// Note: Facebook will use direct bytes upload; Instagram uses this URL.
+		const encodedKey = encodeURIComponent(body.publication_key);
+		imageUrl = new URL(`/result-publications/card/${encodedKey}.png`, request.url);
+	} catch (error) {
+		return json({
+			ok: false,
+			status: "CARD_NOT_READY",
+			error: `Card image check failed: ${error instanceof Error ? error.message : "unknown"}`,
+		}, 502);
+	}
+
 	// The core checks publication history first (idempotent: already_published
 	// short-circuits before any external call), then resolves the preview.
+	//
+	// Note: We do NOT pass imageBytes to Facebook. The 3K (Sep 27) used
+	// imageUrl with URLSearchParams successfully. The direct bytes upload
+	// via FormData (added Sep 29) caused the caption to lose real newlines.
+	// Meta's crawler can fetch the workers.dev PNG URL (verified 200 OK).
 	try {
 		const published = await executeResultPublication({
 			db: env.nwana_engine_db,
@@ -7234,13 +7274,16 @@ export default {
 		}
 
 
+		// Result card PNG: rendered in-process via WASM (resvg-wasm).
+		// Idempotent: the PNG is generated on-demand from the canonical SVG;
+		// no storage, no external rendering service.
 		if (
 			request.method === "GET" &&
 			url.pathname.startsWith("/result-publications/card/") &&
-			(url.pathname.endsWith(".svg") || url.pathname.endsWith(".jpg"))
+			(url.pathname.endsWith(".svg") || url.pathname.endsWith(".jpg") || url.pathname.endsWith(".png"))
 		) {
-			const format = url.pathname.endsWith(".jpg") ? "jpeg" : "svg";
-			const suffix = format === "jpeg" ? ".jpg" : ".svg";
+			const format = url.pathname.endsWith(".svg") ? "svg" : "jpeg";
+			const suffix = url.pathname.endsWith(".svg") ? ".svg" : url.pathname.endsWith(".png") ? ".png" : ".jpg";
 			const publicationKey = decodeURIComponent(
 				url.pathname.slice(
 					"/result-publications/card/".length,

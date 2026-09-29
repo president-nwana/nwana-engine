@@ -285,7 +285,7 @@ export function annotateSeries2026Records(
 			...(draft.editorial_draft.link_url
 				? ["", `Full results: ${draft.editorial_draft.link_url}`]
 				: []),
-		].join("\\n");
+		].join("\n");
 
 		return {
 			...draft,
@@ -435,4 +435,173 @@ export function applySeries2026PublicationHistory(
 				draft.ready_for_editorial_review && !historical,
 		};
 	});
+}
+
+/**
+ * Build a publication draft from the D1 canonical finalized snapshot.
+ *
+ * Architectural rule (Albert, 2026-09-28): for an already approved/finalized
+ * event, publication must NOT re-fetch from RunSignup. The canonical snapshot
+ * (athlete, time, gender, level, level place, points, event title/date,
+ * results URL, winners/records, publication key) is saved in D1 during
+ * processing. This function builds the draft from that snapshot.
+ *
+ * Returns null if no finalized snapshot exists in D1 — caller may then
+ * fall back to the live RunSignup path (for new/unprocessed events).
+ *
+ * No invented data: uses only the saved approved/finalized production snapshot.
+ */
+export async function buildPublicationDraftFromD1(
+	db: D1Database,
+	publicationKey: string,
+): Promise<ReturnType<typeof buildSeries2026PublicationDraft> | null> {
+	const parts = publicationKey.split(":");
+	if (parts.length !== 5 || parts[0] !== "runsignup" || parts[1] !== "series-2026") {
+		return null;
+	}
+	const raceId = Number(parts[2]);
+	const eventId = Number(parts[3]);
+	const resultSetId = Number(parts[4]);
+	if (!Number.isInteger(raceId) || !Number.isInteger(eventId) || !Number.isInteger(resultSetId)) {
+		return null;
+	}
+
+	// Find the source (distance, series IDs) by raceId
+	const source = SERIES_2026_SOURCES.find((s) => s.raceId === raceId);
+	if (!source) {
+		return null;
+	}
+
+	// Get the canonical finalized snapshot from D1
+	const row = await db.prepare(`
+		SELECT event_name, event_date, results_url, results_json, finalized
+		FROM race_event_results
+		WHERE race_id = ? AND event_id = ?
+		LIMIT 1
+	`).bind(raceId, eventId).first<{
+		event_name: string | null;
+		event_date: string | null;
+		results_url: string | null;
+		results_json: string;
+		finalized: number;
+	}>();
+
+	if (!row || !row.finalized) {
+		return null;
+	}
+
+	let results: Array<{
+		result_id?: string;
+		athlete?: string;
+		gender?: string;
+		time?: string;
+		performance_level?: string;
+		level_place?: string;
+		series_record?: boolean;
+	}>;
+	try {
+		results = JSON.parse(row.results_json);
+	} catch {
+		return null;
+	}
+
+	if (!Array.isArray(results) || results.length === 0) {
+		return null;
+	}
+
+	// Normalize results to match the expected draft type
+	// (D1 snapshot is the canonical source; no invented data)
+	// Preserve series_record from D1 for the caption
+	const normalizedResults = results.map((r) => ({
+		result_id: r.result_id ?? null,
+		athlete: r.athlete ?? "",
+		gender: r.gender ?? null,
+		time: r.time ?? null,
+		performance_level: r.performance_level ?? null,
+		level_place: r.level_place ?? null,
+		series_record: r.series_record ?? false,
+	}));
+
+	// Build winners list (level_place === "1"), sorted by level then gender
+	const winners = normalizedResults
+		.filter((r) => r.level_place === "1")
+		.sort((a, b) => {
+			const levelDiff = levelOrder(a.performance_level ?? null) - levelOrder(b.performance_level ?? null);
+			return levelDiff !== 0
+				? levelDiff
+				: (a.gender ?? "").localeCompare(b.gender ?? "");
+		});
+
+	const eventName = row.event_name ?? `NWANA Open ${source.distance} Series`;
+	const eventTitle = eventName.replace(/\s+— Results$/, "");
+	const fullResultsUrl = row.results_url;
+
+	// Build post_text with congratulations, records, winners (real newlines)
+	const winnerNames = [...new Set(winners.map((r) => r.athlete).filter(Boolean))];
+	const congratulations = winnerNames.length === 1
+		? `Congratulations to ${winnerNames[0]} on an outstanding performance in the ${eventTitle} — Results!`
+		: winnerNames.length > 1
+			? `Congratulations to ${winnerNames.join(", ")} on their outstanding performances in the ${eventTitle} — Results!`
+			: `Congratulations to everyone who completed the ${eventTitle} — Results!`;
+	const recordLines = winners
+		.filter((r) => r.series_record)
+		.map((r) =>
+			`${genderLabel(r.gender ?? null)}'s Series Record: ${r.athlete}${r.time ? ` — ${r.time}` : ""}`
+		);
+	const winnerLines = winners.map((r) =>
+		`${r.performance_level} — ${genderLabel(r.gender ?? null)}: ${r.athlete}${r.time ? ` — ${r.time}` : ""}`
+	);
+	const postText = [
+		congratulations,
+		...(recordLines.length > 0 ? ["", ...recordLines] : []),
+		...(winnerLines.length > 0 ? ["", "Level winners:", ...winnerLines] : []),
+		...(fullResultsUrl ? ["", `Full results: ${fullResultsUrl}`] : []),
+	].join("\n");
+
+	const finalized = normalizedResults.every(
+		(r) => r.performance_level && r.level_place
+	);
+
+	return {
+		publication_key: publicationKey,
+		status: "DRAFT" as const,
+		mode: "PLAN_ONLY" as const,
+		execution_allowed: false as const,
+		requires_review: true as const,
+		ready_for_editorial_review: finalized,
+		source: {
+			platform: "RUNSIGNUP" as const,
+			season: 2026,
+			distance: source.distance,
+			race_id: raceId,
+			race_series_id: source.raceSeriesId,
+			race_series_year_id: source.raceSeriesYearId,
+			event_id: eventId,
+			result_set_id: resultSetId,
+		},
+		editorial_draft: {
+			status: "DRAFT" as const,
+			title: `${eventName} — Official Results`,
+			post_text: postText,
+			link_url: fullResultsUrl,
+			image_url: null,
+			winner_count: winners.length,
+			ready_for_approval: finalized && fullResultsUrl !== null,
+			blocking_reasons: [
+				...(!finalized ? ["RESULTS_NOT_FINALIZED"] : []),
+				...(fullResultsUrl === null ? ["RESULTS_URL_REQUIRED"] : []),
+			],
+		},
+		content: {
+			title: `${eventName} — Results`,
+			content_scope: "SERIES_2026_RESULTS" as const,
+			results: normalizedResults,
+		},
+		verification: {
+			result_count: normalizedResults.length,
+			performance_level_field_found: true,
+			level_place_field_found: true,
+			all_results_finalized: finalized,
+		},
+	};
 }

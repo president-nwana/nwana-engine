@@ -16,7 +16,7 @@ import {
 	publishFacebookResult,
 	publishInstagramResult,
 } from "./meta-result-publisher";
-import { previewSeries2026ResultPublications } from "./series-2026-results";
+import { previewSeries2026ResultPublications, buildPublicationDraftFromD1 } from "./series-2026-results";
 import {
 	autoPublishNextRacePromo,
 	autoPublishWinnerNews,
@@ -38,6 +38,10 @@ export interface ExecutePublicationInput {
 	metaToken: string;
 	publicationKey: string;
 	imageUrl: string;
+	/** PNG bytes for direct upload (bypasses Meta's URL fetcher when the
+	 * image host blocks Meta's crawler). If provided, Facebook uses multipart
+	 * upload; Instagram still uses imageUrl. */
+	imageBytes?: Uint8Array;
 	authorizedBy: PublicationAuthorization;
 }
 
@@ -49,7 +53,18 @@ export interface ExecutePublicationResult {
 	deliveries: Record<string, unknown>;
 	site_news: unknown;
 	next_race_news: unknown;
+	/** Per-step factual statuses. Each mandatory downstream step reports its own
+	 * outcome; the overall status is not PUBLISHED_COMPLETE unless every
+	 * mandatory step succeeded. */
+	step_statuses?: Record<string, StepStatus>;
 }
+
+/** Factual status for one mandatory downstream step. */
+export type StepStatus =
+	| { status: "PUBLISHED"; detail?: string }
+	| { status: "FAILED"; error: string }
+	| { status: "EXCEPTION"; error: string }
+	| { status: "SKIPPED_WITH_REASON"; reason: string };
 
 export async function saveResultDelivery(
 	db: D1Database,
@@ -82,11 +97,11 @@ export async function executeResultPublication(
 	if (existing?.status === "LEGACY_BASELINE") {
 		throw new Error("Historical baseline results cannot be published as new");
 	}
-	if (existing?.status === "PUBLISHED") {
+	if (existing?.status === "PUBLISHED" || existing?.status === "PUBLISHED_COMPLETE" || existing?.status === "PUBLISHED_PARTIAL") {
 		return {
 			ok: true,
 			publication_key: input.publicationKey,
-			status: "PUBLISHED",
+			status: existing.status,
 			already_published: true,
 			deliveries: {},
 			site_news: null,
@@ -98,13 +113,21 @@ export async function executeResultPublication(
 	if (!Number.isInteger(raceId)) {
 		throw new Error("Invalid result publication key");
 	}
-	const preview = await previewSeries2026ResultPublications(
-		input.runSignupToken,
-		{ raceId },
-	);
-	const draft = preview.drafts.find(
-		(value) => value.publication_key === input.publicationKey,
-	);
+	// Architectural rule (Albert, 2026-09-28): for an already approved/finalized
+	// event, publication must NOT re-fetch from RunSignup. Use the D1 canonical
+	// finalized snapshot. RunSignup outage must not block publication.
+	// Fall back to live RunSignup only if D1 has no finalized snapshot
+	// (for new/unprocessed events).
+	let draft = await buildPublicationDraftFromD1(db, input.publicationKey);
+	if (!draft) {
+		const preview = await previewSeries2026ResultPublications(
+			input.runSignupToken,
+			{ raceId },
+		);
+		draft = preview.drafts.find(
+			(value) => value.publication_key === input.publicationKey,
+		) ?? null;
+	}
 	if (!draft || !draft.ready_for_editorial_review || !draft.editorial_draft.ready_for_approval) {
 		throw new Error("Publication draft is missing or not ready");
 	}
@@ -114,7 +137,7 @@ export async function executeResultPublication(
 			publication_key, series, status, race_id, event_id, result_set_id, metadata
 		) VALUES (?, 'SERIES_2026', 'APPROVED', ?, ?, ?, ?)
 		ON CONFLICT(publication_key) DO UPDATE SET
-			status = CASE WHEN status = 'PUBLISHED' THEN status ELSE 'APPROVED' END,
+			status = CASE WHEN status IN ('PUBLISHED', 'PUBLISHED_COMPLETE', 'PUBLISHED_PARTIAL') THEN status ELSE 'APPROVED' END,
 			metadata = excluded.metadata,
 			updated_at = CURRENT_TIMESTAMP
 	`).bind(
@@ -153,6 +176,7 @@ export async function executeResultPublication(
 			pageId: destination.pageId,
 			message: draft.editorial_draft.post_text,
 			imageUrl: input.imageUrl,
+			imageBytes: input.imageBytes,
 			pageToken,
 		});
 		await saveResultDelivery(
@@ -203,56 +227,142 @@ export async function executeResultPublication(
 		}
 	}
 
-	await db.prepare(`
-		UPDATE result_publication_history
-		SET status = 'PUBLISHED', updated_at = CURRENT_TIMESTAMP
-		WHERE publication_key = ?
-	`).bind(draft.publication_key).run();
+	// Determine publication status based on delivery results.
+	// PUBLISHED_COMPLETE: all destinations succeeded.
+	// PUBLISHED_PARTIAL: at least one succeeded, at least one failed/skipped.
+	// META_DELIVERY_FAILED: all Meta deliveries failed.
+	const deliveryEntries = Object.entries(result);
+	const succeeded = deliveryEntries.filter(([_, v]) => {
+		const r = v as { external_id?: string; skipped_duplicate?: boolean; skipped_error?: string };
+		return r.external_id !== undefined || r.skipped_duplicate === true;
+	});
+	const failed = deliveryEntries.filter(([_, v]) => {
+		const r = v as { skipped_error?: string };
+		return r.skipped_error !== undefined;
+	});
+	let finalStatus: string;
+	if (succeeded.length > 0 && failed.length === 0) {
+		finalStatus = "PUBLISHED_COMPLETE";
+	} else if (succeeded.length > 0 && failed.length > 0) {
+		finalStatus = "PUBLISHED_PARTIAL";
+	} else {
+		finalStatus = "META_DELIVERY_FAILED";
+	}
+
+	// Per-step factual statuses. The overall publication is not complete
+	// unless every mandatory downstream step succeeded. A Meta success
+	// alone does not mask a site-news or promo failure.
+	const stepStatuses: Record<string, StepStatus> = {};
+
+	// Meta step status from delivery outcomes.
+	if (finalStatus === "PUBLISHED_COMPLETE") {
+		stepStatuses.meta = { status: "PUBLISHED" };
+	} else if (finalStatus === "PUBLISHED_PARTIAL") {
+		const failedKeys = failed.map(([k]) => k).join(", ");
+		stepStatuses.meta = { status: "PUBLISHED", detail: `partial: failed ${failedKeys}` };
+	} else {
+		stepStatuses.meta = { status: "FAILED", error: "all Meta deliveries failed" };
+	}
 
 	// Engine-side news auto-publish (ADR-0011): the authorization above
 	// covers one winner announcement on the public site's news feed.
 	// Internal D1 write only; nothing external is sent.
-	const siteNews = await autoPublishWinnerNews(db, {
-		publicationKey: draft.publication_key,
-		series: "SERIES_2026",
-		raceId: draft.source.race_id,
-		eventId: draft.source.event_id,
-	});
+	// Wrapped so a news failure is recorded as a step failure, not silent.
+	let siteNews: unknown;
+	try {
+		siteNews = await autoPublishWinnerNews(db, {
+			publicationKey: draft.publication_key,
+			series: "SERIES_2026",
+			raceId: draft.source.race_id,
+			eventId: draft.source.event_id,
+		});
+		const outcome = siteNews as { published?: boolean; skipped?: string; slug?: string };
+		if (outcome.published) {
+			stepStatuses.site_news = { status: "PUBLISHED", detail: outcome.slug };
+		} else {
+			stepStatuses.site_news = { status: "SKIPPED_WITH_REASON", reason: outcome.skipped ?? "unknown" };
+		}
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : "unknown";
+		siteNews = { published: false, error: msg };
+		stepStatuses.site_news = { status: "EXCEPTION", error: msg };
+	}
 
 	// Next-race promo auto-publish (ADR-0013): the same authorization
 	// covers one promo for the next not-yet-run event of the same
 	// series and distance. Internal D1 write only; skips with a reported
 	// reason when there is no upcoming event, never failing the publication.
-	const nextRaceNews = await autoPublishNextRacePromo(db, {
-		publicationKey: draft.publication_key,
-		series: "SERIES_2026",
-		raceId: draft.source.race_id,
-		eventId: draft.source.event_id,
-	});
+	let nextRaceNews: unknown;
+	try {
+		nextRaceNews = await autoPublishNextRacePromo(db, {
+			publicationKey: draft.publication_key,
+			series: "SERIES_2026",
+			raceId: draft.source.race_id,
+			eventId: draft.source.event_id,
+		});
+		const outcome = nextRaceNews as { published?: boolean; skipped?: string; slug?: string };
+		if (outcome.published) {
+			stepStatuses.next_race_promo = { status: "PUBLISHED", detail: outcome.slug };
+		} else {
+			stepStatuses.next_race_promo = { status: "SKIPPED_WITH_REASON", reason: outcome.skipped ?? "unknown" };
+		}
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : "unknown";
+		nextRaceNews = { published: false, error: msg };
+		stepStatuses.next_race_promo = { status: "EXCEPTION", error: msg };
+	}
+
+	// Overall status: PUBLISHED_COMPLETE only if every mandatory step
+	// published. Any FAILED/EXCEPTION downgrades the overall status so a
+	// Meta-only success cannot hide a downstream failure.
+	const stepValues = Object.values(stepStatuses);
+	const hasFailed = stepValues.some((s) => s.status === "FAILED" || s.status === "EXCEPTION");
+	const hasSkipped = stepValues.some((s) => s.status === "SKIPPED_WITH_REASON");
+	if (hasFailed) {
+		finalStatus = "PUBLISHED_PARTIAL";
+	} else if (hasSkipped && finalStatus === "PUBLISHED_COMPLETE") {
+		// Meta complete but a downstream step skipped with reason: still
+		// partial, with the reason visible in step_statuses.
+		finalStatus = "PUBLISHED_PARTIAL";
+	}
+
+	await db.prepare(`
+		UPDATE result_publication_history
+		SET status = ?, metadata = json_patch(
+			COALESCE(metadata, '{}'),
+		 json(?)
+		), updated_at = CURRENT_TIMESTAMP
+		WHERE publication_key = ?
+	`).bind(finalStatus, JSON.stringify({ step_statuses: stepStatuses }), draft.publication_key).run();
 
 	// Audit: publication is a consequential action; record what authorized
 	// it so the Activity feed shows what was published, where, and why.
+	// The audit status reflects the true overall outcome, not a hardcoded
+	// PUBLISHED.
 	await db.prepare(`
 		INSERT INTO audit_events (audit_id, object_id, action, module, status, details)
-		VALUES (?, ?, 'RESULT_PUBLISHED', 'RESULTS', 'PUBLISHED', ?)
+		VALUES (?, ?, 'RESULT_PUBLISHED', 'RESULTS', ?, ?)
 	`).bind(
 		`AUDIT-${crypto.randomUUID()}`,
 		draft.publication_key,
+		finalStatus,
 		JSON.stringify({
 			publication_key: draft.publication_key,
 			authorized_by: input.authorizedBy,
 			destinations: Object.keys(result),
+			step_statuses: stepStatuses,
 			site_news: siteNews,
 			next_race_news: nextRaceNews,
 		}),
 	).run();
 
 	return {
-		ok: true,
+		ok: finalStatus !== "META_DELIVERY_FAILED",
 		publication_key: draft.publication_key,
-		status: "PUBLISHED",
+		status: finalStatus,
 		deliveries: result,
 		site_news: siteNews,
 		next_race_news: nextRaceNews,
+		step_statuses: stepStatuses,
 	};
 }

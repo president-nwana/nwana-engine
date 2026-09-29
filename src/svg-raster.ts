@@ -12,6 +12,7 @@
 import { initWasm, Resvg } from "@resvg/resvg-wasm";
 // @ts-expect-error - WASM module import via wrangler CompiledWasm rule
 import resvgWasm from "@resvg/resvg-wasm/index_bg.wasm";
+import { getFontBuffers } from "./assets/fonts";
 
 let wasmInitialized = false;
 
@@ -43,6 +44,16 @@ export async function rasterizeSvgToPng(
 			: undefined,
 		// Background is part of the card design (embedded JPEG), so no
 		// extra background fill needed.
+		//
+		// Fonts: resvg-wasm has no system fonts in Workers. We bundle
+		// Liberation Sans (metric-compatible with Arial) to render SVG
+		// <text> elements. Without this, text is silently dropped.
+		font: {
+			fontBuffers: getFontBuffers(),
+			defaultFontFamily: "Liberation Sans",
+			// Map Arial/Helvetica to Liberation Sans (metric-compatible)
+			loadSystemFonts: false,
+		},
 	});
 
 	const rendered = resvg.render();

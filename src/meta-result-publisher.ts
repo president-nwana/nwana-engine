@@ -65,17 +65,33 @@ export async function publishFacebookResult(params: {
 	pageId: string;
 	message: string;
 	imageUrl?: string;
+	imageBytes?: Uint8Array;
 	pageToken: string;
 	fetcher?: FetchLike;
 }) {
-	// If imageUrl is provided, post as photo. Otherwise, text-only via /feed.
-	const isPhoto = typeof params.imageUrl === "string" && params.imageUrl.length > 0;
-	const body = new URLSearchParams({
-		message: params.message,
-		access_token: params.pageToken,
-	});
-	if (isPhoto) {
-		body.set("url", params.imageUrl!);
+	// If imageBytes is provided, upload directly via multipart (bypasses
+	// Meta's URL fetcher — needed when the image host blocks Meta's crawler).
+	// If imageUrl is provided, post as photo via URL. Otherwise, text-only.
+	const hasBytes = params.imageBytes && params.imageBytes.length > 0;
+	const hasUrl = typeof params.imageUrl === "string" && params.imageUrl.length > 0;
+	const isPhoto = hasBytes || hasUrl;
+
+	let body: URLSearchParams | FormData;
+	if (hasBytes) {
+		const form = new FormData();
+		form.set("message", params.message);
+		form.set("access_token", params.pageToken);
+		form.set("source", new Blob([params.imageBytes!], { type: "image/png" }), "card.png");
+		body = form;
+	} else {
+		const urlBody = new URLSearchParams({
+			message: params.message,
+			access_token: params.pageToken,
+		});
+		if (hasUrl) {
+			urlBody.set("url", params.imageUrl!);
+		}
+		body = urlBody;
 	}
 	const endpoint = isPhoto ? "photos" : "feed";
 	const data = await graphJson(

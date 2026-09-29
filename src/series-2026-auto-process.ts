@@ -622,21 +622,33 @@ export async function autoProcessEvent(
 	if (!draft) {
 		return fail("publish", `No publication draft found for event ${input.eventId}`);
 	}
+	// Validate image is actually available before publication.
+	// If the card cannot be generated, fail fast with IMAGE_GENERATION_FAILED
+	// instead of publishing a text-only post and marking it PUBLISHED.
+	const cardUrl = `${env.publicBaseUrl}/result-publications/card/${encodeURIComponent(draft.publication_key)}.png`;
+	try {
+		const cardCheck = await fetch(cardUrl, { method: "HEAD" });
+		if (!cardCheck.ok) {
+			return fail("publish", `IMAGE_GENERATION_FAILED: card returned HTTP ${cardCheck.status} for ${draft.publication_key}`);
+		}
+	} catch (error) {
+		return fail("publish", `IMAGE_GENERATION_FAILED: card unreachable: ${error instanceof Error ? error.message : "unknown"}`);
+	}
 	try {
 		const published = await executeResultPublication({
 			db,
 			runSignupToken: env.accessToken,
 			metaToken: env.metaToken,
 			publicationKey: draft.publication_key,
-			imageUrl: `${env.publicBaseUrl}/result-publications/card/${encodeURIComponent(draft.publication_key)}.jpg`,
+			imageUrl: cardUrl,
 			authorizedBy: { kind: "owner_result_approvals", distance: input.distance, eventId: input.eventId },
 		});
 		await push(
 			"publish",
-			"ok",
+			published.status === "META_DELIVERY_FAILED" ? "failed" : "ok",
 			published.already_published
-				? "Already published; duplicates skipped."
-				: `Published to ${Object.keys(published.deliveries).length} destinations; winner news + next-race promo written.`,
+				? `Already published (${published.status}); duplicates skipped.`
+				: `${published.status}: ${Object.keys(published.deliveries).length} destinations; winner news + next-race promo written.`,
 		);
 	} catch (error) {
 		return fail("publish", error instanceof Error ? error.message : "Publication failed");
@@ -699,7 +711,7 @@ export async function getAthletePipeline(
 		.prepare(`SELECT status FROM result_publication_history WHERE race_id = ? AND event_id = ? ORDER BY updated_at DESC LIMIT 1`)
 		.bind(input.raceId, input.eventId)
 		.first<{ status: string | null }>();
-	const eventPublished = pubRow?.status === "PUBLISHED";
+	const eventPublished = pubRow?.status === "PUBLISHED" || pubRow?.status === "PUBLISHED_COMPLETE" || pubRow?.status === "PUBLISHED_PARTIAL";
 
 	const byName = new Map<string, AthletePipelineRow>();
 	const ensure = (name: string): AthletePipelineRow => {
@@ -803,5 +815,5 @@ export async function isEventPublished(
 		.prepare(`SELECT status FROM result_publication_history WHERE race_id = ? AND event_id = ? ORDER BY updated_at DESC LIMIT 1`)
 		.bind(raceId, eventId)
 		.first<{ status: string | null }>();
-	return row?.status === "PUBLISHED";
+	return row?.status === "PUBLISHED" || row?.status === "PUBLISHED_COMPLETE" || row?.status === "PUBLISHED_PARTIAL";
 }

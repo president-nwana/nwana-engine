@@ -22,9 +22,9 @@
 		"enabled": true
 	},
 	"upload_source_maps": true,
-	"images": {
-		"binding": "IMAGES"
-	},
+	"rules": [
+		{ "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
+	],
 	"cache": {
 		"enabled": true
 	},
