@@ -365,7 +365,14 @@ export async function evaluateEventTrigger(
 ): Promise<TriggerEvaluation> {
 	const { db } = env;
 	const registrations = await getEventRegistrations(env, input.raceId, input.eventId);
-	const liveResults = await fetchLiveEventResults(env.accessToken, input.raceId, input.eventId);
+	let liveResults: LiveEventResult[];
+	try {
+		liveResults = await fetchLiveEventResults(env.accessToken, input.raceId, input.eventId);
+	} catch (error) {
+		// RunSignup API failure (e.g. 522 timeout) — fall back to D1 approvals below.
+		console.error("fetchLiveEventResults failed, using D1 approvals fallback:", error instanceof Error ? error.message : error);
+		liveResults = [];
+	}
 	const approvals = await getEventApprovals(db, input.distance, input.eventId);
 	// Fallback: if the authenticated RunSignup API returns no results but the
 	// owner has recorded approvals in D1 (verified against the public API at

@@ -6466,7 +6466,13 @@ export default {
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
 				};
-				const liveResults = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				let liveResults: Array<{ result_id: string; athlete: string; gender: string | null; time: string | null }>;
+				try {
+					liveResults = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				} catch (error) {
+					console.error("fetchLiveEventResults failed, using D1 approvals fallback:", error instanceof Error ? error.message : error);
+					liveResults = [];
+				}
 				const approvals = await getEventApprovals(env.nwana_engine_db, distance, eventId);
 				const disquals = await getEventDisqualifications(env.nwana_engine_db, distance, eventId);
 				// Same fallback as evaluateEventTrigger: if the authenticated API
