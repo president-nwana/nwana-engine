@@ -36,13 +36,17 @@ deployed behavior) is given.
   `b415765` is an ancestor of main HEAD and no `site/` changes exist after it,
   so the deployed site equals the site code at HEAD. **VERIFIED BOTH**
 - Local main HEAD: `2917311`. **VERIFIED REPO**
-- `origin/main` (local cache): `b9efd601`. Local main is **ahead 651, behind
-  14** vs origin/main. **VERIFIED REPO**
-- **MISMATCH (explicit): production == local HEAD (`2917311`); `origin/main`
-  does NOT match production.** GitHub has not been synced since the deploy
-  series. Push via Git Database API (`~/workspace/tools/gh-push-api.py`;
-  git-protocol push from this environment is impossible) is pending owner
-  decision — not done in this pass.
+- `origin/main`: `afdd909bdb5e52a54c9653691ab3b549561fb131` (sync commit
+  "Sync origin/main with production/local HEAD 88daba0", pushed 2026-09-29
+  ~14:20 EDT via Git Database API; git-protocol push from this environment
+  is impossible). **VERIFIED BOTH**
+- origin/main tree: `d4b06ff99e96d5e31489f39b11b74637157c2c1e` — byte-identical
+  to the local production tree (verified by tree SHA before the ref move).
+  GitHub main had diverged (was at `105a902c`, tree matched no local commit),
+  so one sync commit carries the exact local tree; the 14 pre-rewrite commits
+  were superseded versions of work already in local history — nothing lost.
+  **GitHub main now matches the local production tree. No push pending.**
+  **VERIFIED BOTH**
 
 ## 2. Workers, domains, D1 binding
 
