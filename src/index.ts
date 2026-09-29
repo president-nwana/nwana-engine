@@ -52,6 +52,7 @@ import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER
 import { executeResultPublication } from "./result-publication-core";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
 import { SEP_26_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-26-2026-3k-result-card";
+import { SEP_27_2026_5K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-27-2026-5k-result-card";
 import {
         getConversionActions,
         getGoogleAdsMetrics,
@@ -5403,12 +5404,15 @@ async function getSeries2026ResultCard(
 	if (
 		format === "jpeg" && (
 			publicationKey === "runsignup:series-2026:210000:1178567:666098" ||
-			publicationKey === "runsignup:series-2026:210000:1177636:664979"
+			publicationKey === "runsignup:series-2026:210000:1177636:664979" ||
+			publicationKey === "runsignup:series-2026:209477:1173956:664484"
 		)
 	) {
 		const jpegBase64 = publicationKey === "runsignup:series-2026:210000:1177636:664979"
 			? SEP_26_2026_3K_RESULT_CARD_JPEG_BASE64
-			: SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64;
+			: publicationKey === "runsignup:series-2026:209477:1173956:664484"
+				? SEP_27_2026_5K_RESULT_CARD_JPEG_BASE64
+				: SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64;
 		const binary = atob(jpegBase64);
 		const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
 
