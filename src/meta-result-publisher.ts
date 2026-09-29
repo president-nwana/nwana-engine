@@ -33,7 +33,9 @@ async function graphJson(
 	const response = await fetcher(url, init);
 	const data = await response.json() as Record<string, unknown>;
 	if (!response.ok || data.error) {
-		throw new Error(`Meta request failed (${response.status})`);
+		const err = data.error as Record<string, unknown> | undefined;
+		const details = err ? ` - ${err.message ?? JSON.stringify(err)} (code ${err.code ?? "?"})` : "";
+		throw new Error(`Meta request failed (${response.status})${details}`);
 	}
 	return data;
 }
