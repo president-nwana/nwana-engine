@@ -64,17 +64,22 @@ export async function getFacebookPageToken(
 export async function publishFacebookResult(params: {
 	pageId: string;
 	message: string;
-	imageUrl: string;
+	imageUrl?: string;
 	pageToken: string;
 	fetcher?: FetchLike;
 }) {
+	// If imageUrl is provided, post as photo. Otherwise, text-only via /feed.
+	const isPhoto = typeof params.imageUrl === "string" && params.imageUrl.length > 0;
 	const body = new URLSearchParams({
 		message: params.message,
-		url: params.imageUrl,
 		access_token: params.pageToken,
 	});
+	if (isPhoto) {
+		body.set("url", params.imageUrl!);
+	}
+	const endpoint = isPhoto ? "photos" : "feed";
 	const data = await graphJson(
-		`https://graph.facebook.com/${GRAPH_VERSION}/${params.pageId}/photos`,
+		`https://graph.facebook.com/${GRAPH_VERSION}/${params.pageId}/${endpoint}`,
 		{ method: "POST", body },
 		params.fetcher ?? fetch,
 	);

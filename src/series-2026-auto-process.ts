@@ -628,7 +628,9 @@ export async function autoProcessEvent(
 			runSignupToken: env.accessToken,
 			metaToken: env.metaToken,
 			publicationKey: draft.publication_key,
-			imageUrl: `${env.publicBaseUrl}/result-publications/card/${encodeURIComponent(draft.publication_key)}.jpg`,
+			// Card generation is currently broken (500); post text-only to
+			// Facebook. Instagram will skip gracefully without an image.
+			imageUrl: "",
 			authorizedBy: { kind: "owner_result_approvals", distance: input.distance, eventId: input.eventId },
 		});
 		await push(

@@ -176,19 +176,31 @@ export async function executeResultPublication(
 			};
 			continue;
 		}
-		const published = await publishInstagramResult({
-			accountId: destination.accountId,
-			caption: draft.editorial_draft.post_text,
-			imageUrl: input.imageUrl,
-			userToken: input.metaToken,
-		});
-		await saveResultDelivery(
-			db,
-			draft.publication_key,
-			destination.ledgerKey,
-			published.external_id,
-		);
-		result[destination.ledgerKey] = published;
+		// Instagram requires an image; if the card is unavailable, skip
+		// gracefully instead of failing the entire publication.
+		if (!input.imageUrl) {
+			result[destination.ledgerKey] = { skipped_no_image: true } as unknown as { external_id: string };
+			continue;
+		}
+		try {
+			const published = await publishInstagramResult({
+				accountId: destination.accountId,
+				caption: draft.editorial_draft.post_text,
+				imageUrl: input.imageUrl,
+				userToken: input.metaToken,
+			});
+			await saveResultDelivery(
+				db,
+				draft.publication_key,
+				destination.ledgerKey,
+				published.external_id,
+			);
+			result[destination.ledgerKey] = published;
+		} catch (error) {
+			// Log and continue; Facebook + site news should still go out.
+			console.error(`Instagram publish failed for ${destination.ledgerKey}:`, error instanceof Error ? error.message : error);
+			result[destination.ledgerKey] = { skipped_error: error instanceof Error ? error.message : "unknown" } as unknown as { external_id: string };
+		}
 	}
 
 	await db.prepare(`
