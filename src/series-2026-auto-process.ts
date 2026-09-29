@@ -556,9 +556,18 @@ export async function autoProcessEvent(
 		disqualifiedResultIds: input.trigger.disqualifiedResultIds,
 	});
 	if (!applyResult.ok) {
-		return fail("apply_levels", applyResult.error ?? "Levels apply failed");
+		// Idempotent retry: if levels were already applied (event in
+		// "levels_computed" stage), skip the apply and continue to publish.
+		// The D1 data is already correct; no need to re-apply.
+		const alreadyApplied = (applyResult.error ?? "").includes('stage "levels_computed"');
+		if (alreadyApplied) {
+			await push("apply_levels", "ok", "Levels already applied (idempotent skip); continuing to publish.");
+		} else {
+			return fail("apply_levels", applyResult.error ?? "Levels apply failed");
+		}
+	} else {
+		await push("apply_levels", "ok", `Applied to ${applyResult.result_count} results; standings rebuilt.`);
 	}
-	await push("apply_levels", "ok", `Applied to ${applyResult.result_count} results; standings rebuilt.`);
 
 	// Step 3: mark the event as levels_computed in the lifecycle state.
 	// A full syncRaceLifecycleDistance would exceed Cloudflare's subrequest
