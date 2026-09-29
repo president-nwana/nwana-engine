@@ -145,6 +145,18 @@ export async function fetchSubmissionDeadline(
 	raceId: number,
 	eventId: number,
 ): Promise<{ deadline: string | null; source: string }> {
+	// D1 first: use cached deadline if available. The RunSignup API is
+	// unreliable (522 timeouts); don't hang the request on it.
+	const cached = await db
+		.prepare(
+			`SELECT submission_deadline, deadline_source FROM series_event_deadlines
+			 WHERE series = ? AND distance = ? AND event_id = ?`,
+		)
+		.bind(RACE_LIFECYCLE_SERIES, distance, eventId)
+		.first<{ submission_deadline: string | null; deadline_source: string | null }>();
+	if (cached?.submission_deadline) {
+		return { deadline: cached.submission_deadline, source: (cached.deadline_source ?? "") + " (cached)" };
+	}
 	const url = new URL("https://api.runsignup.com/rest/v2/vr-settings.json");
 	url.searchParams.set("format", "json");
 	url.searchParams.set("race_id", String(raceId));
@@ -191,25 +203,17 @@ export async function getEventRegistrations(
 	raceId: number,
 	eventId: number,
 ): Promise<EventRegistration[]> {
-	let rows = await env.db
+	const rows = await env.db
 		.prepare(
 			`SELECT registration_id, user_id, first_name, last_name, status
 			 FROM series_registrations WHERE race_id = ? AND event_id = ?`,
 		)
 		.bind(raceId, eventId)
 		.all<EventRegistration>();
-	if (rows.results.length === 0) {
-		await syncSeries2026Registrations(env.db, {
-			accessToken: env.accessToken,
-		});
-		rows = await env.db
-			.prepare(
-				`SELECT registration_id, user_id, first_name, last_name, status
-				 FROM series_registrations WHERE race_id = ? AND event_id = ?`,
-			)
-			.bind(raceId, eventId)
-			.all<EventRegistration>();
-	}
+	// Do NOT auto-sync from the RunSignup API here. The participants endpoint
+	// has never returned data in production (and currently 522s). An empty
+	// D1 table means "unknown", not "zero registered" — decideTrigger already
+	// handles that correctly. Trying to sync would just hang the request.
 	return rows.results.filter(
 		(row) => (row.status ?? "").toLowerCase() === "active",
 	);
