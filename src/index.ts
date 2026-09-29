@@ -49,6 +49,7 @@ import {
 	type AudienceExportEnv,
 } from "./audience-export";
 import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
+import { rasterizeSvgToPng } from "./svg-raster";
 import { executeResultPublication } from "./result-publication-core";
 import { SEP_12_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-12-2026-3k-result-card";
 import { SEP_26_2026_3K_RESULT_CARD_JPEG_BASE64 } from "./assets/sep-26-2026-3k-result-card";
@@ -5454,7 +5455,8 @@ async function getSeries2026ResultCard(
 			series_record: row.series_record,
 		}));
 	let logoUrl: string | undefined;
-	if (format === "jpeg") {
+	// Embed logo as data URL for reliable WASM rendering.
+	{
 		const logoResponse = await fetch(
 			"https://d368g9lw5ileu7.cloudfront.net/uploads/generic/genericImage-websiteLogo-281959-1788823407.1047-0.bQN0DV.jpg",
 		);
@@ -5479,17 +5481,13 @@ async function getSeries2026ResultCard(
 			},
 		});
 	}
-	const svgStream = new Response(svg, {
-		headers: { "content-type": "image/svg+xml" },
-	}).body;
-	if (!svgStream) {
-		throw new Error("Result card stream could not be created");
-	}
-	const output = await env.IMAGES
-		.input(svgStream)
-		.output({ format: "image/jpeg", quality: 90 });
-	return output.response({
+	// Root cause of 9412: Cloudflare Images cannot parse SVG input.
+	// resvg-wasm rasterizes in-process ($0, Worker-compatible).
+	// PNG is accepted by Meta; no JPEG conversion needed.
+	const pngBytes = await rasterizeSvgToPng(svg, { width: 1080 });
+	return new Response(pngBytes, {
 		headers: {
+			"content-type": "image/png",
 			"Cache-Control":
 				"public, max-age=3600, stale-while-revalidate=86400",
 		},
