@@ -550,18 +550,35 @@ export async function autoProcessEvent(
 	}
 	await push("apply_levels", "ok", `Applied to ${applyResult.result_count} results; standings rebuilt.`);
 
-	// Step 3: re-sync so stages derive levels_computed and drafts finalize.
+	// Step 3: mark the event as levels_computed in the lifecycle state.
+	// A full syncRaceLifecycleDistance would exceed Cloudflare's subrequest
+	// limit (it previews publications for every event via the RunSignup API).
+	// We already synced in Step 1; the only change is that this event's
+	// results are now finalized with levels applied. Update D1 directly.
 	try {
-		await syncRaceLifecycleDistance({
-			db,
-			accessToken: env.accessToken,
-			apiCallerToken: env.apiCallerToken,
-			apiCallerSecret: env.apiCallerSecret,
-			distance: input.distance,
-		});
-		await push("sync_finalized", "ok", "Post-apply sync completed.");
+		const lifecycleRow = await db
+			.prepare(`SELECT events_json FROM race_lifecycle WHERE series = ? AND distance = ?`)
+			.bind(RACE_LIFECYCLE_SERIES, input.distance)
+			.first<{ events_json: string | null }>();
+		if (lifecycleRow?.events_json) {
+			const events = JSON.parse(lifecycleRow.events_json) as Array<{ event_id: number; stage: string }>;
+			let updated = false;
+			for (const e of events) {
+				if (e.event_id === input.eventId && e.stage === "verifying") {
+					e.stage = "levels_computed";
+					updated = true;
+				}
+			}
+			if (updated) {
+				await db
+					.prepare(`UPDATE race_lifecycle SET events_json = ?, updated_at = ? WHERE series = ? AND distance = ?`)
+					.bind(JSON.stringify(events), new Date().toISOString(), RACE_LIFECYCLE_SERIES, input.distance)
+					.run();
+			}
+		}
+		await push("sync_finalized", "ok", "Event marked levels_computed in lifecycle (D1-only, no API calls).");
 	} catch (error) {
-		return fail("sync_finalized", error instanceof Error ? error.message : "Sync failed");
+		return fail("sync_finalized", error instanceof Error ? error.message : "Lifecycle update failed");
 	}
 
 	// Step 3b: refresh canonical athlete stats (dynamic victories / podiums /
