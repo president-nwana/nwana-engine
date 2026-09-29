@@ -6466,17 +6466,24 @@ export default {
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
 				};
-				let liveResults: Array<{ result_id: string; athlete: string; gender: string | null; time: string | null }>;
-				try {
-					liveResults = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
-				} catch (error) {
-					console.error("fetchLiveEventResults failed, using D1 approvals fallback:", error instanceof Error ? error.message : error);
-					liveResults = [];
-				}
+				// D1 first: if the owner has recorded approvals, use them directly.
+				// The RunSignup API is unreliable (522 timeouts); don't waste time
+				// calling it when D1 already has the verified data.
 				const approvals = await getEventApprovals(env.nwana_engine_db, distance, eventId);
 				const disquals = await getEventDisqualifications(env.nwana_engine_db, distance, eventId);
-				// Same fallback as evaluateEventTrigger: if the authenticated API
-				// returns nothing but D1 has owner approvals, show the approvals.
+				let liveResults: Array<{ result_id: string; athlete: string; gender: string | null; time: string | null }>;
+				if (approvals.size > 0) {
+					// Owner approvals exist — skip the flaky API entirely.
+					liveResults = [];
+				} else {
+					try {
+						liveResults = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+					} catch (error) {
+						console.error("fetchLiveEventResults failed:", error instanceof Error ? error.message : error);
+						liveResults = [];
+					}
+				}
+				// If the API returned nothing but D1 has owner approvals, show the approvals.
 				const live = liveResults.length > 0
 					? liveResults
 					: Array.from(approvals.values()).map((a) => ({
