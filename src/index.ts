@@ -6466,9 +6466,19 @@ export default {
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
 				};
-				const live = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				const liveResults = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
 				const approvals = await getEventApprovals(env.nwana_engine_db, distance, eventId);
 				const disquals = await getEventDisqualifications(env.nwana_engine_db, distance, eventId);
+				// Same fallback as evaluateEventTrigger: if the authenticated API
+				// returns nothing but D1 has owner approvals, show the approvals.
+				const live = liveResults.length > 0
+					? liveResults
+					: Array.from(approvals.values()).map((a) => ({
+						result_id: a.resultId,
+						athlete: a.athlete ?? `Result ${a.resultId}`,
+						gender: null as string | null,
+						time: a.time ?? null,
+					}));
 				const trigger = await evaluateEventTrigger(autoEnv, { distance, raceId: source.raceId, eventId });
 				return json({
 					ok: true,

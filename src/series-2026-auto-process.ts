@@ -365,8 +365,21 @@ export async function evaluateEventTrigger(
 ): Promise<TriggerEvaluation> {
 	const { db } = env;
 	const registrations = await getEventRegistrations(env, input.raceId, input.eventId);
-	const results = await fetchLiveEventResults(env.accessToken, input.raceId, input.eventId);
+	const liveResults = await fetchLiveEventResults(env.accessToken, input.raceId, input.eventId);
 	const approvals = await getEventApprovals(db, input.distance, input.eventId);
+	// Fallback: if the authenticated RunSignup API returns no results but the
+	// owner has recorded approvals in D1 (verified against the public API at
+	// approval time), use the D1 approvals as the results list. The owner's
+	// approval is the verification; an empty live fetch means "API returned
+	// nothing", not "no results exist".
+	const results = liveResults.length > 0
+		? liveResults
+		: Array.from(approvals.values()).map((a) => ({
+			result_id: a.resultId,
+			athlete: a.athlete ?? `Result ${a.resultId}`,
+			gender: null as string | null,
+			time: a.time ?? null,
+		}));
 	const approvedResultIds = results
 		.filter((r) => approvals.has(r.result_id))
 		.map((r) => r.result_id);
