@@ -46,8 +46,12 @@ export interface ExecutiveMoneyView {
 		};
 	};
 	donations: {
-		available: false;
+		available: boolean;
 		reason: string;
+		event_count: number;
+		total_gross_cents: number;
+		currency: string;
+		last_sync_at: string | null;
 	};
 	sponsorship: ExecutiveMoneySponsorshipSummary;
 	disclaimer: string;
@@ -58,12 +62,59 @@ const num = (value: unknown): number => {
 	return Number.isFinite(n) ? n : 0;
 };
 
+// Phase 1 Money Ingestion: donation outcomes from canonical D1 monetary
+// state (money_events), per ADR-0044. This reads Engine state only — it
+// never re-reads RunSignup. Falls back to "not connected" when the money
+// event store has no rows yet (or the migration has not run here).
+async function getDonationOutcome(db: D1Database): Promise<ExecutiveMoneyView["donations"]> {
+	const unavailable = (reason: string): ExecutiveMoneyView["donations"] => ({
+		available: false,
+		reason,
+		event_count: 0,
+		total_gross_cents: 0,
+		currency: "USD",
+		last_sync_at: null,
+	});
+	try {
+		const agg = await db
+			.prepare(
+				`SELECT COUNT(*) AS event_count,
+						COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0) AS total_gross_cents
+				 FROM money_events WHERE event_type = 'donation_received'`,
+			)
+			.first<{ event_count: number; total_gross_cents: number }>();
+		const sync = await db
+			.prepare(`SELECT last_sync_at FROM money_sync_state WHERE source_key = ?`)
+			.bind("runsignup:donations:race:212466")
+			.first<{ last_sync_at: string | null }>();
+		const eventCount = num(agg?.event_count);
+		if (eventCount === 0) {
+			return unavailable(
+				sync?.last_sync_at
+					? "Donation feed synced; no donations recorded yet"
+					: "Donation outcome feed is not connected yet",
+			);
+		}
+		return {
+			available: true,
+			reason: "RunSignup donations ingested into canonical Engine monetary state",
+			event_count: eventCount,
+			total_gross_cents: num(agg?.total_gross_cents),
+			currency: "USD",
+			last_sync_at: sync?.last_sync_at ?? null,
+		};
+	} catch {
+		return unavailable("Donation outcome feed is not connected yet");
+	}
+}
+
 export async function getExecutiveMoneyView(
 	db: D1Database,
 ): Promise<ExecutiveMoneyView> {
-	const [fundView, sponsorshipView] = await Promise.all([
+	const [fundView, sponsorshipView, donationOutcome] = await Promise.all([
 		getFundView(db),
 		getSponsorshipAssetsView(db),
+		getDonationOutcome(db),
 	]);
 
 	const funds: ExecutiveMoneyFundSummary[] = fundView.funds.map((entry) => {
@@ -105,10 +156,7 @@ export async function getExecutiveMoneyView(
 		ok: true,
 		generated_at: new Date().toISOString(),
 		fundraising: { funds, totals },
-		donations: {
-			available: false,
-			reason: "Donation outcome feed is not connected yet",
-		},
+		donations: donationOutcome,
 		sponsorship: {
 			assets: sponsorshipView.assets.map((asset) => ({
 				id: asset.id,
