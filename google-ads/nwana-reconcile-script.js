@@ -53,6 +53,8 @@ var CONFIG = {
   MANAGED_PREFIX: 'NWANA \u00b7 '
 };
 
+// Increment on every behavior change so Preview logs prove which version ran.
+var SCRIPT_VERSION = "2026-09-30c / 5be756f-network-shape";
 // ── ONE-TIME BOOTSTRAP ──────────────────────────────────────────────
 // Paste the operating center key between the quotes, Preview once
 // (authorize when asked), then DELETE the key from this line and Save.
@@ -82,6 +84,7 @@ function getOwnerKey() {
 }
 
 function main() {
+  Logger.log('NWANA reconcile script version: ' + SCRIPT_VERSION);
   var key = getOwnerKey();
   if (!key) {
     return;
