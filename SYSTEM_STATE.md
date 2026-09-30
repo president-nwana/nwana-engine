@@ -1055,3 +1055,21 @@ A new developer or AI must be able to continue the project from this repository 
   - MemberOrg limitations do not block Phase 4.
 - Phase 4 (Donation Acquisition Loop) proceeds per master directive around the already-proven object `donation:runsignup:212466` only. No switch of the first loop to MemberOrg; no expansion to other donation destinations.
 - Operating cost: VERIFIED $0 (audit only — public reads, no new infrastructure).
+
+## REVENUE ENGINE v1 — Phase 4 Donation Acquisition Loop — 2026-09-30 (in progress)
+
+### Blocker correction (Albert, 2026-09-30)
+- The earlier conclusion that Google Ads acquisition is hard-blocked by `EXPLORER / execution_allowed:false` was NOT established. The API mutation state describes only the direct API path.
+- ADR-0016 (accepted): in-account Google Ads Script is the production acquisition path — requires zero API mutation access.
+- Verified: `google-ads/nwana-reconcile-script.js` exists and is ready; desired-state endpoint live (`ok:true`, 2 campaigns); campaign `NWANA · Founding Circle · Donate` targets the exact 212466 donation URL, passes all Ad Grants policy checks, `isCreationEligible: TRUE` (origin OWNER_DIRECTIVE).
+- Verified: NO `NWANA · ` campaigns exist in the live Ads account (12 campaigns, none with prefix) — the `NWANA reconcile` script is NOT installed/running. No installation record in SYSTEM_STATE or ADRs.
+- Remaining acquisition step (owner, ~20 min, one-time): paste script in Ads UI (Tools → Bulk actions → Scripts), add `NWANA_OWNER_KEY` property, authorize, schedule hourly. Script creates the campaign PAUSED; owner reviews (networks/locations/bidding/sitelinks/copy) and enables. Verification: status ENABLED in Ads UI + visible in Engine ads overview.
+- API tier upgrade is NOT a Revenue Engine v1 requirement. Not pursued.
+
+### Post-donation automated action (implemented 2026-09-30)
+- No new email system built (per Albert: reuse existing capabilities).
+- Implementation: `src/lib/money-ingestion.ts` — on NEW `donation_received` ingest, the Engine automatically records `donation-received` / `pending` in the canonical Revenue Inventory for `donation:runsignup:212466` (UPDATE `next_revenue_action` + append-only INSERT into `revenue_object_actions` with donation id, amounts, and attribution state).
+- Uses only existing inventory machinery. No new tables, no new architecture.
+- Tests: 2 new Phase 4 tests (action recorded on new donation; no action when no new donation). Full suite 759/759 pass. tsc clean.
+- Deployed: Worker `b17215f5-981f-4c38-a8fc-5755233fc141`. Commit `043dbeb` pushed to origin/main.
+- Operating cost: VERIFIED $0 (code change only, no new infrastructure).
