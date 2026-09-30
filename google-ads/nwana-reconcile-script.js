@@ -54,7 +54,7 @@ var CONFIG = {
 };
 
 // Increment on every behavior change so Preview logs prove which version ran.
-var SCRIPT_VERSION = "2026-09-30c / 5be756f-network-shape";
+var SCRIPT_VERSION = "2026-09-30d / ad-dedup-fix";
 // ── ONE-TIME BOOTSTRAP ──────────────────────────────────────────────
 // Paste the operating center key between the quotes, Preview once
 // (authorize when asked), then DELETE the key from this line and Save.
@@ -193,9 +193,18 @@ function reconcileCampaign(spec, summary) {
     }
   }
   for (var i = 0; i < spec.ad_groups.length; i++) {
-    reconcileAdGroup(campaign, campaignResource, spec.ad_groups[i]);
+    try {
+      reconcileAdGroup(campaign, campaignResource, spec.ad_groups[i]);
+    } catch (e) {
+      // One bad ad group must never abort the rest of the campaign.
+      Logger.log('  ERROR ad group "' + spec.ad_groups[i].name + '": ' + e.message);
+    }
   }
-  reconcileSitelinks(campaign, campaignResource, spec);
+  try {
+    reconcileSitelinks(campaign, campaignResource, spec);
+  } catch (e) {
+    Logger.log('  ERROR sitelinks for ' + spec.name + ': ' + e.message);
+  }
   verifyNetworkSettings(campaign);
 }
 
@@ -292,10 +301,20 @@ function reconcileAdGroup(campaign, campaignResource, groupSpec) {
     adGroupResource = adGroupResourceName(adGroup);
   }
   for (var i = 0; i < groupSpec.keywords.length; i++) {
-    addKeywordOnce(adGroup, adGroupResource, groupSpec.keywords[i]);
+    try {
+      addKeywordOnce(adGroup, adGroupResource, groupSpec.keywords[i]);
+    } catch (e) {
+      // One bad keyword must never abort the rest of the group.
+      Logger.log('    ERROR keyword "' + groupSpec.keywords[i].text + '": ' + e.message);
+    }
   }
   for (var j = 0; j < groupSpec.ads.length; j++) {
-    addResponsiveAdOnce(adGroup, adGroupResource, groupSpec.ads[j]);
+    try {
+      addResponsiveAdOnce(adGroup, adGroupResource, groupSpec.ads[j]);
+    } catch (e) {
+      // One bad ad must never abort the rest of the group.
+      Logger.log('    ERROR ad (' + groupSpec.ads[j].final_url + '): ' + e.message);
+    }
   }
 }
 
@@ -324,19 +343,46 @@ function addKeywordOnce(adGroup, adGroupResource, keyword) {
   }
 }
 
-function adFingerprint(ad) {
-  return ad.headlines.join('|') + '||' + ad.final_url;
+function adFinalUrl(adObj) {
+  // ResponsiveSearchAd has no getFinalUrl(); the documented path is
+  // asType().responsiveSearchAd().urls().getFinalUrl(). Defensive: any
+  // unexpected shape returns null instead of aborting the reconcile.
+  try {
+    var typed = adObj.asType().responsiveSearchAd();
+    if (typed && typeof typed.urls === 'function') {
+      var urls = typed.urls();
+      if (urls && typeof urls.getFinalUrl === 'function') {
+        return urls.getFinalUrl();
+      }
+    }
+  } catch (e) { /* fall through -> null */ }
+  return null;
+}
+
+function adHeadlinesKey(adObj) {
+  try {
+    var typed = adObj.asType().responsiveSearchAd();
+    var heads = typed.getHeadlines();
+    var texts = [];
+    for (var i = 0; i < heads.length; i++) texts.push(heads[i].getText());
+    return texts.join('|');
+  } catch (e) { /* fall through -> null */ }
+  return null;
 }
 
 function addResponsiveAdOnce(adGroup, adGroupResource, ad) {
   var existing = adGroup.ads().get();
-  var fingerprint = adFingerprint(ad);
+  var wantUrl = ad.final_url;
+  var wantHeads = ad.headlines.join('|');
   while (existing.hasNext()) {
     var current = existing.next();
-    if (current.isType().responsiveSearchAd &&
-        current.asType().responsiveSearchAd().getFinalUrl() === ad.final_url) {
-      return;
-    }
+    var isRsa = false;
+    try { isRsa = !!current.isType().responsiveSearchAd; } catch (e) { isRsa = false; }
+    if (!isRsa) continue;
+    // Match on final URL; fall back to headline text if URL is unreadable.
+    if (adFinalUrl(current) === wantUrl) return;
+    var headsKey = adHeadlinesKey(current);
+    if (headsKey && headsKey === wantHeads) return;
   }
   var headlines = [];
   for (var i = 0; i < ad.headlines.length; i++) headlines.push({ text: ad.headlines[i] });
@@ -354,7 +400,8 @@ function addResponsiveAdOnce(adGroup, adGroupResource, ad) {
       }
     }
   }, 'responsive search ad create');
-  Logger.log('    Added responsive search ad (' + fingerprint.length + ' chars): ' + ad.final_url);
+  Logger.log('    Added responsive search ad (' + ad.headlines.length +
+    ' headlines): ' + ad.final_url);
 }
 
 function reconcileSitelinks(campaign, campaignResource, spec) {
