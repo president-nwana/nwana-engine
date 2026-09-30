@@ -54,7 +54,7 @@ var CONFIG = {
 };
 
 // Increment on every behavior change so Preview logs prove which version ran.
-var SCRIPT_VERSION = "2026-09-30f / sitelink-builder";
+var SCRIPT_VERSION = "2026-09-30g / sitelink-no-desc";
 // ── ONE-TIME BOOTSTRAP ──────────────────────────────────────────────
 // Paste the operating center key between the quotes, Preview once
 // (authorize when asked), then DELETE the key from this line and Save.
@@ -431,10 +431,15 @@ function reconcileSitelinks(campaign, spec) {
     var link = spec.sitelinks[i];
     if (existing[link.text]) continue;
     try {
+      // NOTE: descriptions are intentionally NOT set. This account's API
+      // backend requires sitelink_asset.description2 whenever description1
+      // is present (proven 2026-09-30: "The required field was not present"
+      // at ...sitelink_asset.description2), and the Engine's desired state
+      // carries a single description line. Sitelinks serve fine without
+      // descriptions; copy can be extended in the Engine later.
       var builder = AdsApp.extensions().newSitelinkBuilder()
         .withLinkText(link.text)
         .withFinalUrl(link.final_url);
-      if (link.description) builder.withDescription1(link.description);
       var operation = builder.build();
       if (!operation.isSuccessful()) {
         Logger.log('  ERROR: sitelink "' + link.text + '" build failed: ' +
