@@ -127,6 +127,14 @@ import {
 	reconcileRunSignupDonations,
 	syncRunSignupDonations,
 } from "./lib/money-ingestion";
+import {
+	ACTION_STATUSES,
+	REVENUE_OBJECT_TYPES,
+	REVENUE_SYSTEMS,
+	getRevenueObject,
+	listRevenueObjects,
+	recordRevenueAction,
+} from "./lib/revenue-inventory";
 import { renderSponsorshipHtml } from "./operating-center-sponsorship";
 import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
@@ -6144,6 +6152,77 @@ export default {
 			return json(
 				await inspectDonationRecordShape(env.RUNSIGNUP_ACCESS_TOKEN, donationId),
 			);
+		}
+
+		// Phase 2 Executable Revenue Inventory (Revenue Engine v1): canonical
+		// inventory of every revenue-producing object. Money metrics derive
+		// from canonical money_events at read time (never duplicated here).
+		// Owner-key gated by the general operatingCenterApiRoute check above.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/revenue/inventory") {
+			const objectType = url.searchParams.get("object_type") ?? undefined;
+			const revenueSystem = url.searchParams.get("revenue_system") ?? undefined;
+			if (
+				(objectType && !(REVENUE_OBJECT_TYPES as readonly string[]).includes(objectType)) ||
+				(revenueSystem && !(REVENUE_SYSTEMS as readonly string[]).includes(revenueSystem))
+			) {
+				return json({ ok: false, error: "invalid object_type or revenue_system" }, 400);
+			}
+			return json({
+				ok: true,
+				objects: await listRevenueObjects(env.nwana_engine_db, {
+					object_type: objectType as never,
+					revenue_system: revenueSystem as never,
+				}),
+			});
+		}
+		if (
+			request.method === "GET" &&
+			url.pathname.startsWith("/api/operating-center/revenue/inventory/")
+		) {
+			const objectKey = decodeURIComponent(
+				url.pathname.slice("/api/operating-center/revenue/inventory/".length),
+			);
+			if (!objectKey || objectKey.includes("/")) {
+				return json({ ok: false, error: "invalid object_key" }, 400);
+			}
+			const obj = await getRevenueObject(env.nwana_engine_db, objectKey);
+			if (!obj) return json({ ok: false, error: "not found" }, 404);
+			return json({ ok: true, object: obj });
+		}
+		// Phase 2: record a next-action transition. The inventory drives
+		// actions: every transition updates next_revenue_action /
+		// action_status and appends to the append-only action history.
+		// Body: { action: string, status: pending|in_progress|done|blocked|none, note?: string }.
+		if (
+			request.method === "POST" &&
+			url.pathname.startsWith("/api/operating-center/revenue/inventory/") &&
+			url.pathname.endsWith("/action")
+		) {
+			const prefix = "/api/operating-center/revenue/inventory/";
+			const objectKey = decodeURIComponent(
+				url.pathname.slice(prefix.length, -"/action".length),
+			);
+			if (!objectKey || objectKey.includes("/")) {
+				return json({ ok: false, error: "invalid object_key" }, 400);
+			}
+			let body: { action?: unknown; status?: unknown; note?: unknown } = {};
+			try {
+				body = (await request.json()) as typeof body;
+			} catch {
+				body = {};
+			}
+			const action = typeof body.action === "string" ? body.action : "";
+			const status = typeof body.status === "string" ? body.status : "";
+			if (!action || !(ACTION_STATUSES as readonly string[]).includes(status)) {
+				return json({ ok: false, error: "action and valid status required" }, 400);
+			}
+			const updated = await recordRevenueAction(env.nwana_engine_db, objectKey, {
+				action,
+				status: status as (typeof ACTION_STATUSES)[number],
+				note: typeof body.note === "string" ? body.note : undefined,
+			});
+			if (!updated) return json({ ok: false, error: "not found" }, 404);
+			return json({ ok: true, object: updated });
 		}
 
 		// ADR-0027: downloadable external-ready reports. Owner-key protected
