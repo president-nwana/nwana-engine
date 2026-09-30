@@ -1036,3 +1036,22 @@ A new developer or AI must be able to continue the project from this repository 
 - GitHub: Phase-1 parity closed as commit 0522d29 (remote blobs verified byte-identical: src/index.ts dcf48c6f, SYSTEM_STATE.md c93fc914) via new persistent `gh` OAuth path (president-nwana, device flow) — no MCP size limits, no workflows, no courier. Phase 2 source committed as a3bb821 via normal git push.
 - Tests 757/757; tsc clean. Operating cost: VERIFIED $0. Temporary parity-courier worker deleted.
 - Outstanding owner action (Google Ads): request review for disapproved ad 822901031664 + sitelink 415970239990 in Google Ads UI (DNS grow.nwaofna.org → custom.runsignup.com restored by owner; HTTP 200 verified).
+
+## REVENUE ENGINE v1 — Phase 3 MemberOrg Audit Outcome — 2026-09-30
+
+- Owner correction (Albert, 2026-09-30 ~14:57 UTC): RunSignup holds at least 15 revenue-capable objects (11 races + 4 MemberOrgs), not the 3 previously covered. The 4 MemberOrgs (owner-dashboard confirmed): Nordic Walking Association of North America (NWANA); NWANA Nordic Walking Groups; NW Group Miami; NWANA Professional Pathways.
+- Public-evidence audit completed 2026-09-30 ~15:10 UTC (no brute-force, no undocumented endpoints):
+  - NWANA (main): MEMBERSHIP_ACTIVE_DONATION_CLOSED — donation page exists but CLOSED ("no payment account configured. Donations are currently closed."); membership 1 level: Annual Athlete License - Regular $55/year (prorated, renewal via RunSignup).
+  - NWANANWGroups: FULLY_ACTIVE — donation page LIVE with One Time / Monthly / Quarterly / Yearly (HTML-confirmed 2026-09-30); membership 28 levels: 14 Individual licenses @ $20/year, 14 Group licenses @ $0/year (free). URL: https://runsignup.com/MemberOrg/NWANANWGroups
+  - NW Group Miami: DONATION_ONLY — donation page live, one-time only (no recurring options in HTML); 0 membership levels configured. URL: https://runsignup.com/MemberOrg/NWGroupMiami
+  - NWANA Professional Pathways: UNVERIFIED — owner-dashboard confirmed; not publicly accessible (all tried slugs 404; not in public Clubs directory).
+- Unified public inventory: 15 total (11 races + 4 MemberOrgs); 13 donation-capable (11 races with HTTP-200 donate pages + 2 MemberOrgs); 1 recurring-donation-capable confirmed (NWANANWGroups). Race 212466 remains the only object with a verified production transaction ($5.00 donation 11291415, Phase 1).
+- Owner directive (Albert, 2026-09-30 ~15:40 UTC) — recorded as production decision, no scope expansion:
+  - `NWANANWGroups` donations = ACTIVE; recurring donations = ACTIVE.
+  - Numeric club IDs = NOT REQUIRED for Revenue Engine v1 Phase 3. No development time on brute-force, undocumented endpoints, speculative discovery, or additional MemberOrg automation.
+  - Club/member transaction automation = FUTURE / NOT_REQUIRED_FOR_CURRENT_V1_DONATION_LOOP.
+  - Absence of public club transaction endpoints is a future integration gap for NW Groups automation — NOT a blocker for the current v1 donation acquisition loop.
+  - MemberOrg / NW Groups workstream = COMPLETE for current v1 scope. Do not expand MemberOrg scope until the first production donation loop is repeatable end-to-end.
+  - MemberOrg limitations do not block Phase 4.
+- Phase 4 (Donation Acquisition Loop) proceeds per master directive around the already-proven object `donation:runsignup:212466` only. No switch of the first loop to MemberOrg; no expansion to other donation destinations.
+- Operating cost: VERIFIED $0 (audit only — public reads, no new infrastructure).
