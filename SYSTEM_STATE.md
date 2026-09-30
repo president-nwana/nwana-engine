@@ -1097,3 +1097,11 @@ A new developer or AI must be able to continue the project from this repository 
 - Deployed: Worker via Cloudflare API. Commit `9949a6b` pushed to origin/main.
 - Production verification: `fund-50k-bridge-sprint.raised_amount = $5.00` VERIFIED in D1.
 - Operating cost: VERIFIED $0.
+
+### Phase 4 current state (fixed 2026-09-30, Albert)
+- Fund projection self-healing = VERIFIED (5 self-healing/idempotency test scenarios; runs on every sync/reconcile completion).
+- `fund-50k-bridge-sprint.raised_amount = $5.00` production verified in D1.
+- Code path for the first donation funnel is ready for production proof: verified donation ingest → canonical money truth → attribution state → automatic fund financial-state update, repeatable without developer intervention.
+- Phase 4 status: IN PROGRESS.
+- Remaining blocker: owner installation/activation of `NWANA reconcile` in Google Ads (paste script, add `NWANA_OWNER_KEY`, authorize, schedule hourly), then review and ENABLE campaign `NWANA · Founding Circle · Donate`.
+- No further Phase 4 development required before that owner action. Next step after script installation: production proof via a new real donation through the acquisition path.
