@@ -219,9 +219,14 @@ function createCampaignViaApi(spec, summary) {
         advertisingChannelType: 'SEARCH',
         campaignBudget: budgetResource,
         manualCpc: { enhancedCpcEnabled: false },
+        // Network flags that validate via AdsApp.mutate() (2026-09-30):
+        // targetGoogleSearch=true with targetSearchNetwork=false is the
+        // confirmed-working shape; targetSearchNetwork=true is rejected with
+        // "This campaign cannot target the search network". Partners and
+        // Display stay off per the Ad Grants / directive requirements.
         networkSettings: {
           targetGoogleSearch: true,
-          targetSearchNetwork: true,
+          targetSearchNetwork: false,
           targetPartnerSearchNetwork: false,
           targetContentNetwork: false
         },
