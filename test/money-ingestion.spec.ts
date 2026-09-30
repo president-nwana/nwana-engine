@@ -49,6 +49,7 @@ function makeMoneyDb() {
 	const events = new Map<string, Record<string, unknown>>();
 	const transactions = new Map<string, Record<string, unknown>>();
 	const sync = new Map<string, Record<string, unknown>>();
+	const executed: Array<{ sql: string; args: unknown[] }> = [];
 
 	const EVENT_COLS = [
 		"event_key", "source_system", "source_transaction_id", "transaction_key",
@@ -143,6 +144,16 @@ function makeMoneyDb() {
 			}
 			return 1;
 		}
+		if (sql.startsWith("UPDATE revenue_objects")) {
+			// Phase 4 post-donation action: binds action, status, object_key.
+			// Stub tracks the transition; no-op for assertions here.
+			return 1;
+		}
+		if (sql.startsWith("INSERT INTO revenue_object_actions")) {
+			// Phase 4 post-donation action log: binds object_key, action,
+			// status, note. Append-only; stub accepts.
+			return 1;
+		}
 		throw new Error(`stub cannot handle SQL: ${sql.slice(0, 80)}`);
 	};
 
@@ -204,6 +215,8 @@ function makeMoneyDb() {
 				sql: s._sql,
 				args: s._getArgs(),
 			}));
+			// Track executed statements for Phase 4 assertions.
+			for (const st of parsed) executed.push({ sql: st.sql, args: st.args });
 			const results = parsed.map((st) => ({ meta: { changes: applyStatement(st) } }));
 			return results;
 		},
@@ -214,6 +227,7 @@ function makeMoneyDb() {
 		events,
 		transactions,
 		sync,
+		executed,
 	};
 }
 
@@ -607,5 +621,47 @@ describe("canonical read paths", () => {
 		const txns = await listMoneyTransactions(db);
 		expect(txns.length).toBe(1);
 		expect(txns[0]["transaction_key"]).toBe("runsignup:donation:1");
+	});
+});
+
+describe("Phase 4 post-donation automated action", () => {
+	it("records donation-received in Revenue Inventory on new donation ingest", async () => {
+		const { db, executed } = makeMoneyDb();
+		mocks.responses.push(donationPage([{ donation_id: 42, donation_amount: 10 }]));
+		await syncRunSignupDonations(db, "token");
+		// The batch must include the Revenue Inventory transition statements.
+		const sqls = executed.map((s: { sql: string }) => s.sql);
+		const updateIdx = sqls.findIndex((s: string) => s.startsWith("UPDATE revenue_objects"));
+		const insertIdx = sqls.findIndex((s: string) => s.startsWith("INSERT INTO revenue_object_actions"));
+		expect(updateIdx).toBeGreaterThan(-1);
+		expect(insertIdx).toBeGreaterThan(-1);
+		// Verify the bound values: object key, action, status.
+		const updateArgs = executed[updateIdx].args as unknown[];
+		expect(updateArgs[0]).toBe("donation-received");
+		expect(updateArgs[1]).toBe("pending");
+		expect(updateArgs[2]).toBe("donation:runsignup:212466");
+		const insertArgs = executed[insertIdx].args as unknown[];
+		expect(insertArgs[0]).toBe("donation:runsignup:212466");
+		expect(insertArgs[1]).toBe("donation-received");
+		expect(insertArgs[2]).toBe("pending");
+		expect(String(insertArgs[3])).toContain("Donation 42 ingested");
+		expect(String(insertArgs[3])).toContain("ATTRIBUTION_UNKNOWN");
+	});
+
+	it("does not record inventory action when no new donation is ingested", async () => {
+		const { db, executed } = makeMoneyDb();
+		// First sync ingests the donation.
+		mocks.responses.push(donationPage([{ donation_id: 42, donation_amount: 10 }]));
+		await syncRunSignupDonations(db, "token");
+		const firstCount = executed.filter((s: { sql: string }) =>
+			s.sql.startsWith("INSERT INTO revenue_object_actions")).length;
+		expect(firstCount).toBe(1);
+		// Second sync with no new donations: no additional inventory action.
+		executed.length = 0;
+		mocks.responses.push(donationPage([]));
+		await syncRunSignupDonations(db, "token");
+		const secondCount = executed.filter((s: { sql: string }) =>
+			s.sql.startsWith("INSERT INTO revenue_object_actions")).length;
+		expect(secondCount).toBe(0);
 	});
 });

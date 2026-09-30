@@ -60,6 +60,23 @@ import {
 	RUNSIGNUP_SOURCE_SYSTEM,
 } from "./money-model";
 
+/**
+ * Phase 4 — Donation Acquisition Loop: post-donation automated action.
+ *
+ * When a NEW donation_received event is ingested for the Phase 4 funnel
+ * object (donation:runsignup:212466), the Engine automatically records the
+ * next revenue action in the canonical Revenue Inventory. This closes the
+ * loop leg "Engine ingestion -> attribution state -> next automated revenue
+ * action" using only the existing inventory machinery (no new tables,
+ * no new email system, no new architecture).
+ *
+ * The action is `donation-received` / `pending`: the Engine has verified
+ * the monetary event and the object is ready for its next revenue step.
+ * Attribution stays ATTRIBUTION_UNKNOWN (honest: no acquisition link yet).
+ */
+const PHASE4_FUNNEL_OBJECT_KEY = "donation:runsignup:212466";
+const PHASE4_POST_DONATION_ACTION = "donation-received";
+
 const DONATIONS_PAGE_SIZE = 100;
 const DONATIONS_MAX_PAGES = 20; // hard bound: 2,000 records per sync max
 const RECONCILE_MAX_IDS = 25; // hard bound: explicit, bounded reconciliation
@@ -426,6 +443,30 @@ async function buildIngestBatch(
 			);
 			insertEvent(n.eventKey, "donation_received", n);
 			if (n.fundraiserEventKey) insertEvent(n.fundraiserEventKey, "fundraiser_donation_received", n);
+			// Phase 4: post-donation automated action. A newly ingested
+			// donation on the Phase 4 funnel object automatically records
+			// the next revenue action in the canonical Revenue Inventory.
+			// Append-only: one action record per donation; the object's
+			// next_revenue_action points at the latest donation.
+			statements.push(
+				db
+					.prepare(
+						`UPDATE revenue_objects SET next_revenue_action = ?, action_status = ?, updated_at = datetime('now') WHERE object_key = ?`,
+					)
+					.bind(PHASE4_POST_DONATION_ACTION, "pending", PHASE4_FUNNEL_OBJECT_KEY),
+			);
+			statements.push(
+				db
+					.prepare(
+						`INSERT INTO revenue_object_actions (object_key, action, status, note) VALUES (?, ?, ?, ?)`,
+					)
+					.bind(
+						PHASE4_FUNNEL_OBJECT_KEY,
+						PHASE4_POST_DONATION_ACTION,
+						"pending",
+						`Donation ${n.donationId} ingested: gross ${n.amounts.grossCents}¢ ${n.amounts.grossStatus}, fee ${n.amounts.feeCents}¢ ${n.amounts.feeStatus}, amount_paid ${n.amounts.amountPaidCents}¢ ${n.amounts.amountPaidStatus}, net ${n.amounts.netStatus}. Attribution: ${ATTRIBUTION_UNKNOWN}.`,
+					),
+			);
 			continue;
 		}
 
