@@ -95,9 +95,42 @@ donations/list would create parallel monetary truth.
 - Downstream money logic must read `money_events` / `money_transactions`;
   re-reading RunSignup to reconfirm ingested monetary truth violates ADR-0044.
 - The model supports the full transaction lifecycle (refunds, partial
-  refunds, reversals, chargebacks) even though production currently holds
-  zero donations; lifecycle paths are covered by fixture tests until real
-  source data exercises them.
-- RunSignup donation record field names remain partially unverified (zero
-  production rows observed); the adapter reads defensively and the first real
-  donation will confirm them.
+  refunds, reversals, chargebacks). Production now holds one verified donation
+  (received path exercised 2026-09-30T03:12:41Z); refund / reversal /
+  chargeback paths remain covered by fixture tests until real source data
+  exercises them.
+- RunSignup donation record field names were partially unverified while no
+  production rows existed; the adapter reads defensively. The first real
+  donation (2026-09-30) confirmed the field names: `donation_id`,
+  `donation_amount`, `processing_fee`, `amount_paid`, donation timestamp.
+
+## Addendum 2026-09-30 — canonical semantics of RunSignup `amount_paid` → `net_cents`
+
+The first real donation (race 212466, donation `11291415`, accepted into
+canonical state 2026-09-30T03:12:41Z) confirmed the source field names the
+adapter reads defensively: `donation_id`, `donation_amount`,
+`processing_fee`, `amount_paid`, and a donation timestamp. The verified
+record is: donation amount 500¢, processing fee 20¢, amount paid 520¢ —
+the fee is donor-covered (added on top: 500 + 20 = 520).
+
+Canonical semantic contract (binding on all downstream aggregation):
+
+- `gross_cents` ← source `donation_amount`: the donation amount directed to
+  the organization. This is the donation-revenue figure.
+- `fee_cents` ← source `processing_fee`: the processing fee on the
+  transaction — a separate money flow to the payment processor, not revenue.
+- `net_cents` ← source `amount_paid`: the TOTAL AMOUNT CHARGED TO THE DONOR,
+  stored as VERIFIED source truth. It is NOT net revenue retained by NWANA.
+- `refund_cents`: source provides no refund fields in the donation record →
+  UNKNOWN (never derived).
+
+Normative rule: donation revenue aggregates `gross_cents`, NEVER
+`net_cents`. Summing `net_cents` would overstate the donation figure by the
+fee amount (here $5.20 vs the true $5.00). Actual settlement / net cash
+retained by NWANA is not derived here: the verified record shows the fee is
+donor-covered (500 + 20 = 520 confirms the fee was added on top of the
+donor charge), but this source provides no payout/settlement truth, so
+retained remains UNKNOWN rather than assumed as gross or gross − fee. A
+future record with different fee-bearing must be read from its own fields,
+not assumed. The current executive money view already aggregates
+`total_gross_cents` and is safe under this contract.
