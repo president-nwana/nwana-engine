@@ -61,6 +61,58 @@ import {
 } from "./money-model";
 
 /**
+ * Phase 4 — Fund attribution (owner decision 2026-09-30).
+ *
+ * All verified donation_received on race 212466 are automatically credited
+ * to fund-50k-bridge-sprint. This is the REAL next automated revenue action:
+ * updating the fund's financial state (raised_amount) from canonical money
+ * truth.
+ *
+ * Design: fund_id is set on money_transactions at ingest. funds.raised_amount
+ * is RECALCULATED (not incremented) as:
+ *   SUM(gross_cents) - SUM(COALESCE(refund_cents, 0)) / 100.0
+ * for all transactions attributed to the fund.
+ *
+ * This is idempotent: re-running after a sync retry yields the same total.
+ * Refunds, partial refunds, reversals, and chargebacks automatically reduce
+ * the total because they update refund_cents / lifecycle_state on the
+ * canonical transaction.
+ */
+export const FUND_ID_BRIDGE_SPRINT = "fund-50k-bridge-sprint";
+/** Maps RunSignup race ID → fund ID for automatic crediting. */
+const RACE_TO_FUND_ID = new Map<number, string>([
+	[RUNSIGNUP_DONATION_RACE_ID, FUND_ID_BRIDGE_SPRINT],
+]);
+
+/**
+ * Recalculates funds.raised_amount from canonical money truth.
+ * Idempotent: safe to call after any sync, retry, or lifecycle update.
+ */
+export async function recalculateFundRaised(
+	db: D1Database,
+	fundId: string,
+): Promise<number> {
+	const row = await db
+		.prepare(
+			`SELECT
+				COALESCE(SUM(gross_cents), 0) AS total_gross,
+				COALESCE(SUM(COALESCE(refund_cents, 0)), 0) AS total_refund
+			 FROM money_transactions
+			 WHERE fund_id = ?`,
+		)
+		.bind(fundId)
+		.first<{ total_gross: number; total_refund: number }>();
+	const raisedDollars = ((row?.total_gross ?? 0) - (row?.total_refund ?? 0)) / 100.0;
+	await db
+		.prepare(
+			`UPDATE funds SET raised_amount = ?, updated_at = datetime('now') WHERE id = ?`,
+		)
+		.bind(raisedDollars, fundId)
+		.run();
+	return raisedDollars;
+}
+
+/**
  * Phase 4 — Donation Acquisition Loop: post-donation automated action.
  *
  * When a NEW donation_received event is ingested for the Phase 4 funnel
@@ -96,6 +148,10 @@ export interface MoneySyncResult {
 	identityUpgrades: Array<{ from: string; to: string }>;
 	cursor: string | null;
 	lastSyncAt: string;
+	/** Fund ID if new transactions were credited to a fund (Phase 4). */
+	fundCredited?: string | null;
+	/** Recalculated fund raised_amount in dollars (Phase 4). */
+	fundRaised?: number | null;
 	error?: string;
 	failureInterpretation?: string;
 }
@@ -111,6 +167,8 @@ export interface MoneyReconcileResult {
 	identityUpgrades: Array<{ from: string; to: string }>;
 	perDonation: Array<{ donationId: string; status: string }>;
 	lastSyncAt: string;
+	/** Recalculated fund raised_amount in dollars after lifecycle updates (Phase 4). */
+	fundRaised?: number | null;
 	error?: string;
 	failureInterpretation?: string;
 }
@@ -257,10 +315,12 @@ interface IngestOutcome {
 async function buildIngestBatch(
 	db: D1Database,
 	normalized: NormalizedRunSignupDonation[],
+	opts?: { fundId?: string | null },
 ): Promise<{
 	statements: D1PreparedStatement[];
 	eventInsertIndexes: number[];
 	outcome: IngestOutcome;
+	fundCredited: boolean;
 }> {
 	const statements: D1PreparedStatement[] = [];
 	const eventInsertIndexes: number[] = [];
@@ -272,6 +332,9 @@ async function buildIngestBatch(
 		identityUpgrades: [],
 		maxDonationId: 0,
 	};
+	// True if at least one NEW transaction was attributed to a fund.
+	let fundCredited = false;
+	const fundId = opts?.fundId ?? null;
 
 	// --- Load existing canonical state for change detection ------------------
 	const existing = new Map<string, StoredTransaction>();
@@ -409,6 +472,10 @@ async function buildIngestBatch(
 		if (!prev) {
 			// New canonical transaction: current-state row + receipt event(s).
 			outcome.transactionsNew++;
+			// Phase 4 fund attribution: credit to the fund if this race maps to one.
+			// The fund_id is set here; the funds.raised_amount is recalculated
+			// (not incremented) after the batch commits, ensuring idempotency.
+			if (fundId) fundCredited = true;
 			statements.push(
 				db
 					.prepare(
@@ -417,8 +484,9 @@ async function buildIngestBatch(
 							currency, gross_cents, gross_status, fee_cents, fee_status,
 							amount_paid_cents, amount_paid_status,
 							net_cents, net_status, refund_cents, refund_status,
-							lifecycle_state, attribution, source_ref, source_payload_hash
-						) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
+							lifecycle_state, attribution, source_ref, source_payload_hash,
+							fund_id
+						) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)`,
 					)
 					.bind(
 						n.transactionKey,
@@ -439,6 +507,7 @@ async function buildIngestBatch(
 						ATTRIBUTION_UNKNOWN,
 						n.sourceRef,
 						n.snapshotHash,
+						fundId,
 					),
 			);
 			insertEvent(n.eventKey, "donation_received", n);
@@ -517,7 +586,7 @@ async function buildIngestBatch(
 		);
 	}
 
-	return { statements, eventInsertIndexes, outcome };
+	return { statements, eventInsertIndexes, outcome, fundCredited };
 }
 
 async function executeBatch(
@@ -613,7 +682,11 @@ export async function syncRunSignupDonations(
 	);
 
 	// --- Ingest (shared core) ------------------------------------------------
-	const { statements, eventInsertIndexes, outcome } = await buildIngestBatch(db, normalized);
+	// Phase 4 fund attribution: race 212466 donations are credited to
+	// fund-50k-bridge-sprint (owner decision 2026-09-30).
+	const fundId = RACE_TO_FUND_ID.get(raceId) ?? null;
+	const { statements, eventInsertIndexes, outcome, fundCredited } =
+		await buildIngestBatch(db, normalized, { fundId });
 
 	// --- Checkpoint IN THE SAME BATCH: advances iff canonical state commits.
 	// An incremental sync that finds nothing new keeps the previous cursor —
@@ -646,6 +719,14 @@ export async function syncRunSignupDonations(
 
 	const eventsIngested = await executeBatch(db, statements, eventInsertIndexes);
 
+	// Phase 4: real next automated revenue action. If new fund-attributed
+	// transactions were ingested, recalculate the fund's raised_amount from
+	// canonical money truth. Idempotent: safe on retry.
+	let fundRaised: number | null = null;
+	if (fundId && fundCredited) {
+		fundRaised = await recalculateFundRaised(db, fundId);
+	}
+
 	return {
 		ok: true,
 		sourceKey,
@@ -659,6 +740,8 @@ export async function syncRunSignupDonations(
 		identityUpgrades: outcome.identityUpgrades,
 		cursor: nextCursor,
 		lastSyncAt: nowIso,
+		fundCredited: fundCredited ? fundId : null,
+		fundRaised,
 	};
 }
 
@@ -747,9 +830,24 @@ export async function reconcileRunSignupDonations(
 	);
 	void skippedNoIdentity;
 
-	const { statements, eventInsertIndexes, outcome } = await buildIngestBatch(db, normalized);
+	// Phase 4 fund attribution: same fund mapping as normal sync.
+	const fundId = RACE_TO_FUND_ID.get(raceId) ?? null;
+	const { statements, eventInsertIndexes, outcome, fundCredited } =
+		await buildIngestBatch(db, normalized, { fundId });
 	// NOTE: no checkpoint write — reconciliation never advances the sync cursor.
 	const eventsIngested = await executeBatch(db, statements, eventInsertIndexes);
+
+	// Phase 4: recalculate fund total after lifecycle updates (refunds,
+	// reversals, chargebacks). The recalculation is idempotent and reflects
+	// the canonical state. Trigger if new fund-attributed transactions were
+	// created OR if lifecycle events touched fund-attributed transactions.
+	let fundRaised: number | null = null;
+	if (fundId && (fundCredited || outcome.lifecycleEvents > 0)) {
+		// For lifecycle events, check if any touched transaction has a fund_id.
+		// The recalculation itself is cheap and idempotent, so we run it
+		// whenever lifecycle events occurred on this race's donations.
+		fundRaised = await recalculateFundRaised(db, fundId);
+	}
 
 	return {
 		ok: true,
@@ -762,6 +860,7 @@ export async function reconcileRunSignupDonations(
 		identityUpgrades: outcome.identityUpgrades,
 		perDonation,
 		lastSyncAt: nowIso,
+		fundRaised,
 	};
 }
 

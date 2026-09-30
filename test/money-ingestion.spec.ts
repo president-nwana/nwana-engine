@@ -50,6 +50,10 @@ function makeMoneyDb() {
 	const transactions = new Map<string, Record<string, unknown>>();
 	const sync = new Map<string, Record<string, unknown>>();
 	const executed: Array<{ sql: string; args: unknown[] }> = [];
+	// Phase 4: fund state for recalculation tests.
+	const funds = new Map<string, Record<string, unknown>>([
+		["fund-50k-bridge-sprint", { id: "fund-50k-bridge-sprint", raised_amount: 0 }],
+	]);
 
 	const EVENT_COLS = [
 		"event_key", "source_system", "source_transaction_id", "transaction_key",
@@ -60,12 +64,14 @@ function makeMoneyDb() {
 		"attribution", "source_ref", "source_payload_hash",
 	];
 	// money_transactions INSERT binds (lifecycle_state is the 'ACTIVE' literal in SQL).
+	// Phase 4: fund_id is the 20th bind (nullable).
 	const TXN_COLS = [
 		"transaction_key", "source_system", "source_transaction_id", "first_event_key",
 		"currency", "gross_cents", "gross_status", "fee_cents", "fee_status",
 		"amount_paid_cents", "amount_paid_status",
 		"net_cents", "net_status", "refund_cents", "refund_status",
 		"attribution", "source_ref", "source_payload_hash",
+		"fund_id",
 	];
 
 	const rowFrom = (cols: string[], args: unknown[]) => {
@@ -154,6 +160,13 @@ function makeMoneyDb() {
 			// status, note. Append-only; stub accepts.
 			return 1;
 		}
+		if (sql.startsWith("UPDATE funds SET raised_amount")) {
+			// Phase 4 fund recalculation: binds raised_amount (dollars), fund_id.
+			const fund = funds.get(String(st.args[1]));
+			if (!fund) return 0;
+			fund["raised_amount"] = st.args[0];
+			return 1;
+		}
 		throw new Error(`stub cannot handle SQL: ${sql.slice(0, 80)}`);
 	};
 
@@ -164,6 +177,11 @@ function makeMoneyDb() {
 			bind(...params: unknown[]) {
 				args = params;
 				return stmt;
+			},
+			async run() {
+				const norm = sql.replace(/\s+/g, " ").trim();
+				applyStatement({ sql: rawSql, args });
+				return { meta: { changes: 1 } };
 			},
 			async all() {
 				const norm = sql.replace(/\s+/g, " ").trim();
@@ -199,6 +217,19 @@ function makeMoneyDb() {
 				if (norm.includes("FROM money_sync_state")) {
 					return sync.get(String(args[0])) ?? null;
 				}
+				if (norm.includes("FROM money_transactions") && norm.includes("fund_id = ?")) {
+					// Phase 4 fund recalculation: SUM(gross) - SUM(refund) for fund.
+					const fundId = String(args[0]);
+					let totalGross = 0;
+					let totalRefund = 0;
+					for (const t of transactions.values()) {
+						if (String(t["fund_id"]) === fundId) {
+							totalGross += Number(t["gross_cents"] ?? 0);
+							totalRefund += Number(t["refund_cents"] ?? 0);
+						}
+					}
+					return { total_gross: totalGross, total_refund: totalRefund };
+				}
 				throw new Error(`stub first() cannot handle SQL: ${norm.slice(0, 80)}`);
 			},
 			_sql: sql,
@@ -228,6 +259,7 @@ function makeMoneyDb() {
 		transactions,
 		sync,
 		executed,
+		funds,
 	};
 }
 
@@ -663,5 +695,49 @@ describe("Phase 4 post-donation automated action", () => {
 		const secondCount = executed.filter((s: { sql: string }) =>
 			s.sql.startsWith("INSERT INTO revenue_object_actions")).length;
 		expect(secondCount).toBe(0);
+	});
+});
+
+describe("Phase 4 fund attribution (owner decision 2026-09-30)", () => {
+	it("credits new 212466 donation to fund-50k-bridge-sprint via recalculation", async () => {
+		const { db, transactions, funds } = makeMoneyDb();
+		mocks.responses.push(donationPage([{ donation_id: 100, donation_amount: 25 }]));
+		const result = await syncRunSignupDonations(db, "token");
+		// The transaction must carry the fund_id.
+		const txns = [...transactions.values()];
+		expect(txns.length).toBe(1);
+		expect(txns[0]["fund_id"]).toBe("fund-50k-bridge-sprint");
+		// The fund total is recalculated: $25.00 (2500 cents).
+		expect(result.fundCredited).toBe("fund-50k-bridge-sprint");
+		expect(result.fundRaised).toBe(25);
+		expect(funds.get("fund-50k-bridge-sprint")?.["raised_amount"]).toBe(25);
+	});
+
+	it("recalculation is idempotent across sync retry (no double-count)", async () => {
+		const { db, funds } = makeMoneyDb();
+		mocks.responses.push(donationPage([{ donation_id: 101, donation_amount: 10 }]));
+		const first = await syncRunSignupDonations(db, "token");
+		expect(first.fundRaised).toBe(10);
+		// Retry with the same donation (already canonicalized): no new
+		// transaction, but recalculation must yield the same total.
+		mocks.responses.push(donationPage([{ donation_id: 101, donation_amount: 10 }]));
+		const second = await syncRunSignupDonations(db, "token");
+		expect(second.transactionsNew).toBe(0);
+		// No new fund credit on retry (fundCredited only when new txns).
+		expect(second.fundCredited).toBeFalsy();
+		// Fund total unchanged: still $10, not $20.
+		expect(funds.get("fund-50k-bridge-sprint")?.["raised_amount"]).toBe(10);
+	});
+
+	it("accumulates multiple donations correctly", async () => {
+		const { db, funds } = makeMoneyDb();
+		mocks.responses.push(donationPage([
+			{ donation_id: 200, donation_amount: 5 },
+			{ donation_id: 201, donation_amount: 15 },
+		]));
+		const result = await syncRunSignupDonations(db, "token");
+		expect(result.transactionsNew).toBe(2);
+		expect(result.fundRaised).toBe(20);
+		expect(funds.get("fund-50k-bridge-sprint")?.["raised_amount"]).toBe(20);
 	});
 });
