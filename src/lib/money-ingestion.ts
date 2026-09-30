@@ -719,11 +719,14 @@ export async function syncRunSignupDonations(
 
 	const eventsIngested = await executeBatch(db, statements, eventInsertIndexes);
 
-	// Phase 4: real next automated revenue action. If new fund-attributed
-	// transactions were ingested, recalculate the fund's raised_amount from
-	// canonical money truth. Idempotent: safe on retry.
+	// Phase 4: real next automated revenue action. The fund projection is
+	// recalculated from canonical D1 truth on EVERY sync completion for a
+	// fund-mapped race, including invocations with no new donation. This
+	// makes the projection self-healing: if a recalculation fails after
+	// the canonical state commits, the next invocation repairs it from
+	// the committed truth. Idempotent: safe on retry.
 	let fundRaised: number | null = null;
-	if (fundId && fundCredited) {
+	if (fundId) {
 		fundRaised = await recalculateFundRaised(db, fundId);
 	}
 
@@ -837,15 +840,13 @@ export async function reconcileRunSignupDonations(
 	// NOTE: no checkpoint write — reconciliation never advances the sync cursor.
 	const eventsIngested = await executeBatch(db, statements, eventInsertIndexes);
 
-	// Phase 4: recalculate fund total after lifecycle updates (refunds,
-	// reversals, chargebacks). The recalculation is idempotent and reflects
-	// the canonical state. Trigger if new fund-attributed transactions were
-	// created OR if lifecycle events touched fund-attributed transactions.
+	// Phase 4: recalculate fund total from canonical D1 truth on EVERY
+	// reconcile completion for a fund-mapped race, including invocations
+	// with no new lifecycle event. This makes the projection self-healing:
+	// if a recalculation fails after canonical state commits, the next
+	// invocation repairs it. Idempotent.
 	let fundRaised: number | null = null;
-	if (fundId && (fundCredited || outcome.lifecycleEvents > 0)) {
-		// For lifecycle events, check if any touched transaction has a fund_id.
-		// The recalculation itself is cheap and idempotent, so we run it
-		// whenever lifecycle events occurred on this race's donations.
+	if (fundId) {
 		fundRaised = await recalculateFundRaised(db, fundId);
 	}
 

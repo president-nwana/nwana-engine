@@ -719,14 +719,66 @@ describe("Phase 4 fund attribution (owner decision 2026-09-30)", () => {
 		const first = await syncRunSignupDonations(db, "token");
 		expect(first.fundRaised).toBe(10);
 		// Retry with the same donation (already canonicalized): no new
-		// transaction, but recalculation must yield the same total.
+		// transaction, but recalculation runs every time and yields the same total.
 		mocks.responses.push(donationPage([{ donation_id: 101, donation_amount: 10 }]));
 		const second = await syncRunSignupDonations(db, "token");
 		expect(second.transactionsNew).toBe(0);
 		// No new fund credit on retry (fundCredited only when new txns).
 		expect(second.fundCredited).toBeFalsy();
+		// But fundRaised is recalculated every time (self-healing).
+		expect(second.fundRaised).toBe(10);
 		// Fund total unchanged: still $10, not $20.
 		expect(funds.get("fund-50k-bridge-sprint")?.["raised_amount"]).toBe(10);
+	});
+
+	it("repairs fund projection after failed update (no new donation)", async () => {
+		const { db, funds } = makeMoneyDb();
+		// Canonical donation commits.
+		mocks.responses.push(donationPage([{ donation_id: 300, donation_amount: 50 }]));
+		const first = await syncRunSignupDonations(db, "token");
+		expect(first.fundRaised).toBe(50);
+		// Simulate projection failure: fund total corrupted (not from canonical truth).
+		funds.get("fund-50k-bridge-sprint")!["raised_amount"] = 999;
+		// Next invocation with NO new donation: recalculation repairs from canonical D1 truth.
+		mocks.responses.push(donationPage([]));
+		const second = await syncRunSignupDonations(db, "token");
+		expect(second.transactionsNew).toBe(0);
+		expect(second.fundRaised).toBe(50);
+		expect(funds.get("fund-50k-bridge-sprint")?.["raised_amount"]).toBe(50);
+	});
+
+	it("repairs fund total after refund with failed projection update", async () => {
+		const { db, transactions, funds } = makeMoneyDb();
+		// Canonical donation $20.
+		mocks.responses.push(donationPage([{ donation_id: 400, donation_amount: 20 }]));
+		await syncRunSignupDonations(db, "token");
+		expect(funds.get("fund-50k-bridge-sprint")?.["raised_amount"]).toBe(20);
+		// Simulate canonical refund: transaction refund_cents updated (as reconcile would do),
+		// but fund projection NOT updated (simulated failure) — fund still shows $20.
+		const txn = [...transactions.values()][0];
+		txn["refund_cents"] = 2000; // full refund in cents
+		txn["lifecycle_state"] = "REFUNDED";
+		// Corrupt the projection to prove it gets repaired from truth, not from the refund delta.
+		funds.get("fund-50k-bridge-sprint")!["raised_amount"] = 12345;
+		// Next invocation with no new lifecycle event: recalculation repairs to $0.
+		mocks.responses.push(donationPage([]));
+		const result = await syncRunSignupDonations(db, "token");
+		expect(result.fundRaised).toBe(0);
+		expect(funds.get("fund-50k-bridge-sprint")?.["raised_amount"]).toBe(0);
+	});
+
+	it("repeated recovery remains idempotent", async () => {
+		const { db, funds } = makeMoneyDb();
+		mocks.responses.push(donationPage([{ donation_id: 500, donation_amount: 7 }]));
+		await syncRunSignupDonations(db, "token");
+		// Corrupt and repair multiple times: each repair yields the same correct total.
+		for (let i = 0; i < 3; i++) {
+			funds.get("fund-50k-bridge-sprint")!["raised_amount"] = 1000 + i;
+			mocks.responses.push(donationPage([]));
+			const r = await syncRunSignupDonations(db, "token");
+			expect(r.fundRaised).toBe(7);
+			expect(funds.get("fund-50k-bridge-sprint")?.["raised_amount"]).toBe(7);
+		}
 	});
 
 	it("accumulates multiple donations correctly", async () => {
