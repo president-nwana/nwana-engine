@@ -14,13 +14,15 @@ const mocks = vi.hoisted(() => ({
 		api_error_code?: number;
 		api_error_msg?: string;
 	}>,
+	urls: [] as string[],
 }));
 
 vi.mock("../src/runsignup-client", async (importOriginal) => {
 	const mod = (await importOriginal()) as Record<string, unknown>;
 	return {
 		...mod,
-		runSignupGetJson: async () => {
+		runSignupGetJson: async (url: string) => {
+			mocks.urls.push(url);
 			const r = mocks.responses.shift();
 			if (!r) throw new Error("unexpected RunSignup call: no mocked response left");
 			return r;
@@ -29,8 +31,14 @@ vi.mock("../src/runsignup-client", async (importOriginal) => {
 });
 
 // Import after the mock is registered.
-const { syncRunSignupDonations, getMoneySyncState, listMoneyEvents, listMoneyTransactions } =
-	await import("../src/lib/money-ingestion");
+const {
+	syncRunSignupDonations,
+	reconcileRunSignupDonations,
+	inspectDonationRecordShape,
+	getMoneySyncState,
+	listMoneyEvents,
+	listMoneyTransactions,
+} = await import("../src/lib/money-ingestion");
 
 interface StubStatement {
 	sql: string;
@@ -46,6 +54,7 @@ function makeMoneyDb() {
 		"event_key", "source_system", "source_transaction_id", "transaction_key",
 		"event_type", "occurred_at", "currency",
 		"gross_cents", "gross_status", "fee_cents", "fee_status",
+		"amount_paid_cents", "amount_paid_status",
 		"net_cents", "net_status", "refund_cents", "refund_status",
 		"attribution", "source_ref", "source_payload_hash",
 	];
@@ -53,6 +62,7 @@ function makeMoneyDb() {
 	const TXN_COLS = [
 		"transaction_key", "source_system", "source_transaction_id", "first_event_key",
 		"currency", "gross_cents", "gross_status", "fee_cents", "fee_status",
+		"amount_paid_cents", "amount_paid_status",
 		"net_cents", "net_status", "refund_cents", "refund_status",
 		"attribution", "source_ref", "source_payload_hash",
 	];
@@ -79,17 +89,44 @@ function makeMoneyDb() {
 			return 1;
 		}
 		if (sql.startsWith("UPDATE money_transactions")) {
-			// binds: currency, gross_cents, gross_status, fee_cents, fee_status,
+			const a = st.args;
+			if (sql.includes("SET transaction_key")) {
+				// Identity upgrade: binds new_key, new_source_transaction_id, old_key.
+				const oldKey = String(a[2]);
+				const t = transactions.get(oldKey);
+				if (!t) return 0;
+				transactions.delete(oldKey);
+				t["transaction_key"] = a[0];
+				t["source_transaction_id"] = a[1];
+				transactions.set(String(a[0]), t);
+				return 1;
+			}
+			// Snapshot update binds: currency, gross_cents, gross_status,
+			// fee_cents, fee_status, amount_paid_cents, amount_paid_status,
 			// net_cents, net_status, refund_cents, refund_status,
 			// lifecycle_state, source_payload_hash, transaction_key
-			const a = st.args;
-			const t = transactions.get(String(a[11]));
+			const t = transactions.get(String(a[13]));
 			if (!t) return 0;
 			t["currency"] = a[0]; t["gross_cents"] = a[1]; t["gross_status"] = a[2];
-			t["fee_cents"] = a[3]; t["fee_status"] = a[4]; t["net_cents"] = a[5];
-			t["net_status"] = a[6]; t["refund_cents"] = a[7]; t["refund_status"] = a[8];
-			t["lifecycle_state"] = a[9]; t["source_payload_hash"] = a[10];
+			t["fee_cents"] = a[3]; t["fee_status"] = a[4];
+			t["amount_paid_cents"] = a[5]; t["amount_paid_status"] = a[6];
+			t["net_cents"] = a[7]; t["net_status"] = a[8];
+			t["refund_cents"] = a[9]; t["refund_status"] = a[10];
+			t["lifecycle_state"] = a[11]; t["source_payload_hash"] = a[12];
 			return 1;
+		}
+		if (sql.startsWith("UPDATE money_events")) {
+			// Identity upgrade: binds new_key, new_source_transaction_id, old_key.
+			const a = st.args;
+			let changed = 0;
+			for (const e of events.values()) {
+				if (String(e["transaction_key"]) === String(a[2])) {
+					e["transaction_key"] = a[0];
+					e["source_transaction_id"] = a[1];
+					changed++;
+				}
+			}
+			return changed;
 		}
 		if (sql.includes("money_sync_state")) {
 			// upsert binds: source_key, cursor, last_sync_at, last_sync_result
@@ -128,6 +165,17 @@ function makeMoneyDb() {
 					};
 				}
 				if (norm.includes("FROM money_events")) {
+					if (norm.includes("WHERE event_key IN")) {
+						const keys = new Set(args.map(String));
+						return {
+							results: [...events.values()]
+								.filter((e) => keys.has(String(e["event_key"])))
+								.map((e) => ({
+									event_key: e["event_key"],
+									transaction_key: e["transaction_key"],
+								})),
+						};
+					}
 					return { results: [...events.values()] };
 				}
 				if (norm.includes("FROM money_transactions")) {
@@ -177,6 +225,7 @@ const donationPage = (donations: unknown[]) => ({
 
 beforeEach(() => {
 	mocks.responses.length = 0;
+	mocks.urls.length = 0;
 });
 
 describe("syncRunSignupDonations", () => {
@@ -191,6 +240,8 @@ describe("syncRunSignupDonations", () => {
 
 		const r = await syncRunSignupDonations(db, "token");
 		expect(r.ok).toBe(true);
+		expect(r.incremental).toBe(false); // no cursor yet: full first read
+		expect(mocks.urls[0]).not.toContain("after_donation_id");
 		expect(r.fetched).toBe(2);
 		expect(r.transactionsNew).toBe(2);
 		expect(r.eventsIngested).toBe(2);
@@ -203,6 +254,10 @@ describe("syncRunSignupDonations", () => {
 		expect(e101["gross_cents"]).toBe(5000);
 		expect(e101["gross_status"]).toBe("VERIFIED");
 		expect(e101["fee_status"]).toBe("UNKNOWN");
+		// amount_paid absent here -> UNKNOWN; net is never derived.
+		expect(e101["amount_paid_status"]).toBe("UNKNOWN");
+		expect(e101["net_cents"]).toBeNull();
+		expect(e101["net_status"]).toBe("UNKNOWN");
 		expect(e101["attribution"]).toBe("ATTRIBUTION_UNKNOWN");
 		expect(e101["transaction_key"]).toBe("runsignup:donation:101");
 
@@ -233,12 +288,102 @@ describe("syncRunSignupDonations", () => {
 		);
 		const second = await syncRunSignupDonations(db, "token");
 		expect(second.ok).toBe(true);
+		expect(second.incremental).toBe(true);
+		expect(mocks.urls[1]).toContain("after_donation_id=101");
 		expect(second.fetched).toBe(1);
 		expect(second.eventsIngested).toBe(0);
 		expect(second.eventsDuplicate).toBe(0); // nothing attempted: snapshot unchanged
 		expect(second.transactionsNew).toBe(0);
+		expect(second.cursor).toBe("101"); // cursor retained
 		expect(events.size).toBe(1);
 		expect(transactions.size).toBe(1);
+	});
+
+	it("incremental sync never re-fetches already-canonicalized donations and never nulls the cursor", async () => {
+		const { db, events } = makeMoneyDb();
+		mocks.responses.push(
+			donationPage([{ donation_id: 101, donation_amount: 50 }]),
+		);
+		const first = await syncRunSignupDonations(db, "token");
+		expect(first.cursor).toBe("101");
+		expect(first.incremental).toBe(false);
+
+		// Source has nothing newer: empty incremental read.
+		mocks.responses.push(donationPage([]));
+		const second = await syncRunSignupDonations(db, "token");
+		expect(second.ok).toBe(true);
+		expect(second.incremental).toBe(true);
+		expect(mocks.urls[1]).toContain("after_donation_id=101");
+		expect(mocks.urls[1]).toContain("sort_direction=ASC");
+		expect(second.fetched).toBe(0);
+		expect(second.cursor).toBe("101"); // kept, not nulled
+		expect(events.size).toBe(1);
+
+		const state = await getMoneySyncState(db);
+		expect(state!["cursor"]).toBe("101");
+	});
+
+	it("uses the true source transaction id for transaction identity when the payload provides it", async () => {
+		const { db, events, transactions } = makeMoneyDb();
+		mocks.responses.push(
+			donationPage([
+				{
+					donation_id: 11291415,
+					donation_amount: 5,
+					processing_fee: 0.2,
+					amount_paid: 5.2,
+					donation_date_ts: 1759201848,
+					rsu_transaction_id: 987654,
+					transaction_id: "gw-abcdef",
+				},
+			]),
+		);
+		const r = await syncRunSignupDonations(db, "token");
+		expect(r.ok).toBe(true);
+		// Transaction identity: the true source transaction id.
+		expect(transactions.has("runsignup:rsu_transaction:987654")).toBe(true);
+		const t = transactions.get("runsignup:rsu_transaction:987654")!;
+		expect(t["source_transaction_id"]).toBe("rsu_transaction:987654");
+		// amount_paid preserved under its correct name; net stays UNKNOWN.
+		expect(t["amount_paid_cents"]).toBe(520);
+		expect(t["amount_paid_status"]).toBe("VERIFIED");
+		expect(t["net_cents"]).toBeNull();
+		expect(t["net_status"]).toBe("UNKNOWN");
+		// Event identity stays donation-record based (idempotency proof).
+		expect(events.has("runsignup:evt:donation_received:donation:11291415")).toBe(true);
+		const e = events.get("runsignup:evt:donation_received:donation:11291415")!;
+		expect(e["transaction_key"]).toBe("runsignup:rsu_transaction:987654");
+		expect(e["amount_paid_cents"]).toBe(520);
+		expect(e["net_cents"]).toBeNull();
+	});
+
+	it("upgrades a fallback identity to the true transaction id without duplicating", async () => {
+		const { db, events, transactions } = makeMoneyDb();
+		// First observed without a transaction identifier: fallback identity.
+		mocks.responses.push(donationPage([{ donation_id: 9, donation_amount: 100 }]));
+		await syncRunSignupDonations(db, "token");
+		expect(transactions.has("runsignup:donation:9")).toBe(true);
+
+		// Re-observed (via reconcile) with the true transaction id.
+		mocks.responses.push(
+			donationPage([{ donation_id: 9, donation_amount: 100, rsu_transaction_id: 777 }]),
+		);
+		const r = await reconcileRunSignupDonations(db, "token", {
+			donationIds: [9],
+			reason: "test",
+		});
+		expect(r.ok).toBe(true);
+		expect(r.identityUpgrades).toEqual([
+			{ from: "runsignup:donation:9", to: "runsignup:rsu_transaction:777" },
+		]);
+		expect(r.transactionsNew).toBe(0);
+		expect(transactions.has("runsignup:donation:9")).toBe(false);
+		expect(transactions.has("runsignup:rsu_transaction:777")).toBe(true);
+		// The receipt event key never moved: idempotency proof preserved.
+		expect(events.has("runsignup:evt:donation_received:donation:9")).toBe(true);
+		expect(events.get("runsignup:evt:donation_received:donation:9")!["transaction_key"]).toBe(
+			"runsignup:rsu_transaction:777",
+		);
 	});
 
 	it("skips records without a stable donation id", async () => {
@@ -343,6 +488,96 @@ describe("syncRunSignupDonations", () => {
 		expect(
 			events.has("runsignup:evt:fundraiser_donation_received:donation:21"),
 		).toBe(true);
+	});
+});
+
+describe("reconcileRunSignupDonations", () => {
+	it("re-reads only the listed ids, derives lifecycle events, and never moves the cursor", async () => {
+		const { db, events } = makeMoneyDb();
+		mocks.responses.push(donationPage([{ donation_id: 9, donation_amount: 100 }]));
+		await syncRunSignupDonations(db, "token");
+		expect(events.size).toBe(1);
+		mocks.urls.length = 0; // only the reconcile reads matter below
+
+		// Source now shows a refund on the already-canonicalized donation.
+		mocks.responses.push(
+			donationPage([{ donation_id: 9, donation_amount: 100, refund_amount: 100 }]),
+		);
+		const r = await reconcileRunSignupDonations(db, "token", {
+			donationIds: [9],
+			reason: "refund check",
+		});
+		expect(r.ok).toBe(true);
+		expect(r.requested).toBe(1);
+		expect(r.fetched).toBe(1);
+		expect(r.lifecycleEvents).toBe(1);
+		expect(r.eventsIngested).toBe(1);
+		expect(events.size).toBe(2);
+		// One bounded read per id, targeted at that id.
+		expect(mocks.urls).toHaveLength(1);
+		expect(mocks.urls[0]).toContain("after_donation_id=8");
+		expect(mocks.urls[0]).toContain("results_per_page=1");
+		// The sync cursor is untouched by reconciliation.
+		const state = await getMoneySyncState(db);
+		expect(state!["cursor"]).toBe("9");
+
+		// Unknown ids are reported, not fatal.
+		mocks.responses.push(donationPage([]));
+		const r2 = await reconcileRunSignupDonations(db, "token", { donationIds: [4242] });
+		expect(r2.ok).toBe(true);
+		expect(r2.perDonation).toEqual([{ donationId: "4242", status: "not_found_at_source" }]);
+		expect(r2.eventsIngested).toBe(0);
+	});
+
+	it("rejects empty and over-bounded id lists", async () => {
+		const { db } = makeMoneyDb();
+		const empty = await reconcileRunSignupDonations(db, "token", { donationIds: [] });
+		expect(empty.ok).toBe(false);
+		const tooMany = await reconcileRunSignupDonations(db, "token", {
+			donationIds: Array.from({ length: 26 }, (_, i) => i + 1),
+		});
+		expect(tooMany.ok).toBe(false);
+		expect(tooMany.error).toContain("bounded");
+	});
+});
+
+describe("inspectDonationRecordShape", () => {
+	it("returns allowlisted non-PII fields and the full field-name shape", async () => {
+		mocks.responses.push(
+			donationPage([
+				{
+					donation_id: 11291415,
+					donation_amount: "$5.00",
+					processing_fee: "$0.20",
+					amount_paid: "$5.20",
+					donation_date_ts: 1759201848,
+					rsu_transaction_id: 987654,
+					transaction_id: "gw-abcdef",
+					fundraiser_id: null,
+					associated_registration_id: 654321,
+					user: { first_name: "John", email: "j@example.com" },
+					on_behalf_of: "Someone",
+				},
+			]),
+		);
+		const shape = await inspectDonationRecordShape("token", 11291415);
+		expect(shape.ok).toBe(true);
+		expect(shape.identifiers.rsu_transaction_id).toBe(987654);
+		expect(shape.identifiers.transaction_id).toBe("gw-abcdef");
+		expect(shape.amounts.amount_paid).toBe("$5.20");
+		expect(shape.fieldNames).toContain("donation_id");
+		expect(shape.fieldNames).toContain("rsu_transaction_id");
+		expect(shape.fieldNames).toContain("user");
+		// PII is never returned: only allowlisted scalars leave this function.
+		expect(JSON.stringify(shape)).not.toContain("j@example.com");
+		expect(JSON.stringify(shape)).not.toContain("John");
+	});
+
+	it("reports a missing donation without failing", async () => {
+		mocks.responses.push(donationPage([]));
+		const shape = await inspectDonationRecordShape("token", 4242);
+		expect(shape.ok).toBe(false);
+		expect(shape.error).toContain("not found");
 	});
 });
 

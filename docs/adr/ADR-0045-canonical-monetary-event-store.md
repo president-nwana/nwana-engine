@@ -134,3 +134,65 @@ retained remains UNKNOWN rather than assumed as gross or gross − fee. A
 future record with different fee-bearing must be read from its own fields,
 not assumed. The current executive money view already aggregates
 `total_gross_cents` and is safe under this contract.
+
+## Addendum 2026-09-30 (evening) — acceptance fixes: incremental cursor, `amount_paid` storage, true transaction identity
+
+Phase 1 acceptance was reopened and closed only after three fixes were
+implemented, tested, deployed, and verified against production. The
+`donation_received` evidence for donation `11291415` (race 212466) remained
+valid throughout; the fixes change storage semantics and ingestion behavior,
+not the acceptance evidence itself.
+
+1. **True incremental ingestion.** Normal sync now reads
+   `money_sync_state.cursor` and, when a cursor exists, queries
+   `donations/list` with `sort_direction=ASC&after_donation_id={cursor}` —
+   the cursor mechanism documented by RunSignup for this endpoint (also
+   verified: `before_donation_id`, `since_ts`, `until_ts` exist). The source
+   page is read ONLY for ids greater than the cursor; an empty incremental
+   page never resets the cursor. The previous full-scan-per-sync behavior is
+   gone. Verified in production: a sync after the acceptance donation
+   returned `incremental=true, fetched=0, eventsIngested=0`, cursor stayed
+   `11291415` — the already-canonicalized donation was not re-read.
+2. **Lifecycle reconciliation is a separate, explicit, bounded action.**
+   `POST /api/operating-center/money/reconcile` (owner-gated) takes at most
+   25 donation ids, re-reads only those records (one targeted read per id,
+   `after_donation_id={id-1}&results_per_page=1`), derives lifecycle events
+   from snapshot changes, and never advances the normal sync cursor. This is
+   the only path for re-reading old records; normal ingestion must not do it
+   (ADR-0044). Verified in production: reconciling donation `11291415`
+   returned `fetched=1, eventsIngested=0, lifecycleEvents=0` — no duplicates,
+   cursor untouched.
+3. **`amount_paid` is no longer stored as `net_cents`.** Schema 0050 added
+   `amount_paid_cents` / `amount_paid_status` to `money_events` and
+   `money_transactions`; `net_cents` is NULL and `net_status` is `UNKNOWN`
+   for everything ingested from `donations/list` until a confirmed
+   settlement / net-retained source exists. The verified real donation now
+   stores: gross 500 VERIFIED, fee 20 VERIFIED, amount_paid 520 VERIFIED,
+   net NULL/UNKNOWN. Downstream aggregates `gross_cents` only (verified in
+   `src/operating-center-money.ts`); nothing sums `net_cents`.
+4. **True source transaction identity (verified from the live payload).**
+   The live record for donation `11291415` carries
+   `rsu_transaction_id = 56992565` and
+   `transaction_id = "ay_BDP9MNBQMND3QF35_0"`. Canonical identity rule
+   (binding): transaction identity = `rsu_transaction:{rsu_transaction_id}`
+   when present, else `transaction:{transaction_id}`, else the deterministic
+   `donation:{donation_id}` fallback. Migration 0051 remapped the canonical
+   transaction to `runsignup:rsu_transaction:56992565`
+   (`source_transaction_id = rsu_transaction:56992565`). Event identity is
+   deliberately donation-record based and unchanged:
+   `runsignup:evt:donation_received:donation:11291415` — the idempotency
+   proof survives the identity upgrade verbatim. The adapter upgrades a
+   fallback identity to a true identity idempotently when a later read
+   observes the identifiers.
+
+A non-PII source-shape diagnostic exists for future verification:
+`GET /api/operating-center/money/diagnostics/donation-record?donation_id=…`
+(owner-gated) returns top-level field names plus only allowlisted scalar
+identifiers/amounts/timestamps — donor `user` data is never read or
+returned. It was used to verify the identifiers above.
+
+Operational rule preserved: no periodic polling, no cron for external-change
+discovery; sync and reconcile are explicit owner-triggered actions under the
+verified-$0 constraint. Production Worker version holding this contract:
+`3f0d9ec0-bb56-46cb-bcfb-aa891b8a6838` (deployed 2026-09-30; temporary
+migration routes for 0050/0051 were applied and removed in the same session).

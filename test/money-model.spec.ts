@@ -90,18 +90,53 @@ describe("normalizeRunSignupDonation", () => {
 		});
 		expect(n).not.toBeNull();
 		expect(n!.donationId).toBe("42");
+		// No transaction identifier in this payload: deterministic fallback.
+		expect(n!.identitySource).toBe("donation_id_fallback");
 		expect(n!.sourceTransactionId).toBe("donation:42");
 		expect(n!.transactionKey).toBe("runsignup:donation:42");
 		expect(n!.eventKey).toBe("runsignup:evt:donation_received:donation:42");
 		expect(n!.amounts.grossCents).toBe(10000);
 		expect(n!.amounts.grossStatus).toBe(AMOUNT_VERIFIED);
 		expect(n!.amounts.feeCents).toBe(320);
-		expect(n!.amounts.netCents).toBe(9680);
-		expect(n!.amounts.netStatus).toBe(AMOUNT_VERIFIED);
+		// amount_paid is the donor charge, preserved under its own name —
+		// it is NOT net revenue.
+		expect(n!.amounts.amountPaidCents).toBe(9680);
+		expect(n!.amounts.amountPaidStatus).toBe(AMOUNT_VERIFIED);
+		expect(n!.amounts.netCents).toBeNull();
+		expect(n!.amounts.netStatus).toBe(AMOUNT_UNKNOWN);
 		expect(n!.amounts.refundStatus).toBe(AMOUNT_UNKNOWN);
 		expect(n!.fundraiserId).toBeNull();
 		expect(n!.fundraiserEventKey).toBeNull();
 		expect(n!.sourceRef).toBe("race:212466/donation:42");
+	});
+
+	it("uses rsu_transaction_id as the true transaction identity when present", () => {
+		const n = normalizeRunSignupDonation({
+			donation_id: 42,
+			donation_amount: 5,
+			processing_fee: 0.2,
+			amount_paid: 5.2,
+			rsu_transaction_id: 987654,
+			transaction_id: "gw-abcdef",
+		});
+		expect(n!.identitySource).toBe("rsu_transaction_id");
+		expect(n!.sourceTransactionId).toBe("rsu_transaction:987654");
+		expect(n!.transactionKey).toBe("runsignup:rsu_transaction:987654");
+		// Event identity stays donation-record based.
+		expect(n!.eventKey).toBe("runsignup:evt:donation_received:donation:42");
+		expect(n!.donationRef).toBe("donation:42");
+	});
+
+	it("falls back to transaction_id when rsu_transaction_id is absent", () => {
+		const n = normalizeRunSignupDonation({
+			donation_id: 42,
+			donation_amount: 5,
+			transaction_id: "gw-abcdef",
+		});
+		expect(n!.identitySource).toBe("transaction_id");
+		expect(n!.sourceTransactionId).toBe("transaction:gw-abcdef");
+		expect(n!.transactionKey).toBe("runsignup:transaction:gw-abcdef");
+		expect(n!.eventKey).toBe("runsignup:evt:donation_received:donation:42");
 	});
 
 	it("keeps unknown amounts UNKNOWN while ingesting verified gross", () => {

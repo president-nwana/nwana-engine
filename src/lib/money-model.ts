@@ -5,19 +5,33 @@
  * `source_system`. RunSignup is the first source adapter, not the architecture.
  *
  * Identity rules (deterministic, stable across repeated sync runs):
- * - transaction identity: `source_system + source_transaction_id`
+ * - transaction identity: `source_system + source_transaction_id`, where the
+ *   source_transaction_id is the source's true transaction identifier when
+ *   the payload provides one (for RunSignup donations: `rsu_transaction_id`,
+ *   falling back to `transaction_id`), and only otherwise the deterministic
+ *   `donation:{donation_id}` fallback.
  *   (transaction_key = `${source_system}:${source_transaction_id}`)
- * - event identity: `${source_system}:evt:${event_type}:${stable_source_ref}`
- *   where the source supplies no unique event id, the stable ref is derived
- *   from the source record's own stable identifiers and the normalized
- *   monetary snapshot hash — so the same source fact always maps to the same
- *   event_key, and INSERT OR IGNORE on that key makes ingestion idempotent.
+ * - event identity: `${source_system}:evt:${event_type}:donation:${donation_id}`.
+ *   The donation record is the stable monetary fact, so event keys stay
+ *   donation-record based even when the transaction identity uses the true
+ *   source transaction id. Where the source supplies no unique event id, the
+ *   stable ref is derived from the source record's own stable identifiers and
+ *   the normalized monetary snapshot hash — so the same source fact always
+ *   maps to the same event_key, and INSERT OR IGNORE on that key makes
+ *   ingestion idempotent.
  *
- * Money semantics: gross / fee / net / refund are tracked independently as
- * (cents, status) pairs. A status is VERIFIED only when the source supplied
- * the value; otherwise cents is NULL and status is UNKNOWN. Unknown amounts
- * never block ingestion of verified amounts, and derived values are never
- * silently presented as source truth.
+ * Money semantics: gross / fee / amount_paid / net / refund are tracked
+ * independently as (cents, status) pairs. A status is VERIFIED only when the
+ * source supplied the value; otherwise cents is NULL and status is UNKNOWN.
+ * Unknown amounts never block ingestion of verified amounts, and derived
+ * values are never silently presented as source truth.
+ *
+ * CRITICAL: `amount_paid` (RunSignup) is the total charged to the donor. It
+ * is NOT net revenue retained by NWANA. It is preserved verbatim in the
+ * correctly named `amount_paid_cents` field. `net_cents` means verified
+ * settlement / net-retained cash and stays NULL / UNKNOWN until a source
+ * provides verified settlement truth. Never derive it, never relabel
+ * amount_paid as net.
  */
 
 export const MONEY_EVENT_TYPES = [
@@ -55,6 +69,16 @@ export interface MoneyAmounts {
 	grossStatus: AmountStatus;
 	feeCents: number | null;
 	feeStatus: AmountStatus;
+	/**
+	 * Total charged to the donor, exactly as the source stated it
+	 * (RunSignup `amount_paid`). This is NOT net revenue retained by NWANA.
+	 */
+	amountPaidCents: number | null;
+	amountPaidStatus: AmountStatus;
+	/**
+	 * Verified settlement / net-retained cash. NULL + UNKNOWN until a source
+	 * provides verified settlement truth. Never derived from amount_paid.
+	 */
 	netCents: number | null;
 	netStatus: AmountStatus;
 	refundCents: number | null;
@@ -149,13 +173,30 @@ export const RUNSIGNUP_SOURCE_SYSTEM = "runsignup";
 export const RUNSIGNUP_DONATION_RACE_ID = 212466;
 export const MONEY_SYNC_SOURCE_KEY = `runsignup:donations:race:${RUNSIGNUP_DONATION_RACE_ID}`;
 
+export type DonationIdentitySource =
+	| "rsu_transaction_id"
+	| "transaction_id"
+	| "donation_id_fallback";
+
 export interface NormalizedRunSignupDonation {
 	sourceSystem: typeof RUNSIGNUP_SOURCE_SYSTEM;
 	donationId: string;
-	/** Canonical transaction id for a RunSignup donation: the donation record
-	 *  itself is the stable monetary fact, so the transaction is keyed by it. */
+	/**
+	 * Canonical transaction id. The source's true transaction identifier when
+	 * the payload provides one (`rsu_transaction:{id}`, else
+	 * `transaction:{id}`); the deterministic `donation:{donation_id}`
+	 * fallback only when the payload carries no transaction identifier.
+	 */
 	sourceTransactionId: string;
+	/** Which source field supplied the transaction identity (verified fact). */
+	identitySource: DonationIdentitySource;
 	transactionKey: string;
+	/**
+	 * Donation-record based event identity. Stays `donation:{donation_id}`
+	 * even when the transaction identity uses the true source transaction
+	 * id, so event keys (the idempotency proof) never move.
+	 */
+	donationRef: string;
 	eventKey: string;
 	occurredAt: string | null;
 	currency: string;
@@ -197,9 +238,11 @@ function normalizeOccurredAt(value: unknown): string | null {
  * Returns null when the record carries no stable donation identifier
  * (it cannot be given a stable identity, so it is skipped, not guessed).
  *
- * Field names are defensive: the production source currently holds zero
- * donations, so exact record field names are unverified and will be
- * confirmed against the first real donation. No PII is extracted.
+ * Verified production field names (race 212466, real donation 11291415,
+ * 2026-09-30): donation_id, donation_date_ts, donation_amount,
+ * processing_fee, amount_paid, rsu_transaction_id, transaction_id,
+ * fundraiser_id. No PII is extracted (the record's `user` object is never
+ * read).
  */
 export function normalizeRunSignupDonation(
 	record: Record<string, unknown>,
@@ -208,15 +251,41 @@ export function normalizeRunSignupDonation(
 	const donationIdRaw = pickFirst(record, "donation_id", "donationId");
 	if (donationIdRaw === null || donationIdRaw === undefined) return null;
 	const donationId = String(donationIdRaw);
+	const donationRef = `donation:${donationId}`;
 
-	const sourceTransactionId = `donation:${donationId}`;
+	// Transaction identity: the source's true transaction identifier when
+	// the payload provides one. rsu_transaction_id is RunSignup's own
+	// transaction record id (preferred); transaction_id is the payment
+	// gateway reference (accepted when rsu_transaction_id is absent). Only
+	// when the payload carries neither do we fall back to the donation
+	// record itself — deterministic and documented, never guessed.
+	const rsuTxnRaw = pickFirst(record, "rsu_transaction_id", "rsuTransactionId");
+	const txnRaw = pickFirst(record, "transaction_id", "transactionId");
+	let sourceTransactionId: string;
+	let identitySource: DonationIdentitySource;
+	if (rsuTxnRaw !== null && rsuTxnRaw !== undefined && String(rsuTxnRaw) !== "") {
+		sourceTransactionId = `rsu_transaction:${String(rsuTxnRaw)}`;
+		identitySource = "rsu_transaction_id";
+	} else if (txnRaw !== null && txnRaw !== undefined && String(txnRaw) !== "") {
+		sourceTransactionId = `transaction:${String(txnRaw)}`;
+		identitySource = "transaction_id";
+	} else {
+		sourceTransactionId = donationRef;
+		identitySource = "donation_id_fallback";
+	}
+
 	const occurredAt = normalizeOccurredAt(
 		pickFirst(record, "donation_date", "donationDate", "donation_date_ts", "donationDateTs"),
 	);
 	const gross = normalizeAmount(pickFirst(record, "donation_amount", "donationAmount"));
 	const fee = normalizeAmount(pickFirst(record, "processing_fee", "processingFee"));
-	// net is VERIFIED only when the source states it; never derived silently.
-	const net = normalizeAmount(pickFirst(record, "amount_paid", "amountPaid"));
+	// amount_paid is the total charged to the donor — preserved verbatim in
+	// its own correctly named field. It is NOT net revenue.
+	const amountPaid = normalizeAmount(pickFirst(record, "amount_paid", "amountPaid"));
+	// net (settlement / net-retained cash): the donations/list source
+	// provides no settlement truth, so this stays NULL / UNKNOWN by
+	// construction. Never derived from amount_paid.
+	const net = { cents: null as number | null, status: AMOUNT_UNKNOWN };
 	const refund = normalizeAmount(
 		pickFirst(record, "refund_amount", "refundAmount", "refunded_amount", "refundedAmount"),
 	);
@@ -234,6 +303,8 @@ export function normalizeRunSignupDonation(
 		grossStatus: gross.status,
 		feeCents: fee.cents,
 		feeStatus: fee.status,
+		amountPaidCents: amountPaid.cents,
+		amountPaidStatus: amountPaid.status,
 		netCents: net.cents,
 		netStatus: net.status,
 		refundCents: refund.cents,
@@ -242,14 +313,15 @@ export function normalizeRunSignupDonation(
 
 	const snapshot: Record<string, unknown> = {
 		donation_id: donationId,
+		identity_source: identitySource,
 		occurred_at: occurredAt,
 		currency,
 		gross_cents: amounts.grossCents,
 		gross_status: amounts.grossStatus,
 		fee_cents: amounts.feeCents,
 		fee_status: amounts.feeStatus,
-		net_cents: amounts.netCents,
-		net_status: amounts.netStatus,
+		amount_paid_cents: amounts.amountPaidCents,
+		amount_paid_status: amounts.amountPaidStatus,
 		refund_cents: amounts.refundCents,
 		refund_status: amounts.refundStatus,
 		fundraiser_id: fundraiserId,
@@ -259,8 +331,10 @@ export function normalizeRunSignupDonation(
 		sourceSystem: RUNSIGNUP_SOURCE_SYSTEM,
 		donationId,
 		sourceTransactionId,
+		identitySource,
 		transactionKey: transactionKey(RUNSIGNUP_SOURCE_SYSTEM, sourceTransactionId),
-		eventKey: receiptEventKey(RUNSIGNUP_SOURCE_SYSTEM, "donation_received", sourceTransactionId),
+		donationRef,
+		eventKey: receiptEventKey(RUNSIGNUP_SOURCE_SYSTEM, "donation_received", donationRef),
 		occurredAt,
 		currency,
 		amounts,
@@ -268,7 +342,7 @@ export function normalizeRunSignupDonation(
 		fundraiserEventKey:
 			fundraiserId === null
 				? null
-				: receiptEventKey(RUNSIGNUP_SOURCE_SYSTEM, "fundraiser_donation_received", sourceTransactionId),
+				: receiptEventKey(RUNSIGNUP_SOURCE_SYSTEM, "fundraiser_donation_received", donationRef),
 		sourceRef: `race:${raceId}/donation:${donationId}`,
 		snapshot,
 		snapshotHash: snapshotHash(snapshot),
