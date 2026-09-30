@@ -54,7 +54,7 @@ var CONFIG = {
 };
 
 // Increment on every behavior change so Preview logs prove which version ran.
-var SCRIPT_VERSION = "2026-09-30e / sitelink-fix";
+var SCRIPT_VERSION = "2026-09-30f / sitelink-builder";
 // ── ONE-TIME BOOTSTRAP ──────────────────────────────────────────────
 // Paste the operating center key between the quotes, Preview once
 // (authorize when asked), then DELETE the key from this line and Save.
@@ -201,7 +201,7 @@ function reconcileCampaign(spec, summary) {
     }
   }
   try {
-    reconcileSitelinks(campaign, campaignResource, spec);
+    reconcileSitelinks(campaign, spec);
   } catch (e) {
     Logger.log('  ERROR sitelinks for ' + spec.name + ': ' + e.message);
   }
@@ -413,7 +413,11 @@ function readSitelinkTexts(campaign) {
   return existing;
 }
 
-function reconcileSitelinks(campaign, campaignResource, spec) {
+function reconcileSitelinks(campaign, spec) {
+  // Sitelinks go through the classic extensions builder: the mutate()
+  // assetOperation path fails in this account's scripts backend with an
+  // opaque "An error occurred. Please try again later." (proven 2026-09-30
+  // across two payload shapes). The builder reports real errors.
   var existing;
   try {
     existing = readSitelinkTexts(campaign);
@@ -426,40 +430,28 @@ function reconcileSitelinks(campaign, campaignResource, spec) {
   for (var i = 0; i < spec.sitelinks.length; i++) {
     var link = spec.sitelinks[i];
     if (existing[link.text]) continue;
-    // NOTE: do NOT set Asset.type on create — it is output-only; the
-    // populated sitelinkAsset oneof determines the type. Setting it makes
-    // the operation fail. Also NOTE: AdsApp.mutate() does not throw on
-    // operation failure, so creation is verified by re-reading.
-    var sitelinkAsset = { linkText: link.text, finalUrls: [link.final_url] };
-    if (link.description) {
-      sitelinkAsset.description1 = link.description;
-    }
-    var assetResource = gadsMutate({
-      assetOperation: {
-        create: {
-          name: spec.name + ' | ' + link.text,
-          sitelinkAsset: sitelinkAsset
-        }
-      }
-    }, 'sitelink asset create (' + link.text + ')').getResourceName();
-    gadsMutate({
-      campaignAssetOperation: {
-        create: {
-          campaign: campaignResource,
-          asset: assetResource,
-          fieldType: 'SITELINK'
-        }
-      }
-    }, 'sitelink attach (' + link.text + ')');
-    var verified = false;
     try {
-      verified = !!readSitelinkTexts(campaign)[link.text];
-    } catch (e) { verified = false; }
-    if (verified) {
-      Logger.log('  Added sitelink: ' + link.text);
-    } else {
-      Logger.log('  ERROR: sitelink "' + link.text + '" was not visible after ' +
-        'create for ' + spec.name + ' — check Assets in the UI before enabling.');
+      var builder = AdsApp.extensions().newSitelinkBuilder()
+        .withLinkText(link.text)
+        .withFinalUrl(link.final_url);
+      if (link.description) builder.withDescription1(link.description);
+      var operation = builder.build();
+      if (!operation.isSuccessful()) {
+        Logger.log('  ERROR: sitelink "' + link.text + '" build failed: ' +
+          operation.getErrors().join('; '));
+        continue;
+      }
+      campaign.addSitelink(operation.getResult());
+      var verified = false;
+      try { verified = !!readSitelinkTexts(campaign)[link.text]; } catch (e) { verified = false; }
+      if (verified) {
+        Logger.log('  Added sitelink: ' + link.text);
+      } else {
+        Logger.log('  Sitelink "' + link.text + '" attached to ' + spec.name +
+          ' but not yet visible — confirm in the UI before enabling.');
+      }
+    } catch (e) {
+      Logger.log('  ERROR sitelink "' + link.text + '": ' + e.message);
     }
   }
 }
