@@ -54,7 +54,7 @@ var CONFIG = {
 };
 
 // Increment on every behavior change so Preview logs prove which version ran.
-var SCRIPT_VERSION = "2026-09-30d / ad-dedup-fix";
+var SCRIPT_VERSION = "2026-09-30e / sitelink-fix";
 // ── ONE-TIME BOOTSTRAP ──────────────────────────────────────────────
 // Paste the operating center key between the quotes, Preview once
 // (authorize when asked), then DELETE the key from this line and Save.
@@ -404,63 +404,87 @@ function addResponsiveAdOnce(adGroup, adGroupResource, ad) {
     ' headlines): ' + ad.final_url);
 }
 
+function readSitelinkTexts(campaign) {
+  var existing = {};
+  var it = campaign.extensions().sitelinks().get();
+  while (it.hasNext()) {
+    existing[it.next().getLinkText()] = true;
+  }
+  return existing;
+}
+
 function reconcileSitelinks(campaign, campaignResource, spec) {
+  var existing;
   try {
-    var existing = {};
-    var it = campaign.extensions().sitelinks().get();
-    while (it.hasNext()) {
-      existing[it.next().getLinkText()] = true;
-    }
-    for (var i = 0; i < spec.sitelinks.length; i++) {
-      var link = spec.sitelinks[i];
-      if (existing[link.text]) continue;
-      var sitelinkAsset = { linkText: link.text, finalUrls: [link.final_url] };
-      if (link.description) {
-        sitelinkAsset.description1 = link.description;
-      }
-      var assetResource = gadsMutate({
-        assetOperation: {
-          create: {
-            name: link.text,
-            type: 'SITELINK',
-            sitelinkAsset: sitelinkAsset
-          }
-        }
-      }, 'sitelink asset create (' + link.text + ')').getResourceName();
-      gadsMutate({
-        campaignAssetOperation: {
-          create: {
-            campaign: campaignResource,
-            asset: assetResource,
-            fieldType: 'SITELINK'
-          }
-        }
-      }, 'sitelink attach (' + link.text + ')');
-      Logger.log('  Added sitelink: ' + link.text);
-    }
+    existing = readSitelinkTexts(campaign);
   } catch (e) {
     Logger.log('  Sitelinks need a manual check for ' + spec.name +
-      ' (script could not manage them: ' + e.message +
+      ' (script could not read them: ' + e.message +
       '). Ad Grants requires 2+ active sitelinks per campaign.');
+    return;
+  }
+  for (var i = 0; i < spec.sitelinks.length; i++) {
+    var link = spec.sitelinks[i];
+    if (existing[link.text]) continue;
+    // NOTE: do NOT set Asset.type on create — it is output-only; the
+    // populated sitelinkAsset oneof determines the type. Setting it makes
+    // the operation fail. Also NOTE: AdsApp.mutate() does not throw on
+    // operation failure, so creation is verified by re-reading.
+    var sitelinkAsset = { linkText: link.text, finalUrls: [link.final_url] };
+    if (link.description) {
+      sitelinkAsset.description1 = link.description;
+    }
+    var assetResource = gadsMutate({
+      assetOperation: {
+        create: {
+          name: spec.name + ' | ' + link.text,
+          sitelinkAsset: sitelinkAsset
+        }
+      }
+    }, 'sitelink asset create (' + link.text + ')').getResourceName();
+    gadsMutate({
+      campaignAssetOperation: {
+        create: {
+          campaign: campaignResource,
+          asset: assetResource,
+          fieldType: 'SITELINK'
+        }
+      }
+    }, 'sitelink attach (' + link.text + ')');
+    var verified = false;
+    try {
+      verified = !!readSitelinkTexts(campaign)[link.text];
+    } catch (e) { verified = false; }
+    if (verified) {
+      Logger.log('  Added sitelink: ' + link.text);
+    } else {
+      Logger.log('  ERROR: sitelink "' + link.text + '" was not visible after ' +
+        'create for ' + spec.name + ' — check Assets in the UI before enabling.');
+    }
   }
 }
 
 function verifyNetworkSettings(campaign) {
+  // The API's target_search_network flag covers partner SITES (it is false
+  // by design here); the "Google Search ON" requirement is
+  // target_google_search. Read the right fields to avoid false alarms.
   try {
     var rows = AdsApp.search(
-      'SELECT campaign.network_settings.target_search_network, ' +
+      'SELECT campaign.network_settings.target_google_search, ' +
+      'campaign.network_settings.target_search_network, ' +
       'campaign.network_settings.target_partner_search_network, ' +
       'campaign.network_settings.target_content_network ' +
       'FROM campaign WHERE campaign.name = "' + campaign.getName().replace(/"/g, '') + '" LIMIT 1');
     if (rows.hasNext()) {
       var row = rows.next();
       var nets = row.campaign.networkSettings;
-      if (nets.targetPartnerSearchNetwork || nets.targetContentNetwork || !nets.targetSearchNetwork) {
+      if (!nets.targetGoogleSearch || nets.targetPartnerSearchNetwork || nets.targetContentNetwork) {
         Logger.log('  CHECK NETWORKS for ' + campaign.getName() +
-          ': Search=' + nets.targetSearchNetwork +
+          ': GoogleSearch=' + nets.targetGoogleSearch +
+          ', SearchNetwork(partner sites)=' + nets.targetSearchNetwork +
           ', Partners=' + nets.targetPartnerSearchNetwork +
           ', Content=' + nets.targetContentNetwork +
-          '. Required: Search ON, partners OFF, content OFF.');
+          '. Required: GoogleSearch ON, partners OFF, content OFF.');
       }
     }
   } catch (e) {
