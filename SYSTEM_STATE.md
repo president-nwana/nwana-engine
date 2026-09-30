@@ -1073,3 +1073,17 @@ A new developer or AI must be able to continue the project from this repository 
 - Tests: 2 new Phase 4 tests (action recorded on new donation; no action when no new donation). Full suite 759/759 pass. tsc clean.
 - Deployed: Worker `b17215f5-981f-4c38-a8fc-5755233fc141`. Commit `043dbeb` pushed to origin/main.
 - Operating cost: VERIFIED $0 (code change only, no new infrastructure).
+
+### Real next automated revenue action: fund attribution (implemented 2026-09-30, Albert confirmed)
+- Owner decision 2026-09-30: all verified `donation_received` on race 212466 automatically credited to `fund-50k-bridge-sprint`.
+- The `donation-received` / `pending` inventory action is a state/history marker ONLY. The REAL next automated revenue action is the fund financial state update.
+- Implementation (smallest safe change, no new architecture):
+  - Migration 0053: `fund_id TEXT` column on `money_transactions` + index.
+  - `src/lib/money-ingestion.ts`: `FUND_ID_BRIDGE_SPRINT` constant; `RACE_TO_FUND_ID` map (212466 → fund); `recalculateFundRaised()` function.
+  - On new donation ingest: `fund_id` set on the transaction row; after batch commits, `funds.raised_amount` RECALCULATED as `(SUM(gross_cents) - SUM(refund_cents)) / 100.0` from canonical money truth.
+  - Recalculation (not increment): idempotent across syncs/retries; refunds, partial refunds, reversals, chargebacks automatically reduce the total via updated `refund_cents` / `lifecycle_state`.
+  - Reconcile path also recalculates after lifecycle events.
+- Production: migration 0053 applied via D1 API; existing $5 donation (11291415, transaction 56992565) backfilled with `fund_id`; fund `raised_amount` = $5.00 VERIFIED in D1.
+- Tests: 3 new fund attribution tests (credit on new donation; idempotent on retry; accumulates multiple). Full suite 762/762 pass. tsc clean.
+- Deployed: Worker `e2488807e23f4dc795f526c08933b633` (via Cloudflare API). Commit `c7bcab5` pushed to origin/main.
+- Operating cost: VERIFIED $0 (code + D1 schema change only, no new infrastructure).
