@@ -1087,3 +1087,13 @@ A new developer or AI must be able to continue the project from this repository 
 - Tests: 3 new fund attribution tests (credit on new donation; idempotent on retry; accumulates multiple). Full suite 762/762 pass. tsc clean.
 - Deployed: Worker `e2488807e23f4dc795f526c08933b633` (via Cloudflare API). Commit `c7bcab5` pushed to origin/main.
 - Operating cost: VERIFIED $0 (code + D1 schema change only, no new infrastructure).
+
+### Fund projection self-healing correctness fix (2026-09-30, Albert required)
+- Gap: canonical money state committed first, fund recalculation ran afterwards as a separate operation. If recalculation failed, next invocation with no new event never repaired the projection.
+- Fix (smallest safe): fund recalculation now runs on EVERY sync/reconcile completion for race 212466, including invocations with no new donation/lifecycle event. Deterministically recoverable from canonical D1 truth; no RunSignup re-read.
+- `syncRunSignupDonations`: `if (fundId)` instead of `if (fundId && fundCredited)`.
+- `reconcileRunSignupDonations`: `if (fundId)` instead of conditional on lifecycle events.
+- Tests: 3 new self-healing tests (repair after failed donation projection; repair after refund with failed projection; repeated recovery idempotent). Full suite 765/765 pass. tsc clean.
+- Deployed: Worker via Cloudflare API. Commit `9949a6b` pushed to origin/main.
+- Production verification: `fund-50k-bridge-sprint.raised_amount = $5.00` VERIFIED in D1.
+- Operating cost: VERIFIED $0.
