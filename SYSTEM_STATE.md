@@ -1,4 +1,4 @@
-﻿# NWANA ENGINE — CURRENT SYSTEM STATE
+# NWANA ENGINE — CURRENT SYSTEM STATE
 
 This file is the canonical starting point for any developer or AI working on NWANA Engine.
 
@@ -38,7 +38,9 @@ Read before making changes:
 - Ingestion: `syncRunSignupDonations` in `src/lib/money-ingestion.ts` (uses canonical `src/runsignup-client.ts`; bounded pagination 100 rows x 20 pages; no generic retry; failure records without advancing cursor; `INSERT OR IGNORE` on deterministic keys; D1 batch commits events + checkpoint atomically). Owner-gated routes: `POST /api/operating-center/money/sync`, `GET .../money/events`, `GET .../money/transactions`, `GET .../money/sync-state`. No cron — sync starts only by explicit owner action in Engine, per ADR-0045. Money overview donation section now reads canonical D1 only (ADR-0044).
 - Production verification 2026-09-30 ~02:15 UTC, Worker version `7c7d3078`: first sync → ok, fetched 0 (race 212466 has zero donations — matches the 2026-09-30 probe), checkpoint row `runsignup:donations:race:212466` durably written; second sync → 0 new events (no duplicates); `/money/events`, `/money/transactions` return empty lists; `/money/overview` reports "Donation feed synced; no donations recorded yet". Tests 743/743 (30 new money tests), tsc clean.
 - Infra notes: Cloudflare API token has NO D1 scope (D1 API calls return 401/7403) — migration 0049 was applied via a temporary owner-gated worker route through the Worker's own D1 binding, then the route was removed and redeployed (clean version `7c7d3078`). `~/workspace/bin/cf-wrangler` wraps wrangler with the stored token via authd surrogate (real token never handled). Token D1 scope is a verified missing capability — request upgrade separately; not blocking.
-- Commit `419cff1` (Phase 1 implementation) — push to origin/main pending (GitHub App approval expired on first attempt; retry next).
+- Commit `419cff1` (Phase 1 implementation) pushed to origin/main as `691d7e7` — Phase 1 repository parity CLOSED 2026-09-30 (implementation code, migration 0049, money-model/ingestion, ADR-0045, tests; index.ts + SYSTEM_STATE.md were delivered as downloadable parity exports since they exceed the GitHub CLI 128KB per-arg limit).
+- Acceptance PASSED 2026-09-30 ~03:12 UTC on a real $5.00 donation (+$0.20 donor-covered processing fee, $5.20 charged) to race 212466: source_transaction_id `donation:11291415`, transaction_key `runsignup:donation:11291415`, event_key `runsignup:evt:donation_received:donation:11291415` (occurred_at 2026-09-30T03:10:48Z); gross 500¢ / fee 20¢ / net 520¢ all VERIFIED, refund UNKNOWN, attribution ATTRIBUTION_UNKNOWN; checkpoint cursor advanced to `11291415`; second no-change sync created zero duplicate events (canonical table still exactly 1 event); money overview reads canonical D1 only and reports the donation (`total_gross_cents: 500`).
+- Canonical semantic contract (ADR-0045 addendum 2026-09-30): for RunSignup donations `net_cents` ← source `amount_paid` = TOTAL CHARGED TO THE DONOR, not net revenue retained by NWANA. Downstream donation-revenue aggregation sums `gross_cents` (org-directed donation amount), never `net_cents`; retained revenue is never derived as gross − fee without source-verified fee-bearing. Source truth preserved (520¢ stored VERIFIED); misinterpretation as retained revenue is forbidden.
 
 ## READ THIS FIRST
 
