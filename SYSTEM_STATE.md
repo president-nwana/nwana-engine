@@ -1063,7 +1063,7 @@ A new developer or AI must be able to continue the project from this repository 
 - ADR-0016 (accepted): in-account Google Ads Script is the production acquisition path — requires zero API mutation access.
 - Verified: `google-ads/nwana-reconcile-script.js` exists and is ready; desired-state endpoint live (`ok:true`, 2 campaigns); campaign `NWANA · Founding Circle · Donate` targets the exact 212466 donation URL, passes all Ad Grants policy checks, `isCreationEligible: TRUE` (origin OWNER_DIRECTIVE).
 - Verified: NO `NWANA · ` campaigns exist in the live Ads account (12 campaigns, none with prefix) — the `NWANA reconcile` script is NOT installed/running. No installation record in SYSTEM_STATE or ADRs.
-- Remaining acquisition step (owner, ~20 min, one-time): paste script in Ads UI (Tools → Bulk actions → Scripts), add `NWANA_OWNER_KEY` property, authorize, schedule hourly. Script creates the campaign PAUSED; owner reviews (networks/locations/bidding/sitelinks/copy) and enables. Verification: status ENABLED in Ads UI + visible in Engine ads overview.
+- Remaining acquisition step (owner, ~20 min, one-time): paste script in Ads UI (Tools → Bulk actions → Scripts), paste `NWANA_OWNER_KEY` into the `NWANA_OWNER_KEY_BOOTSTRAP = ""` line at the top of the script, Preview → Authorize → Allow (script stores the key in its own ScriptProperties, never logged), delete the key from the bootstrap line, Save, Preview again to verify the reconcile run, set Frequency: Hourly. Script creates the campaign PAUSED; owner reviews (networks/locations/bidding/sitelinks/copy) and enables. Verification: status ENABLED in Ads UI + visible in Engine ads overview.
 - API tier upgrade is NOT a Revenue Engine v1 requirement. Not pursued.
 
 ### Post-donation automated action (implemented 2026-09-30)
@@ -1103,5 +1103,5 @@ A new developer or AI must be able to continue the project from this repository 
 - `fund-50k-bridge-sprint.raised_amount = $5.00` production verified in D1.
 - Code path for the first donation funnel is ready for production proof: verified donation ingest → canonical money truth → attribution state → automatic fund financial-state update, repeatable without developer intervention.
 - Phase 4 status: IN PROGRESS.
-- Remaining blocker: owner installation/activation of `NWANA reconcile` in Google Ads (paste script, add `NWANA_OWNER_KEY`, authorize, schedule hourly), then review and ENABLE campaign `NWANA · Founding Circle · Donate`.
+- Remaining blocker: owner installation/activation of `NWANA reconcile` in Google Ads (paste script, bootstrap `NWANA_OWNER_KEY` via the `NWANA_OWNER_KEY_BOOTSTRAP` line, authorize, schedule hourly), then review and ENABLE campaign `NWANA · Founding Circle · Donate`.
 - No further Phase 4 development required before that owner action. Next step after script installation: production proof via a new real donation through the acquisition path.

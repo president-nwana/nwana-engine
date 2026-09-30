@@ -13,15 +13,31 @@
  * - Never deletes anything. It only adds missing pieces and updates budgets.
  *
  * ONE-TIME SETUP (about 20 minutes, done once)
+ * The current Google Ads Scripts editor has NO Script Properties / Project
+ * Settings panel, so the key is bootstrapped through the script itself:
  * 1. In Google Ads: Tools -> Bulk actions -> Scripts -> + to add a script.
  * 2. Paste this whole file, name it "NWANA reconcile".
- * 3. In the script editor: open the left menu -> Properties ->
- *    Script properties -> add row: property NWANA_OWNER_KEY, value = the
- *    operating center key. (The script sends it as an Authorization header;
- *    it is never printed to any log.)
- * 4. Authorize the script when asked (it needs Ads + external fetch access).
- * 5. Frequency: Hourly. Save, then Preview once and read the log.
- * 6. After the first run: check each new campaign once in the Ads UI:
+ * 3. At the top of the script find NWANA_OWNER_KEY_BOOTSTRAP = "" and paste
+ *    the operating center key between the quotes.
+ * 4. Click Preview. When prompted, click Authorize, choose the Google
+ *    account, review permissions, click Allow. The script stores the key in
+ *    its own ScriptProperties (never printed to any log) and reports
+ *    "one-time bootstrap complete".
+ * 5. Delete the key from the NWANA_OWNER_KEY_BOOTSTRAP line (leave ""),
+ *    click Save.
+ * 6. Click Preview again and read the log: it must show the reconcile run
+ *    (desired-state fetch, campaign check). Afterwards the bootstrap line
+ *    stays empty forever; the stored key is reused on every run.
+ * 7. Back in the Scripts list set Frequency: Hourly for "NWANA reconcile".
+ * 8. After the first scheduled run: check each new campaign once in the Ads UI:
+ *    - Networks: Google Search ON, Search partners OFF, Display OFF.
+ *    - Locations: United States, "Presence" (people in the location).
+ *    - Bidding: Manual CPC (ad-group bids are set by the script, max $2.00).
+ *    - Two sitelinks present (script adds them; confirm they show).
+ *    Then enable a campaign only when you approve its ads.
+ *
+ * The key is sent as an Authorization header only. It is never written to
+ * any log, and the committed copy of this file keeps the bootstrap line empty.
  *    - Networks: Google Search ON, Search partners OFF, Display OFF.
  *    - Locations: United States, "Presence" (people in the location).
  *    - Bidding: Manual CPC (ad-group bids are set by the script, max $2.00).
@@ -35,11 +51,37 @@ var CONFIG = {
   MANAGED_PREFIX: 'NWANA \u00b7 '
 };
 
+// ── ONE-TIME BOOTSTRAP ──────────────────────────────────────────────
+// Paste the operating center key between the quotes, Preview once
+// (authorize when asked), then DELETE the key from this line and Save.
+// The script copies it into its own ScriptProperties on first run;
+// afterwards this line must stay empty.
+var NWANA_OWNER_KEY_BOOTSTRAP = "";
+// ───────────────────────────────────────────────────────────────────
+
+function getOwnerKey() {
+  var props = PropertiesService.getScriptProperties();
+  var stored = props.getProperty(CONFIG.OWNER_KEY_PROPERTY);
+  if (stored) {
+    return stored;
+  }
+  if (NWANA_OWNER_KEY_BOOTSTRAP) {
+    props.setProperty(CONFIG.OWNER_KEY_PROPERTY, NWANA_OWNER_KEY_BOOTSTRAP);
+    // Never log the key itself — only confirm it was stored.
+    Logger.log('NWANA reconcile: owner key stored in ScriptProperties ' +
+      '(one-time bootstrap complete). Now delete the key from the ' +
+      'NWANA_OWNER_KEY_BOOTSTRAP line and click Save.');
+    return NWANA_OWNER_KEY_BOOTSTRAP;
+  }
+  Logger.log('NWANA reconcile: ' + CONFIG.OWNER_KEY_PROPERTY + ' is not set. ' +
+    'One-time setup: paste the operating center key into ' +
+    'NWANA_OWNER_KEY_BOOTSTRAP at the top of this script, then Preview once.');
+  return null;
+}
+
 function main() {
-  var key = PropertiesService.getScriptProperties().getProperty(CONFIG.OWNER_KEY_PROPERTY);
+  var key = getOwnerKey();
   if (!key) {
-    Logger.log('Missing script property ' + CONFIG.OWNER_KEY_PROPERTY +
-      '. Add it under the script Properties panel (value = operating center key).');
     return;
   }
   var state = fetchDesiredState(key);
