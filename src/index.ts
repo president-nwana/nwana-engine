@@ -119,6 +119,12 @@ import { renderMediaHtml } from "./operating-center-media";
 import { renderNewsReviewHtml } from "./operating-center-news-review";
 import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFacebook } from "./news-review";
 import { getExecutiveMoneyView } from "./operating-center-money";
+import {
+	getMoneySyncState,
+	listMoneyEvents,
+	listMoneyTransactions,
+	syncRunSignupDonations,
+} from "./lib/money-ingestion";
 import { renderSponsorshipHtml } from "./operating-center-sponsorship";
 import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
@@ -6065,6 +6071,44 @@ export default {
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/money/overview") {
 			return json(await getExecutiveMoneyView(env.nwana_engine_db));
+		}
+		// Phase 1 Money Ingestion (Revenue Engine v1): canonical monetary
+		// read paths. ADR-0044: downstream reads D1; these routes never
+		// touch RunSignup. Owner-key gated by the general
+		// operatingCenterApiRoute check above.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/money/events") {
+			const eventType = url.searchParams.get("event_type") ?? undefined;
+			const limit = Number(url.searchParams.get("limit") ?? "50");
+			return json({
+				ok: true,
+				events: await listMoneyEvents(env.nwana_engine_db, { eventType, limit }),
+			});
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/money/transactions") {
+			const lifecycleState = url.searchParams.get("lifecycle_state") ?? undefined;
+			const limit = Number(url.searchParams.get("limit") ?? "50");
+			return json({
+				ok: true,
+				transactions: await listMoneyTransactions(env.nwana_engine_db, {
+					lifecycleState,
+					limit,
+				}),
+			});
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/money/sync-state") {
+			return json({ ok: true, sync: await getMoneySyncState(env.nwana_engine_db) });
+		}
+		// Phase 1 Money Ingestion: explicit sync trigger. This is the
+		// allowed start per the OPERATING_PLAN trigger rule (owner action
+		// in Engine) — there is intentionally no cron polling the source.
+		// Idempotent: re-running against unchanged source data ingests
+		// zero new canonical events.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/money/sync") {
+			const result = await syncRunSignupDonations(
+				env.nwana_engine_db,
+				env.RUNSIGNUP_ACCESS_TOKEN,
+			);
+			return json(result, result.ok ? 200 : 502);
 		}
 
 		// ADR-0027: downloadable external-ready reports. Owner-key protected
