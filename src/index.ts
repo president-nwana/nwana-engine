@@ -121,8 +121,10 @@ import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFa
 import { getExecutiveMoneyView } from "./operating-center-money";
 import {
 	getMoneySyncState,
+	inspectDonationRecordShape,
 	listMoneyEvents,
 	listMoneyTransactions,
+	reconcileRunSignupDonations,
 	syncRunSignupDonations,
 } from "./lib/money-ingestion";
 import { renderSponsorshipHtml } from "./operating-center-sponsorship";
@@ -6109,6 +6111,39 @@ export default {
 				env.RUNSIGNUP_ACCESS_TOKEN,
 			);
 			return json(result, result.ok ? 200 : 502);
+		}
+		// Phase 1 Money Ingestion: explicit, bounded reconciliation of
+		// already-canonicalized donations (e.g. refund detection on old
+		// donations, invisible to incremental ingestion by design). Separate
+		// from normal ingestion: never advances the sync cursor, never
+		// widens its own scope. Body: { donation_ids: [...], reason?: str }.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/money/reconcile") {
+			let body: { donation_ids?: unknown; reason?: unknown } = {};
+			try {
+				body = (await request.json()) as typeof body;
+			} catch {
+				body = {};
+			}
+			const donationIds = Array.isArray(body.donation_ids) ? body.donation_ids : [];
+			const result = await reconcileRunSignupDonations(
+				env.nwana_engine_db,
+				env.RUNSIGNUP_ACCESS_TOKEN,
+				{ donationIds, reason: typeof body.reason === "string" ? body.reason : undefined },
+			);
+			return json(result, result.ok ? 200 : 502);
+		}
+		// Phase 1 Money Ingestion: diagnostic — inspect the live shape of one
+		// donation record. Returns field names plus allowlisted non-PII
+		// scalars only; the record's `user` object (donor PII) is never
+		// read, returned, or logged. Explicit, bounded, owner-gated.
+		if (
+			request.method === "GET" &&
+			url.pathname === "/api/operating-center/money/diagnostics/donation-record"
+		) {
+			const donationId = url.searchParams.get("donation_id") ?? "";
+			return json(
+				await inspectDonationRecordShape(env.RUNSIGNUP_ACCESS_TOKEN, donationId),
+			);
 		}
 
 		// ADR-0027: downloadable external-ready reports. Owner-key protected
