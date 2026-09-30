@@ -9,8 +9,15 @@
  * WHAT IT NEVER DOES
  * - Never enables anything. Everything is created PAUSED; a human reviews
  *   and enables each campaign in the Ads UI.
- * - Never touches campaigns whose name does not start with "NWANA \u00b7 ".
+ * - Never touches campaigns whose name does not start with "NWANA · ".
  * - Never deletes anything. It only adds missing pieces and updates budgets.
+ *
+ * HOW IT WRITES
+ * Campaign/ad-group/keyword/ad/sitelink creation goes through
+ * AdsApp.mutate() — the Google Ads API REST mutate path documented in the
+ * current Google Ads Scripts reference. (The old AdsApp.newCampaignBuilder()
+ * no longer exists in the scripts runtime; a 2026-09-30 Preview proved it
+ * throws "not a function".) Reads still use the classic selectors.
  *
  * ONE-TIME SETUP (about 20 minutes, done once)
  * The current Google Ads Scripts editor has NO Script Properties / Project
@@ -33,16 +40,11 @@
  *    - Networks: Google Search ON, Search partners OFF, Display OFF.
  *    - Locations: United States, "Presence" (people in the location).
  *    - Bidding: Manual CPC (ad-group bids are set by the script, max $2.00).
- *    - Two sitelinks present (script adds them; confirm they show).
+ *    - Three sitelinks present (script adds them; confirm they show).
  *    Then enable a campaign only when you approve its ads.
  *
  * The key is sent as an Authorization header only. It is never written to
  * any log, and the committed copy of this file keeps the bootstrap line empty.
- *    - Networks: Google Search ON, Search partners OFF, Display OFF.
- *    - Locations: United States, "Presence" (people in the location).
- *    - Bidding: Manual CPC (ad-group bids are set by the script, max $2.00).
- *    - Two sitelinks present (script adds them; confirm they show).
- *    Then enable a campaign only when you approve its ads.
  */
 
 var CONFIG = {
@@ -129,6 +131,35 @@ function fetchDesiredState(key) {
   }
 }
 
+// ── Google Ads API mutate helpers ───────────────────────────────────
+// AdsApp.mutate() executes one Google Ads API REST mutate operation and
+// returns a MutateResult (getResourceName() gives the created resource).
+// This is the documented creation path in the current scripts runtime.
+
+function customerIdDigits() {
+  return AdsApp.currentAccount().getCustomerId().replace(/-/g, '');
+}
+
+function micros(dollars) {
+  return String(Math.round(dollars * 1000000));
+}
+
+function gadsMutate(operation, what) {
+  try {
+    return AdsApp.mutate(operation);
+  } catch (e) {
+    throw new Error(what + ' failed: ' + e.message);
+  }
+}
+
+function campaignResourceName(campaign) {
+  return 'customers/' + customerIdDigits() + '/campaigns/' + campaign.getId();
+}
+
+function adGroupResourceName(adGroup) {
+  return 'customers/' + customerIdDigits() + '/adGroups/' + adGroup.getId();
+}
+
 function findCampaign(name) {
   var it = AdsApp.campaigns()
     .withCondition('campaign.name = "' + name.replace(/"/g, '') + '"')
@@ -138,22 +169,17 @@ function findCampaign(name) {
 
 function reconcileCampaign(spec, summary) {
   var campaign = findCampaign(spec.name);
+  var campaignResource;
   if (!campaign) {
-    campaign = AdsApp.newCampaignBuilder()
-      .withName(spec.name)
-      .withStatus('PAUSED')
-      .withBudget(spec.daily_budget)
-      .build()
-      .getResult();
-    try {
-      campaign.addLocation(spec.geo_target_id);
-    } catch (e) {
-      Logger.log(spec.name + ': could not set location targeting automatically (' + e.message +
-        '). Set United States manually in campaign settings.');
+    campaignResource = createCampaignViaApi(spec, summary);
+    // Re-fetch so the object below supports ad-group/keyword/ad selectors.
+    campaign = findCampaign(spec.name);
+    if (!campaign) {
+      throw new Error('campaign created but could not be re-read; ' +
+        'check the account UI before the next run');
     }
-    summary.created++;
-    Logger.log('Created campaign (PAUSED): ' + spec.name);
   } else {
+    campaignResource = campaignResourceName(campaign);
     var budget = campaign.getBudget();
     if (Math.abs(budget.getAmount() - spec.daily_budget) > 0.001) {
       budget.setAmount(spec.daily_budget);
@@ -164,10 +190,68 @@ function reconcileCampaign(spec, summary) {
     }
   }
   for (var i = 0; i < spec.ad_groups.length; i++) {
-    reconcileAdGroup(campaign, spec.ad_groups[i]);
+    reconcileAdGroup(campaign, campaignResource, spec.ad_groups[i]);
   }
-  reconcileSitelinks(campaign, spec);
+  reconcileSitelinks(campaign, campaignResource, spec);
   verifyNetworkSettings(campaign);
+}
+
+function createCampaignViaApi(spec, summary) {
+  // 1. Daily budget (own budget per campaign; total stays under the grant cap
+  //    because the engine sizes each daily_budget accordingly).
+  var budgetResource = gadsMutate({
+    campaignBudgetOperation: {
+      create: {
+        name: spec.name + ' — daily budget',
+        amountMicros: micros(spec.daily_budget),
+        deliveryMethod: 'STANDARD'
+      }
+    }
+  }, 'campaign budget create').getResourceName();
+
+  // 2. Search campaign, Manual CPC, PAUSED. Search partners and Display off.
+  //    Presence geo targeting is set via geoTargetTypeSetting.
+  var campaignResource = gadsMutate({
+    campaignOperation: {
+      create: {
+        name: spec.name,
+        status: 'PAUSED',
+        advertisingChannelType: 'SEARCH',
+        campaignBudget: budgetResource,
+        manualCpc: { enhancedCpcEnabled: false },
+        networkSettings: {
+          targetGoogleSearch: true,
+          targetSearchNetwork: true,
+          targetPartnerSearchNetwork: false,
+          targetContentNetwork: false
+        },
+        geoTargetTypeSetting: {
+          positiveGeoTargetType: 'PRESENCE',
+          negativeGeoTargetType: 'PRESENCE'
+        },
+        containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING'
+      }
+    }
+  }, 'campaign create').getResourceName();
+
+  // 3. Location: United States (geoTargetConstants/2840).
+  try {
+    gadsMutate({
+      campaignCriterionOperation: {
+        create: {
+          campaign: campaignResource,
+          location: { geoTargetConstant: 'geoTargetConstants/' + spec.geo_target_id }
+        }
+      }
+    }, 'location criterion create');
+  } catch (e) {
+    Logger.log(spec.name + ': could not set location targeting automatically (' + e.message +
+      '). Set United States manually in campaign settings.');
+  }
+
+  summary.created++;
+  Logger.log('Created campaign (PAUSED): ' + spec.name);
+  return campaignResource;
 }
 
 function findAdGroup(campaign, name) {
@@ -177,21 +261,33 @@ function findAdGroup(campaign, name) {
   return it.hasNext() ? it.next() : null;
 }
 
-function reconcileAdGroup(campaign, groupSpec) {
+function reconcileAdGroup(campaign, campaignResource, groupSpec) {
   var adGroup = findAdGroup(campaign, groupSpec.name);
+  var adGroupResource;
   if (!adGroup) {
-    adGroup = campaign.newAdGroupBuilder()
-      .withName(groupSpec.name)
-      .withCpc(groupSpec.default_cpc)
-      .build()
-      .getResult();
+    adGroupResource = gadsMutate({
+      adGroupOperation: {
+        create: {
+          campaign: campaignResource,
+          name: groupSpec.name,
+          status: 'ENABLED',
+          cpcBidMicros: micros(groupSpec.default_cpc)
+        }
+      }
+    }, 'ad group create (' + groupSpec.name + ')').getResourceName();
     Logger.log('  Created ad group: ' + groupSpec.name);
+    adGroup = findAdGroup(campaign, groupSpec.name);
+    if (!adGroup) {
+      throw new Error('ad group created but could not be re-read: ' + groupSpec.name);
+    }
+  } else {
+    adGroupResource = adGroupResourceName(adGroup);
   }
   for (var i = 0; i < groupSpec.keywords.length; i++) {
-    addKeywordOnce(adGroup, groupSpec.keywords[i]);
+    addKeywordOnce(adGroup, adGroupResource, groupSpec.keywords[i]);
   }
   for (var j = 0; j < groupSpec.ads.length; j++) {
-    addResponsiveAdOnce(adGroup, groupSpec.ads[j]);
+    addResponsiveAdOnce(adGroup, adGroupResource, groupSpec.ads[j]);
   }
 }
 
@@ -201,13 +297,21 @@ function keywordText(keyword) {
   return keyword.text;
 }
 
-function addKeywordOnce(adGroup, keyword) {
+function addKeywordOnce(adGroup, adGroupResource, keyword) {
   var text = keywordText(keyword);
   var it = adGroup.keywords()
     .withCondition('ad_group_criterion.keyword.text = "' + keyword.text.replace(/"/g, '') + '"')
     .get();
   if (!it.hasNext()) {
-    adGroup.newKeywordBuilder().withText(text).build();
+    gadsMutate({
+      adGroupCriterionOperation: {
+        create: {
+          adGroup: adGroupResource,
+          status: 'ENABLED',
+          keyword: { text: keyword.text, matchType: keyword.match_type }
+        }
+      }
+    }, 'keyword create (' + text + ')');
     Logger.log('    Added keyword: ' + text);
   }
 }
@@ -216,7 +320,7 @@ function adFingerprint(ad) {
   return ad.headlines.join('|') + '||' + ad.final_url;
 }
 
-function addResponsiveAdOnce(adGroup, ad) {
+function addResponsiveAdOnce(adGroup, adGroupResource, ad) {
   var existing = adGroup.ads().get();
   var fingerprint = adFingerprint(ad);
   while (existing.hasNext()) {
@@ -226,14 +330,26 @@ function addResponsiveAdOnce(adGroup, ad) {
       return;
     }
   }
-  var builder = adGroup.newAd().responsiveSearchAdBuilder().withFinalUrl(ad.final_url);
-  for (var i = 0; i < ad.headlines.length; i++) builder.addHeadline(ad.headlines[i]);
-  for (var j = 0; j < ad.descriptions.length; j++) builder.addDescription(ad.descriptions[j]);
-  builder.build();
+  var headlines = [];
+  for (var i = 0; i < ad.headlines.length; i++) headlines.push({ text: ad.headlines[i] });
+  var descriptions = [];
+  for (var j = 0; j < ad.descriptions.length; j++) descriptions.push({ text: ad.descriptions[j] });
+  gadsMutate({
+    adGroupAdOperation: {
+      create: {
+        adGroup: adGroupResource,
+        status: 'ENABLED',
+        ad: {
+          responsiveSearchAd: { headlines: headlines, descriptions: descriptions },
+          finalUrls: [ad.final_url]
+        }
+      }
+    }
+  }, 'responsive search ad create');
   Logger.log('    Added responsive search ad (' + fingerprint.length + ' chars): ' + ad.final_url);
 }
 
-function reconcileSitelinks(campaign, spec) {
+function reconcileSitelinks(campaign, campaignResource, spec) {
   try {
     var existing = {};
     var it = campaign.extensions().sitelinks().get();
@@ -243,14 +359,29 @@ function reconcileSitelinks(campaign, spec) {
     for (var i = 0; i < spec.sitelinks.length; i++) {
       var link = spec.sitelinks[i];
       if (existing[link.text]) continue;
-      var op = AdsApp.extensions().newSitelinkBuilder()
-        .withLinkText(link.text)
-        .withFinalUrl(link.final_url)
-        .build();
-      if (op.isSuccessful()) {
-        campaign.addSitelink(op.getResult());
-        Logger.log('  Added sitelink: ' + link.text);
+      var sitelinkAsset = { linkText: link.text, finalUrls: [link.final_url] };
+      if (link.description) {
+        sitelinkAsset.description1 = link.description;
       }
+      var assetResource = gadsMutate({
+        assetOperation: {
+          create: {
+            name: link.text,
+            type: 'SITELINK',
+            sitelinkAsset: sitelinkAsset
+          }
+        }
+      }, 'sitelink asset create (' + link.text + ')').getResourceName();
+      gadsMutate({
+        campaignAssetOperation: {
+          create: {
+            campaign: campaignResource,
+            asset: assetResource,
+            fieldType: 'SITELINK'
+          }
+        }
+      }, 'sitelink attach (' + link.text + ')');
+      Logger.log('  Added sitelink: ' + link.text);
     }
   } catch (e) {
     Logger.log('  Sitelinks need a manual check for ' + spec.name +
