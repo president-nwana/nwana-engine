@@ -372,4 +372,13 @@ describe("business unit detail honesty", () => {
 		expect(detail?.audience?.value).toBe("7");
 		expect(detail?.audience?.source).toContain("series_registrations");
 	});
+
+	it("parseIntegrations accepts both integration and system keys", async () => {
+		const db = makeDb();
+		db.exec(`INSERT INTO tenants (tenant_id, legal_name, display_name, external_systems)
+			VALUES ('t2','T2','T2','[{"system":"runsignup","status":"connected"},{"integration":"ga4","status":"connected"}]')`);
+		const tenant = await getTenant(db, "t2");
+		expect(tenant).not.toBeNull();
+		expect(tenant!.external_systems.map((x) => x.integration)).toEqual(["runsignup", "ga4"]);
+	});
 });

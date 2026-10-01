@@ -156,7 +156,8 @@ function parseIntegrations(raw: string | null): IntegrationRef[] {
 		return v
 			.filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
 			.map((x) => ({
-				integration: String(x.integration ?? "unknown"),
+				// The NWANA seed uses "system"; accept both keys (no data rewrite).
+				integration: String(x.integration ?? x.system ?? "unknown"),
 				status: String(x.status ?? "unknown"),
 				note: typeof x.note === "string" ? x.note : null,
 			}));
