@@ -6,6 +6,11 @@
 // (renamed from the old per-screen `boot()`/`loadX()`), called lazily on first
 // tab activation. The shell owns the owner-key gate (single gate per page);
 // tab scripts must NOT contain their own key-form handlers.
+//
+// ADR-0047: ocBareShell is the generic primitive (styles + parameterized
+// key gate + #app). ocSectionShell keeps the full OC menu behavior.
+// The tenant portal (oc-portal.ts) reuses ocBareShell with its own slim
+// header (no OC menu) and its own access-key gate.
 
 import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
 
@@ -16,6 +21,140 @@ function escHtml(v: unknown): string {
 		.replace(/>/g, "&gt;")
 		.replace(/"/g, "&quot;")
 		.replace(/'/g, "&#39;");
+}
+
+/** Shared stylesheet for OC sections and the tenant portal. */
+export const OC_BASE_CSS = `
+		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9;--warn:#b35400}
+		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
+		header{background:var(--brand);color:white;padding:24px clamp(20px,5vw,72px);display:flex;align-items:center;gap:18px}
+		header img{width:64px;height:64px;border-radius:14px;flex:none}
+		header h1{margin:0;font-size:clamp(26px,3.6vw,40px)}header p{margin:6px 0 0;color:#dce9e2}
+		.oc-menu{background:var(--brand);padding:0 clamp(20px,5vw,72px) 18px;display:flex;flex-wrap:wrap;gap:10px}
+		.oc-menu-btn{display:inline-block;background:#2f6247;color:#fff;font-weight:700;padding:10px 20px;border-radius:9px;text-decoration:none}
+		.oc-menu-btn:hover{background:#3a7455}.oc-menu-active{background:#fff;color:var(--brand)}
+		.oc-tabs{background:#10261c;padding:14px clamp(20px,5vw,72px);display:flex;flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:5}
+		.oc-tab{border:1px solid #2f6247;background:transparent;color:#dce9e2;font-weight:650;padding:8px 16px;border-radius:8px;cursor:pointer;width:auto;margin:0}
+		.oc-tab:hover{background:#1c3a2a}.oc-tab-active{background:#fff;color:var(--brand);border-color:#fff}
+		.oc-func-desc{color:var(--muted);font-size:15px;margin:0 0 14px;max-width:70ch}
+		.oc-views{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}
+		.oc-view-btn{border:1px solid var(--brand);background:white;color:var(--brand);font-weight:700;padding:10px 22px;border-radius:9px;cursor:pointer;width:auto;margin:0}
+		.oc-view-btn:hover{background:var(--accent)}
+		.oc-view-btn.oc-view-active{background:var(--brand);color:white}
+		.oc-quick{background:white;border-bottom:1px solid var(--line);padding:16px clamp(20px,5vw,72px);display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+		.oc-quick span{font-weight:700;color:var(--brand);margin-right:6px}
+		.oc-quick button{width:auto;margin:0;background:#2f6247}
+		.oc-quick button:hover{background:#3a7455}
+		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px}
+		h2{margin:0 0 14px;font-size:22px}h3{margin:18px 0 8px;font-size:18px}
+		label{display:block;margin:12px 0 5px;font-weight:650}input,select,textarea,button{font:inherit}
+		input,select,textarea{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%}textarea{min-height:105px;resize:vertical}
+		button{border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer;margin-top:14px}
+		button.secondary{background:white;color:var(--brand);border:1px solid var(--brand);width:auto;margin:8px 8px 0 0}
+		.message{min-height:24px;color:var(--muted);margin-top:9px}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}
+		.item{border-top:1px solid var(--line);padding:14px 0}.item:first-of-type{border-top:0}.item strong{display:block}
+		.badge{display:inline-block;background:var(--accent);border-radius:6px;padding:2px 8px;font-size:13px;color:var(--brand);font-weight:650;margin-left:8px}
+		.badge-warn{display:inline-block;background:#fbeedf;border-radius:6px;padding:2px 8px;font-size:13px;color:var(--warn);font-weight:650;margin-left:8px}
+		.badge-ok{display:inline-block;background:#e5efe9;border-radius:6px;padding:2px 8px;font-size:13px;color:#183d2d;font-weight:650;margin-left:8px}
+		.detail{margin:6px 0;font-size:15px}.detail b{color:var(--muted);font-weight:650}
+		.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.stat{background:white;border:1px solid var(--line);border-radius:14px;padding:18px}.stat strong{display:block;font-size:30px}.stat span{color:var(--muted)}
+		.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:20px}
+		.followup-due{color:#b35400;font-weight:700}.followup-overdue{color:#b00020;font-weight:700}
+		table.data{width:100%;border-collapse:collapse;margin-top:8px}table.data th,table.data td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);font-size:15px}table.data th{color:var(--muted);font-weight:650}
+		.pipeline{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin:14px 0}
+		.pipeline .pstep{background:white;border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:150px;flex:1}
+		.pipeline .pstep strong{display:block;font-size:24px;color:var(--brand)}
+		.pipeline .parrow{align-self:center;padding:0 8px;color:var(--muted);font-size:22px;font-weight:700}
+	`;
+
+export interface BareShellGate {
+	/** localStorage key for the credential. */
+	storageKey: string;
+	heading: string;
+	intro: string;
+	keyLabel: string;
+	keyId: string;
+	keyName: string;
+	buttonLabel: string;
+	/** Message shown when the server rejects the stored credential (401). */
+	rejectedMessage: string;
+}
+
+export interface BareShellOpts {
+	title: string;
+	/** Tab-title suffix. Defaults to "NWANA Operating Center". */
+	titleSuffix?: string;
+	/** Everything above the gate: header, menu, tab bar. */
+	headerHtml: string;
+	gate: BareShellGate;
+	/** Rendered at the top of #app, after the gate unlocks. */
+	appTopHtml?: string;
+	/** Panels / single body rendered inside #app. */
+	bodyHtml: string;
+	/**
+	 * Extra client script. Runs inside the same <script> as the gate logic
+	 * and must define `__activateInitialTab()` (called on unlock and on
+	 * load when a credential is stored).
+	 */
+	script: string;
+}
+
+/**
+ * Generic shell: styles + parameterized key gate + #app. No OC menu —
+ * callers supply their own headerHtml (the OC menu for sections, a slim
+ * tenant header for the portal).
+ */
+export function ocBareShell(opts: BareShellOpts): string {
+	const g = opts.gate;
+	return `<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1">
+	<title>${escHtml(opts.title)} — ${escHtml(opts.titleSuffix ?? "NWANA Operating Center")}</title>
+	<link rel="icon" type="image/png" href="/operating-center/icon-180.v2.png">
+	<link rel="apple-touch-icon" href="/operating-center/icon-180.v2.png">
+	<style>${OC_BASE_CSS}</style>
+</head>
+<body>
+	${opts.headerHtml}
+	<main>
+		<section class="panel" id="gate" hidden>
+			<h2>${escHtml(g.heading)}</h2>
+			<p class="unavailable">${escHtml(g.intro)}</p>
+			<form id="key-form">
+				<label for="${escHtml(g.keyId)}">${escHtml(g.keyLabel)}</label>
+				<input id="${escHtml(g.keyId)}" name="${escHtml(g.keyName)}" type="password" autocomplete="current-password" required>
+				<button type="submit">${escHtml(g.buttonLabel)}</button>
+				<div class="message" id="key-message" aria-live="polite"></div>
+			</form>
+		</section>
+		<div id="app" hidden>
+			${opts.appTopHtml ? `<div class="oc-quick">${opts.appTopHtml}</div>` : ""}
+			${opts.bodyHtml}
+		</div>
+	</main>
+	<script>
+		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+		const KEY_STORAGE='${g.storageKey}';
+		const gate=document.querySelector('#gate');
+		const app=document.querySelector('#app');
+		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
+		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
+		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
+		function showApp(){gate.hidden=true;app.hidden=false}
+		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('${g.rejectedMessage}');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
+		function downloadReport(screen,filename,msgEl){
+			if(msgEl)msgEl.textContent='Preparing report…';
+			fetch('/api/operating-center/report/'+screen,{headers:{authorization:'Bearer '+getKey()}}).then(r=>{if(r.status===401){clearKey();showGate('${g.rejectedMessage}');throw new Error('Unauthorized')}if(!r.ok)throw new Error('Report request failed');return r.text()}).then(html=>{const blob=new Blob([html],{type:'text/html'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename+'.html';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);if(msgEl)msgEl.textContent='Report downloaded.'}).catch(err=>{if(msgEl)msgEl.textContent=err.message});
+		}
+		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('${g.keyName}')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();__activateInitialTab()});
+		document.querySelector('#app').addEventListener('click',e=>{const b=e.target.closest('.oc-report-btn');if(!b)return;const panel=b.closest('.oc-tabpanel')||document;const m=panel.querySelector('.oc-report-message');downloadReport(b.dataset.screen,b.dataset.filename,m)});
+		${opts.script}
+		if(getKey()){showApp();__activateInitialTab()}else{showGate('')}
+	</script>
+</body></html>`;
 }
 
 export interface OcTab {
@@ -202,96 +341,14 @@ export function ocSectionShell(opts: {
 
 	const tabScripts = tabs.map((t) => t.script).join("\n");
 
-	return `<!doctype html>
-<html lang="en">
-<head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width,initial-scale=1">
-	<title>${escHtml(opts.title)} — NWANA Operating Center</title>
-	<link rel="icon" type="image/png" href="/operating-center/icon-180.v2.png">
-	<link rel="apple-touch-icon" href="/operating-center/icon-180.v2.png">
-	<style>
-		:root{color-scheme:light;--ink:#17221d;--muted:#66736d;--line:#dce4df;--paper:#f5f7f5;--brand:#183d2d;--accent:#e5efe9;--warn:#b35400}
-		*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
-		header{background:var(--brand);color:white;padding:24px clamp(20px,5vw,72px);display:flex;align-items:center;gap:18px}
-		header img{width:64px;height:64px;border-radius:14px;flex:none}
-		header h1{margin:0;font-size:clamp(26px,3.6vw,40px)}header p{margin:6px 0 0;color:#dce9e2}
-		.oc-menu{background:var(--brand);padding:0 clamp(20px,5vw,72px) 18px;display:flex;flex-wrap:wrap;gap:10px}
-		.oc-menu-btn{display:inline-block;background:#2f6247;color:#fff;font-weight:700;padding:10px 20px;border-radius:9px;text-decoration:none}
-		.oc-menu-btn:hover{background:#3a7455}.oc-menu-active{background:#fff;color:var(--brand)}
-		.oc-tabs{background:#10261c;padding:14px clamp(20px,5vw,72px);display:flex;flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:5}
-		.oc-tab{border:1px solid #2f6247;background:transparent;color:#dce9e2;font-weight:650;padding:8px 16px;border-radius:8px;cursor:pointer;width:auto;margin:0}
-		.oc-tab:hover{background:#1c3a2a}.oc-tab-active{background:#fff;color:var(--brand);border-color:#fff}
-		.oc-func-desc{color:var(--muted);font-size:15px;margin:0 0 14px;max-width:70ch}
-		.oc-views{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}
-		.oc-view-btn{border:1px solid var(--brand);background:white;color:var(--brand);font-weight:700;padding:10px 22px;border-radius:9px;cursor:pointer;width:auto;margin:0}
-		.oc-view-btn:hover{background:var(--accent)}
-		.oc-view-btn.oc-view-active{background:var(--brand);color:white}
-		.oc-quick{background:white;border-bottom:1px solid var(--line);padding:16px clamp(20px,5vw,72px);display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-		.oc-quick span{font-weight:700;color:var(--brand);margin-right:6px}
-		.oc-quick button{width:auto;margin:0;background:#2f6247}
-		.oc-quick button:hover{background:#3a7455}
-		main{max-width:1240px;margin:auto;padding:28px 20px 60px}.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px}
-		h2{margin:0 0 14px;font-size:22px}h3{margin:18px 0 8px;font-size:18px}
-		label{display:block;margin:12px 0 5px;font-weight:650}input,select,textarea,button{font:inherit}
-		input,select,textarea{border:1px solid #bfcac4;border-radius:9px;padding:10px;background:white;width:100%}textarea{min-height:105px;resize:vertical}
-		button{border:0;border-radius:9px;padding:11px 14px;background:var(--brand);color:white;font-weight:700;cursor:pointer;margin-top:14px}
-		button.secondary{background:white;color:var(--brand);border:1px solid var(--brand);width:auto;margin:8px 8px 0 0}
-		.message{min-height:24px;color:var(--muted);margin-top:9px}.meta{color:var(--muted);font-size:14px}.unavailable{color:var(--muted)}
-		.item{border-top:1px solid var(--line);padding:14px 0}.item:first-of-type{border-top:0}.item strong{display:block}
-		.badge{display:inline-block;background:var(--accent);border-radius:6px;padding:2px 8px;font-size:13px;color:var(--brand);font-weight:650;margin-left:8px}
-		.badge-warn{display:inline-block;background:#fbeedf;border-radius:6px;padding:2px 8px;font-size:13px;color:var(--warn);font-weight:650;margin-left:8px}
-		.badge-ok{display:inline-block;background:#e5efe9;border-radius:6px;padding:2px 8px;font-size:13px;color:#183d2d;font-weight:650;margin-left:8px}
-		.detail{margin:6px 0;font-size:15px}.detail b{color:var(--muted);font-weight:650}
-		.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.stat{background:white;border:1px solid var(--line);border-radius:14px;padding:18px}.stat strong{display:block;font-size:30px}.stat span{color:var(--muted)}
-		.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:20px}
-		.followup-due{color:#b35400;font-weight:700}.followup-overdue{color:#b00020;font-weight:700}
-		table.data{width:100%;border-collapse:collapse;margin-top:8px}table.data th,table.data td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);font-size:15px}table.data th{color:var(--muted);font-weight:650}
-		.pipeline{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin:14px 0}
-		.pipeline .pstep{background:white;border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:150px;flex:1}
-		.pipeline .pstep strong{display:block;font-size:24px;color:var(--brand)}
-		.pipeline .parrow{align-self:center;padding:0 8px;color:var(--muted);font-size:22px;font-weight:700}
-	</style>
-</head>
-<body>
-	<header><img src="/operating-center/icon-180.v2.png" alt="NWANA Operating Center icon" width="64" height="64"><div><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></div></header>
-	${operatingCenterMenu(opts.section)}
-	${opts.aboveTabsHtml ? `<div class="oc-quick">${opts.aboveTabsHtml}</div>` : ""}
-	${tabBar}
-	<main>
-		<section class="panel" id="gate" hidden>
-			<h2>Owner access</h2>
-			<p class="unavailable">This page is private. Enter the operating center key to continue.</p>
-			<form id="key-form">
-				<label for="owner-key">Operating center key</label>
-				<input id="owner-key" name="owner_key" type="password" autocomplete="current-password" required>
-				<button type="submit">Open ${escHtml(opts.title.toLowerCase())}</button>
-				<div class="message" id="key-message" aria-live="polite"></div>
-			</form>
-		</section>
-		<div id="app" hidden>
-			${opts.appTopHtml ? `<div class="oc-quick">${opts.appTopHtml}</div>` : ""}
-			${panels}
-		</div>
-	</main>
-	<script>
-		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-		const KEY_STORAGE='nwana_operating_center_key';
-		const gate=document.querySelector('#gate');
-		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
-		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
-		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
-		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
-		function showApp(){gate.hidden=true;app.hidden=false}
-		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
-		function downloadReport(screen,filename,msgEl){
-			if(msgEl)msgEl.textContent='Preparing report…';
-			fetch('/api/operating-center/report/'+screen,{headers:{authorization:'Bearer '+getKey()}}).then(r=>{if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error('Report request failed');return r.text()}).then(html=>{const blob=new Blob([html],{type:'text/html'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename+'.html';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);if(msgEl)msgEl.textContent='Report downloaded.'}).catch(err=>{if(msgEl)msgEl.textContent=err.message});
-		}
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();__activateInitialTab()});
-		document.querySelector('#app').addEventListener('click',e=>{const b=e.target.closest('.oc-report-btn');if(!b)return;const panel=b.closest('.oc-tabpanel')||document;const m=panel.querySelector('.oc-report-message');downloadReport(b.dataset.screen,b.dataset.filename,m)});
-		${hasTabs ? `
+	const headerHtml =
+		`<header><img src="/operating-center/icon-180.v2.png" alt="NWANA Operating Center icon" width="64" height="64"><div><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></div></header>` +
+		`\n\t${operatingCenterMenu(opts.section)}` +
+		`\n\t${opts.aboveTabsHtml ? `<div class="oc-quick">${opts.aboveTabsHtml}</div>` : ""}` +
+		`\n\t${tabBar}`;
+
+	const sectionScript = hasTabs
+		? `
 		const __QUERY_TABS=${opts.queryTabs ? "true" : "false"};
 		const __booted={};
 		function __activateTab(id){
@@ -315,11 +372,26 @@ export function ocSectionShell(opts: {
 		function __activateInitialTab(){if(!__activateTab(__tabFromUrl())){const first=document.querySelector('.oc-tab');if(first)__activateTab(first.dataset.tab)}}
 		document.querySelectorAll('.oc-tab').forEach(b=>b.addEventListener('click',()=>__navigateTab(b.dataset.tab)));
 		if(__QUERY_TABS){window.addEventListener('popstate',()=>__activateInitialTab())}else{window.addEventListener('hashchange',()=>__activateInitialTab())}
-		` : `
+		`
+		: `
 		function __activateInitialTab(){}
-		`}
-		${tabScripts}
-		if(getKey()){showApp();__activateInitialTab()}else{showGate('')}
-	</script>
-</body></html>`;
+		`;
+
+	return ocBareShell({
+		title: opts.title,
+		headerHtml,
+		gate: {
+			storageKey: "nwana_operating_center_key",
+			heading: "Owner access",
+			intro: "This page is private. Enter the operating center key to continue.",
+			keyLabel: "Operating center key",
+			keyId: "owner-key",
+			keyName: "owner_key",
+			buttonLabel: `Open ${opts.title.toLowerCase()}`,
+			rejectedMessage: "The key was rejected. Enter the owner key again.",
+		},
+		appTopHtml: opts.appTopHtml,
+		bodyHtml: panels,
+		script: sectionScript + "\n\t\t" + tabScripts,
+	});
 }

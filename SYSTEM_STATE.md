@@ -1160,3 +1160,13 @@ Full professional league, marketplace build-out, inventory/fulfillment, new chal
 - Live API verified: /tenants (2 tenants), /tenants/nwana (integrations parse: runsignup/google_ads/google_analytics/cloudflare connected), /tenants/nwana/units/nwana-governing (money derived: 1 txn, gross 500¢, net NULL honest), demo unit (not_operating, money/audience null), cross-tenant unit read → 404.
 - Regression: all 7 existing OC sections 200, money overview ok:true, revenue inventory ok:true, google-ads desired-state ok:true.
 - Tests 784/784, tsc clean. Operating cost: VERIFIED $0 (billing: one subscription, 0 USD, Paid/good-standing; no new services).
+
+### Role-based tenant navigation (ADR-0047) — implemented, pending deploy (2026-10-01)
+- Two identities: `platform_admin` (existing OPERATING_CENTER_KEY, in-memory timing-safe compare, no DB lookup) and `tenant_user` (opaque 256-bit token bound to one tenant + explicit business-unit allowlist).
+- Migration 0055 (`migrations/0055-tenant-users.sql`): additive table `tenant_users` — stores only SHA-256 token_hash; plaintext token returned once at creation, never logged/persisted. Empty unit allowlist = no access.
+- `src/lib/tenant-access.ts`: identity resolution, user CRUD (admin APIs under /api/operating-center/tenants/:tenantId/users), portal session (allowlisted units only; no tenant_id/user_id/token_hash in responses), portal unit read (allowlist check first; foreign/unassigned unit → 404).
+- Gate: /api/operating-center/* requires platform_admin (401); /api/portal/* requires tenant_user (403, owner key cannot impersonate). Portal tenant always server-derived from the token, never from URL.
+- Portal UI (`src/oc-portal.ts`): /portal (separate storage key nwana_portal_key; single unit → client-side redirect; multi → allowed-only picker; zero → empty state), /portal/unit/:unitId. No OC menu, no Organizations directory, no internal terms. Admin deep links excluded via shared renderer options (`src/oc-unit-body.ts`).
+- Admin Organizations screens unchanged: Overview shell byte-identical; unit renderer extracted verbatim — admin mode keeps tenant IDs, Organizations back link, Engine-function deep links (old branch semantics preserved: links panel → else "not operating" note).
+- Tests: test/tenant-access.spec.ts, 17 tests — identity/token/hash properties, create/revoke/validation, cross-tenant isolation, portal shells, shared renderer admin-vs-portal. Full suite 800/800, tsc clean.
+- NOT YET DONE: migration 0055 not applied to production; not committed; not deployed; production browser login flow not verified. Verification users will be neutral access records on existing config-only demo units, revoked after testing.

@@ -102,6 +102,7 @@ import { getBoardDigest } from "./board-digest";
 import {
 	createBoardSubmission,
 	createInitiative,
+	extractOperatingCenterKey,
 	getOperatingCenterOverview,
 	isOperatingCenterAuthorized,
 	listBoardSubmissions,
@@ -143,6 +144,15 @@ import {
 	listBusinessUnits,
 	listTenants,
 } from "./lib/tenants";
+import {
+	createTenantUser,
+	getPortalSession,
+	getPortalUnit,
+	listTenantUsers,
+	resolveIdentity,
+	revokeTenantUser,
+} from "./lib/tenant-access";
+import { renderPortalLandingHtml, renderPortalUnitHtml } from "./oc-portal";
 import { renderSponsorshipHtml } from "./operating-center-sponsorship";
 import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
@@ -5811,12 +5821,41 @@ export default {
 			operatingCenterRoute &&
 			!(request.method === "GET" && url.pathname.startsWith("/operating-center"));
 
-		if (operatingCenterApiRoute && !isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
+		// ADR-0047 role-based navigation: every /api/portal/* data route is
+		// tenant-user only. The tenant comes from the token, never the URL.
+		const portalApiRoute = url.pathname.startsWith("/api/portal/");
+
+		// Resolve the request identity once. Owner key -> platform_admin
+		// (no DB lookup); anything else -> scoped tenant_users lookup.
+		const presentedKey =
+			operatingCenterApiRoute || portalApiRoute ? extractOperatingCenterKey(request) : "";
+		const identity = presentedKey
+			? await resolveIdentity(env.nwana_engine_db, presentedKey, env.OPERATING_CENTER_KEY)
+			: null;
+
+		if (operatingCenterApiRoute && identity?.kind !== "platform_admin") {
 			return json({
 				ok: false,
 				error: "Operating center access requires the owner key",
 			}, 401);
 		}
+		if (portalApiRoute) {
+			if (!identity) {
+				return json({
+					ok: false,
+					error: "Portal access requires a tenant access key",
+				}, 401);
+			}
+			if (identity.kind !== "tenant_user") {
+				return json({
+					ok: false,
+					error: "The tenant portal is for tenant access keys; platform admins use the Operating Center",
+				}, 403);
+			}
+		}
+		// Narrowed tenant-user identity for the portal handlers below.
+		const tenantIdentity =
+			portalApiRoute && identity?.kind === "tenant_user" ? identity : null;
 
 		// Operating Center (rebuild 2026-09-28; Organizations added 2026-10-01). Canonical GET pages.
 		const htmlPage = (render: () => string) =>
@@ -5864,6 +5903,23 @@ export default {
 				const unitId = parts[1];
 				return htmlPage(() => renderBusinessUnitSectionHtml(tenantId, unitId));
 			}
+		}
+
+		// ADR-0047 tenant portal pages: public shells (the access-key gate
+		// is client-side); all data comes from the tenant-scoped
+		// /api/portal/* routes. No OC menu, no Organizations directory,
+		// no tenant ids in markup.
+		if (request.method === "GET" && url.pathname === "/portal") {
+			return htmlPage(renderPortalLandingHtml);
+		}
+		if (request.method === "GET" && url.pathname.startsWith("/portal/unit/")) {
+			const portalUnitId = decodeURIComponent(
+				url.pathname.slice("/portal/unit/".length),
+			);
+			if (!/^[a-z0-9][a-z0-9-]{1,60}$/.test(portalUnitId)) {
+				return json({ ok: false, error: "not found" }, 404);
+			}
+			return htmlPage(() => renderPortalUnitHtml(portalUnitId));
 		}
 
 		// Retired standalone pages → 301 to their section tab (rebuild 2026-09-28).
@@ -6331,6 +6387,51 @@ export default {
 					return json({ ok: false, error: e instanceof Error ? e.message : "invalid input" }, 400);
 				}
 			}
+			// ADR-0047: tenant users (scoped access tokens).
+			// GET /tenants/:id/users — list users; token hashes never leave the server.
+			if (request.method === "GET" && parts.length === 2 && parts[1] === "users") {
+				try {
+					const users = await listTenantUsers(env.nwana_engine_db, tenantId);
+					return json({ ok: true, users });
+				} catch (e) {
+					return json({ ok: false, error: e instanceof Error ? e.message : "invalid" }, 400);
+				}
+			}
+			// POST /tenants/:id/users — create a tenant user with an explicit
+			// business-unit allowlist. Returns the access token ONCE; only
+			// its hash is stored.
+			if (request.method === "POST" && parts.length === 2 && parts[1] === "users") {
+				let body: Record<string, unknown> = {};
+				try {
+					body = (await request.json()) as Record<string, unknown>;
+				} catch {
+					body = {};
+				}
+				try {
+					const created = await createTenantUser(env.nwana_engine_db, tenantId, {
+						display_name: String(body.display_name ?? ""),
+						unit_ids: Array.isArray(body.unit_ids)
+							? body.unit_ids.filter((x): x is string => typeof x === "string")
+							: [],
+						note: typeof body.note === "string" ? body.note : null,
+					});
+					return json({ ok: true, user: created.user, token: created.token });
+				} catch (e) {
+					return json({ ok: false, error: e instanceof Error ? e.message : "invalid input" }, 400);
+				}
+			}
+			// POST /tenants/:id/users/:userId/revoke
+			if (
+				request.method === "POST" &&
+				parts.length === 4 &&
+				parts[1] === "users" &&
+				parts[3] === "revoke" &&
+				/^[0-9a-fA-F-]{1,64}$/.test(parts[2])
+			) {
+				const revoked = await revokeTenantUser(env.nwana_engine_db, tenantId, parts[2]);
+				if (!revoked) return json({ ok: false, error: "not found" }, 404);
+				return json({ ok: true, revoked: true });
+			}
 			// GET /tenants/:id — tenant with business units derived at read time.
 			if (request.method === "GET" && parts.length === 1) {
 				const tenant = await getTenant(env.nwana_engine_db, tenantId);
@@ -6372,6 +6473,32 @@ export default {
 			} catch (e) {
 				return json({ ok: false, error: e instanceof Error ? e.message : "invalid input" }, 400);
 			}
+		}
+
+		// ADR-0047 tenant portal API. Tenant-user only (prefix-gated above):
+		// the tenant comes from the token, never from the URL, so
+		// cross-tenant access is impossible by construction. A unit outside
+		// the user's allowlist — or in another tenant — reads as 404,
+		// indistinguishable from not-found by design. No tenant ids or
+		// other internal terms in responses.
+		if (request.method === "GET" && url.pathname === "/api/portal/session") {
+			if (!tenantIdentity) return json({ ok: false, error: "forbidden" }, 403);
+			return json({
+				ok: true,
+				session: await getPortalSession(env.nwana_engine_db, tenantIdentity),
+			});
+		}
+		if (request.method === "GET" && url.pathname.startsWith("/api/portal/units/")) {
+			if (!tenantIdentity) return json({ ok: false, error: "forbidden" }, 403);
+			const portalUnitId = decodeURIComponent(
+				url.pathname.slice("/api/portal/units/".length),
+			);
+			if (!/^[a-z0-9][a-z0-9-]{1,60}$/.test(portalUnitId)) {
+				return json({ ok: false, error: "not found" }, 404);
+			}
+			const unit = await getPortalUnit(env.nwana_engine_db, tenantIdentity, portalUnitId);
+			if (!unit) return json({ ok: false, error: "not found" }, 404);
+			return json({ ok: true, unit });
 		}
 
 		// ADR-0027: downloadable external-ready reports. Owner-key protected
