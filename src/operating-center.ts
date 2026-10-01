@@ -505,10 +505,11 @@ export type OperatingCenterPageId =
 	| "sport"
 	| "academy"
 	| "board"
-	| "operations";
+	| "operations"
+	| "organizations";
 
 /**
- * Shared 7-section button menu rendered directly under the header on every
+ * Shared section button menu rendered directly under the header on every
  * operating-center section page. Same markup everywhere so the center
  * navigates as one workspace. (Replaces the old 18-button menu, 2026-09-28.)
  *
@@ -525,6 +526,7 @@ export function operatingCenterMenu(active: OperatingCenterPageId | string): str
 		{ id: "academy", label: "Academy", href: "/operating-center/academy" },
 		{ id: "board", label: "Board", href: "/operating-center/board" },
 		{ id: "operations", label: "Operations", href: "/operating-center/operations" },
+		{ id: "organizations", label: "Organizations", href: "/operating-center/organizations" },
 	];
 	return (
 		'<nav class="oc-menu" aria-label="Operating center">' +

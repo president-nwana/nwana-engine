@@ -1,4 +1,4 @@
-// Operating Center — shared section shell (7 sections).
+// Operating Center — shared section shell.
 //
 // Every section page is a thin shell: header (app icon) -> 7-button menu ->
 // tab bar -> per-tab panels. Each tab reuses one former screen's panels and

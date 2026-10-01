@@ -135,12 +135,20 @@ import {
 	listRevenueObjects,
 	recordRevenueAction,
 } from "./lib/revenue-inventory";
+import {
+	createBusinessUnit,
+	createTenant,
+	getBusinessUnitDetail,
+	getTenant,
+	listBusinessUnits,
+	listTenants,
+} from "./lib/tenants";
 import { renderSponsorshipHtml } from "./operating-center-sponsorship";
 import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
 import { renderUploadsHtml } from "./operating-center-uploads";
 import { renderCreationHtml, renderCreationPacketHtml } from "./operating-center-creation";
-// 7-section Operating Center rebuild (2026-09-28): one renderer per section.
+// Operating Center sections (rebuild 2026-09-28; Organizations added 2026-10-01): one renderer per section.
 import { renderOverviewSectionHtml } from "./oc-overview";
 import { renderMarketingSectionHtml } from "./oc-marketing";
 import { OC_ICON_1024_BASE64 } from "./assets/oc-icon-1024";
@@ -151,6 +159,11 @@ import { renderSportSectionHtml } from "./oc-sport";
 import { renderAcademySectionHtml } from "./oc-academy";
 import { renderBoardSectionHtml } from "./oc-board";
 import { renderOperationsSectionHtml } from "./oc-operations";
+import {
+	renderBusinessUnitSectionHtml,
+	renderOrganizationsSectionHtml,
+	renderTenantSectionHtml,
+} from "./oc-organizations";
 import {
 	getAthleteProfile,
 	listAthleteProfiles,
@@ -5805,7 +5818,7 @@ export default {
 			}, 401);
 		}
 
-		// 7-section Operating Center (rebuild 2026-09-28). Canonical GET pages.
+		// Operating Center (rebuild 2026-09-28; Organizations added 2026-10-01). Canonical GET pages.
 		const htmlPage = (render: () => string) =>
 			new Response(render(), {
 				headers: {
@@ -5830,6 +5843,28 @@ export default {
 		if (request.method === "GET" && url.pathname === "/operating-center/academy") return htmlPage(renderAcademySectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/board") return htmlPage(renderBoardSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/operations") return htmlPage(renderOperationsSectionHtml);
+		// Multi-tenant Organizations (ADR-0046): tenant list -> tenant ->
+		// business unit. Exact path first, then the two parameterized levels.
+		if (request.method === "GET" && url.pathname === "/operating-center/organizations") {
+			return htmlPage(renderOrganizationsSectionHtml);
+		}
+		if (
+			request.method === "GET" &&
+			url.pathname.startsWith("/operating-center/organizations/")
+		) {
+			const rest = url.pathname.slice("/operating-center/organizations/".length);
+			const parts = rest.split("/").filter((p) => p.length > 0);
+			const validId = (p: string) => /^[a-z0-9][a-z0-9-]{1,60}$/.test(p);
+			if (parts.length === 1 && validId(parts[0])) {
+				const tenantId = parts[0];
+				return htmlPage(() => renderTenantSectionHtml(tenantId));
+			}
+			if (parts.length === 2 && parts.every(validId)) {
+				const tenantId = parts[0];
+				const unitId = parts[1];
+				return htmlPage(() => renderBusinessUnitSectionHtml(tenantId, unitId));
+			}
+		}
 
 		// Retired standalone pages → 301 to their section tab (rebuild 2026-09-28).
 		if (request.method === "GET") {
@@ -6223,6 +6258,120 @@ export default {
 			});
 			if (!updated) return json({ ok: false, error: "not found" }, 404);
 			return json({ ok: true, object: updated });
+		}
+
+		// ADR-0046 Multi-tenant layer: tenants + business units.
+		// Owner-key gated by the general operatingCenterApiRoute check above.
+		// Every read is tenant-scoped: there is no unscoped business-unit
+		// list, and a unit of another tenant reads as 404 (indistinguishable
+		// from not-found by design).
+		const TENANT_ID_RE = /^[a-z0-9][a-z0-9-]{1,60}$/;
+		if (request.method === "GET" && url.pathname === "/api/operating-center/tenants") {
+			const tenants = await listTenants(env.nwana_engine_db);
+			const withCounts = [];
+			for (const t of tenants) {
+				withCounts.push({
+					...t,
+					business_unit_count: (await listBusinessUnits(env.nwana_engine_db, t.tenant_id)).length,
+				});
+			}
+			return json({ ok: true, tenants: withCounts });
+		}
+		if (
+			(request.method === "GET" || request.method === "POST") &&
+			url.pathname.startsWith("/api/operating-center/tenants/")
+		) {
+			const rest = url.pathname.slice("/api/operating-center/tenants/".length);
+			const parts = rest.split("/").filter((p) => p.length > 0);
+			const tenantId = parts[0] ?? "";
+			if (!TENANT_ID_RE.test(tenantId)) {
+				return json({ ok: false, error: "invalid tenant_id" }, 400);
+			}
+			// GET /tenants/:id/units/:unitId — full business-unit screen model.
+			if (
+				request.method === "GET" &&
+				parts.length === 3 &&
+				parts[1] === "units" &&
+				TENANT_ID_RE.test(parts[2])
+			) {
+				const unit = await getBusinessUnitDetail(env.nwana_engine_db, tenantId, parts[2]);
+				if (!unit) return json({ ok: false, error: "not found" }, 404);
+				return json({ ok: true, unit });
+			}
+			// POST /tenants/:id/units — enable a business unit on the tenant.
+			if (request.method === "POST" && parts.length === 2 && parts[1] === "units") {
+				let body: Record<string, unknown> = {};
+				try {
+					body = (await request.json()) as Record<string, unknown>;
+				} catch {
+					body = {};
+				}
+				try {
+					const unit = await createBusinessUnit(env.nwana_engine_db, tenantId, {
+						business_unit_id: String(body.business_unit_id ?? ""),
+						unit_type: String(body.unit_type ?? ""),
+						name: String(body.name ?? ""),
+						operating_status: (typeof body.operating_status === "string"
+							? body.operating_status
+							: undefined) as never,
+						legal_entity_status: (typeof body.legal_entity_status === "string"
+							? body.legal_entity_status
+							: undefined) as never,
+						owner_legal_ref: typeof body.owner_legal_ref === "string" ? body.owner_legal_ref : null,
+						revenue_model: typeof body.revenue_model === "string" ? body.revenue_model : null,
+						connected_assets: Array.isArray(body.connected_assets)
+							? body.connected_assets.filter((x): x is string => typeof x === "string")
+							: [],
+						next_actions: Array.isArray(body.next_actions)
+							? body.next_actions.filter((x): x is string => typeof x === "string")
+							: [],
+					});
+					return json({ ok: true, unit });
+				} catch (e) {
+					return json({ ok: false, error: e instanceof Error ? e.message : "invalid input" }, 400);
+				}
+			}
+			// GET /tenants/:id — tenant with business units derived at read time.
+			if (request.method === "GET" && parts.length === 1) {
+				const tenant = await getTenant(env.nwana_engine_db, tenantId);
+				if (!tenant) return json({ ok: false, error: "not found" }, 404);
+				return json({ ok: true, tenant });
+			}
+			return json({ ok: false, error: "not found" }, 404);
+		}
+		// POST /api/operating-center/tenants — create a tenant (generic path,
+		// no sport-specific architecture required).
+		if (request.method === "POST" && url.pathname === "/api/operating-center/tenants") {
+			let body: Record<string, unknown> = {};
+			try {
+				body = (await request.json()) as Record<string, unknown>;
+			} catch {
+				body = {};
+			}
+			try {
+				const tenant = await createTenant(env.nwana_engine_db, {
+					tenant_id: String(body.tenant_id ?? ""),
+					legal_name: String(body.legal_name ?? ""),
+					display_name: String(body.display_name ?? ""),
+					organization_type:
+						typeof body.organization_type === "string" ? body.organization_type : undefined,
+					sport_domain: typeof body.sport_domain === "string" ? body.sport_domain : null,
+					status: (typeof body.status === "string" ? body.status : undefined) as never,
+					plan_license_status: (typeof body.plan_license_status === "string"
+						? body.plan_license_status
+						: undefined) as never,
+					enabled_modules: Array.isArray(body.enabled_modules)
+						? body.enabled_modules.filter((x): x is string => typeof x === "string")
+						: [],
+					license_start: typeof body.license_start === "string" ? body.license_start : null,
+					license_end: typeof body.license_end === "string" ? body.license_end : null,
+					billing_model: typeof body.billing_model === "string" ? body.billing_model : null,
+					white_label: body.white_label === true,
+				});
+				return json({ ok: true, tenant });
+			} catch (e) {
+				return json({ ok: false, error: e instanceof Error ? e.message : "invalid input" }, 400);
+			}
 		}
 
 		// ADR-0027: downloadable external-ready reports. Owner-key protected

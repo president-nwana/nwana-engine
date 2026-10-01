@@ -1130,3 +1130,25 @@ A new developer or AI must be able to continue the project from this repository 
 - Phase 4 status: IN PROGRESS.
 - Remaining: a NEW real donation through the acquisition path as production proof — acquisition source → real donor → real transaction → verified monetary event → Engine ingestion → attribution state → next automated revenue action, repeatable without developer intervention. The historical donation 11291415 does not prove the acquisition path.
 - Owner business decision (NOT done, NOT requested tonight): review and ENABLE `NWANA · Founding Circle · Donate`. The script was deliberately never asked to enable anything.
+
+## Multi-tenant MVP — tenants + business units (2026-10-01)
+
+Objective: convert NWANA Engine from a single-organization operating system into a reusable multi-tenant sports operating platform without breaking existing NWANA production functionality. NWANA remains the first live tenant. ADR-0046.
+
+### What was built
+- Migration `0054-tenants-business-units.sql`: new tables `tenants` + `business_units` (additive only — zero ALTERs of existing tables, zero backfill). CHECK vocabularies: tenant status (active|suspended|archived|demo), plan/license (owner|trial|active|expired|none), BU operating status (operating|pilot|not_operating|unknown), legal entity (NOT_FORMED|PLANNED|ACTIVE). `unit_type` deliberately OPEN (no CHECK) for future unit types.
+- Seed: tenant `nwana` (NWANA, nordic_walking, active, plan=owner, white_label=0) + 6 business units: `nwana-governing` (GOVERNING_BODY, operating, ACTIVE), `nwana-academy` (ACADEMY, pilot), `nwana-engine-tech` (TECHNOLOGY, operating), `nwana-league` (LEAGUE_COMPETITION, pilot), `nwana-sales` (SALES_DISTRIBUTION, pilot), `nwana-marketplace` (MARKETPLACE, not_operating). Demo tenant `demo-running-org` (running, status=demo, plan=trial, white_label=1) + 3 units (MEMBERSHIP/EVENTS/ACADEMY, all not_operating, zero assets/money/audience — configuration proof only).
+- `src/lib/tenants.ts`: canonical types, tenant-scoped service layer. Every read filters by tenant_id; cross-tenant unit reads return null (indistinguishable from not-found). Money per BU derived at read time from canonical money_events via linked revenue_objects (ADR-0044 extended) — net stays UNKNOWN where no settlement truth exists. `createTenant`/`createBusinessUnit` = the generic onboarding path (no sport-specific code).
+- Operating Center: new `Organizations` section (`/operating-center/organizations` → tenant → `/organizations/<t>/<u>` business-unit screen: identity, status, assets, money, audience, integrations, next actions, deep links into existing Engine functions). Shared menu gains one additive entry; 7 existing sections untouched.
+- API (owner-key gated by the existing prefix check): `GET /api/operating-center/tenants`, `GET /tenants/:id`, `GET /tenants/:id/units/:unitId`, `POST /tenants`, `POST /tenants/:id/units`.
+- Licensing readiness = data boundary only: plan_license_status, enabled_modules, license_start/end, billing_model placeholder, white_label. No payment processor.
+- Tests: `test/tenants.spec.ts` (13: creation, duplicate/invalid rejection, isolation, money-derivation honesty, no synthetic data) + `test/oc-organizations.spec.ts` (5: menu, three page levels, attribute sanitization). Full suite + tsc clean.
+- BU↔asset linkage lives in `business_units.connected_assets` (JSON of revenue_objects.object_key) — `revenue_objects` itself untouched.
+
+### Production verification (2026-10-01)
+- Migration applied to production D1 via API: 2 tenants, 9 business units verified by re-read.
+- NWANA production flows re-verified after deploy: money overview, revenue inventory, Google Ads desired-state (200 ok), existing OC sections render unchanged.
+- Operating cost: VERIFIED $0 (D1 tables + Worker routes only; no new services).
+
+### Explicitly out of scope (not built)
+Full professional league, marketplace build-out, inventory/fulfillment, new challenges/races, redesign of existing NWANA screens, fake customers, paid infrastructure, second source of truth, moving NWANA assets into new legal entities, cap tables/valuation/investor functionality.
