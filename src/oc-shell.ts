@@ -87,6 +87,13 @@ export interface BareShellOpts {
 	/** Everything above the gate: header, menu, tab bar. */
 	headerHtml: string;
 	gate: BareShellGate;
+	/**
+	 * ADR-0048: optional sessionStorage key holding a platform-admin
+	 * preview token. When present it satisfies the gate (no key-entry
+	 * form), so a preview opens the portal directly. Never persisted to
+	 * localStorage — closing the tab ends the preview.
+	 */
+	previewStorageKey?: string;
 	/** Rendered at the top of #app, after the gate unlocks. */
 	appTopHtml?: string;
 	/** Panels / single body rendered inside #app. */
@@ -137,11 +144,13 @@ export function ocBareShell(opts: BareShellOpts): string {
 	<script>
 		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 		const KEY_STORAGE='${g.storageKey}';
+		const PREVIEW_STORAGE='${opts.previewStorageKey ?? ""}';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getPreviewKey(){if(!PREVIEW_STORAGE)return '';try{return sessionStorage.getItem(PREVIEW_STORAGE)||''}catch(e){return ''}}
+		function getKey(){var p=getPreviewKey();if(p)return p;try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
-		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
+		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}try{if(PREVIEW_STORAGE)sessionStorage.removeItem(PREVIEW_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
 		function showApp(){gate.hidden=true;app.hidden=false}
 		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('${g.rejectedMessage}');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}

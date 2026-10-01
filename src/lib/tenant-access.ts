@@ -25,6 +25,14 @@ export type Identity =
 			tenant_id: string;
 			display_name: string;
 			unit_ids: string[];
+	  }
+	| {
+			/** ADR-0048: platform-admin preview of a tenant. Stateless,
+			 *  short-lived, read-only; never a tenant_users row. */
+			kind: "preview";
+			tenant_id: string;
+			unit_ids: string[];
+			expires_at: number;
 	  };
 
 export interface TenantUserPublic {
@@ -77,6 +85,133 @@ export async function hashAccessToken(token: string): Promise<string> {
 		.join("");
 }
 
+/** ADR-0048: preview tokens live 15 minutes — enough for a demo, small blast radius. */
+export const PREVIEW_TOKEN_TTL_SEC = 900;
+
+function b64urlEncode(bytes: Uint8Array): string {
+	let bin = "";
+	for (const b of bytes) bin += String.fromCharCode(b);
+	return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function b64urlDecode(s: string): Uint8Array {
+	const padded = s.replace(/-/g, "+").replace(/_/g, "/");
+	const bin = atob(padded);
+	const out = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+	return out;
+}
+
+async function hmacSign(key: string, data: string): Promise<string> {
+	const cryptoKey = await crypto.subtle.importKey(
+		"raw",
+		new TextEncoder().encode(key),
+		{ name: "HMAC", hash: "SHA-256" },
+		false,
+		["sign"],
+	);
+	const sig = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data));
+	return b64urlEncode(new Uint8Array(sig));
+}
+
+/** Preview tokens are `payload.signature`; tenant access tokens never contain a dot. */
+function isPreviewTokenFormat(key: string): boolean {
+	if (!/^[-_A-Za-z0-9]+\.[-_A-Za-z0-9]+$/.test(key)) return false;
+	return key.length <= 2048;
+}
+
+interface PreviewPayload {
+	v: number;
+	tid: string;
+	units: string[];
+	exp: number;
+	n: string;
+}
+
+function randomNonce(): string {
+	const bytes = new Uint8Array(8);
+	crypto.getRandomValues(bytes);
+	return b64urlEncode(bytes);
+}
+
+/**
+ * Mint a stateless preview token for a tenant (ADR-0048). No DB write —
+ * no synthetic users, nothing to revoke; expiry is enforced per request.
+ * unitIds defaults to ALL of the tenant's business units (what a
+ * fully-licensed tenant user sees); a subset scopes "Preview as client".
+ * Every unit must belong to the tenant. Only the server (which holds the
+ * owner key used as the HMAC secret) can mint.
+ */
+export async function createPreviewToken(
+	db: Db,
+	ownerKey: string,
+	tenantId: string,
+	unitIds?: string[],
+): Promise<{ token: string; tenant_id: string; unit_ids: string[]; expires_at: number }> {
+	const tenant = await getTenant(db, tenantId);
+	if (!tenant) throw new Error("unknown tenant");
+	const tenantUnits = new Set((await listBusinessUnits(db, tenantId)).map((u) => u.business_unit_id));
+	const units = Array.from(new Set(unitIds ?? Array.from(tenantUnits)));
+	if (units.length === 0) throw new Error("tenant has no business units to preview");
+	for (const u of units) {
+		if (!tenantUnits.has(u)) throw new Error(`unknown business unit for this tenant: ${u}`);
+	}
+	const payload: PreviewPayload = {
+		v: 1,
+		tid: tenantId,
+		units,
+		exp: Math.floor(Date.now() / 1000) + PREVIEW_TOKEN_TTL_SEC,
+		n: randomNonce(),
+	};
+	const payloadB64 = b64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+	const sig = await hmacSign(ownerKey, payloadB64);
+	return {
+		token: `${payloadB64}.${sig}`,
+		tenant_id: tenantId,
+		unit_ids: units,
+		expires_at: payload.exp,
+	};
+}
+
+/**
+ * Verify a preview token. Returns the preview identity or null. Rejects
+ * tampered payloads, expired tokens, unknown tenants, and unit lists that
+ * no longer match the tenant (defense in depth — the tenant's unit set
+ * may have changed since issuance).
+ */
+export async function verifyPreviewToken(
+	db: Db,
+	ownerKey: string,
+	token: string,
+): Promise<Extract<Identity, { kind: "preview" }> | null> {
+	if (!isPreviewTokenFormat(token)) return null;
+	const [payloadB64, sigB64] = token.split(".");
+	const expectedSig = await hmacSign(ownerKey, payloadB64);
+	if (!timingSafeEqual(sigB64, expectedSig)) return null;
+	let payload: PreviewPayload;
+	try {
+		payload = JSON.parse(new TextDecoder().decode(b64urlDecode(payloadB64))) as PreviewPayload;
+	} catch {
+		return null;
+	}
+	if (
+		!payload ||
+		payload.v !== 1 ||
+		typeof payload.tid !== "string" ||
+		!Array.isArray(payload.units) ||
+		typeof payload.exp !== "number" ||
+		payload.exp * 1000 <= Date.now()
+	) {
+		return null;
+	}
+	const tenant = await getTenant(db, payload.tid);
+	if (!tenant) return null;
+	const tenantUnits = new Set((await listBusinessUnits(db, payload.tid)).map((u) => u.business_unit_id));
+	const units = payload.units.filter((u) => typeof u === "string" && tenantUnits.has(u));
+	if (units.length === 0) return null;
+	return { kind: "preview", tenant_id: payload.tid, unit_ids: units, expires_at: payload.exp };
+}
+
 function parseUnitIds(raw: unknown): string[] {
 	if (typeof raw !== "string") return [];
 	try {
@@ -102,8 +237,9 @@ function rowToPublic(row: Record<string, unknown>): TenantUserPublic {
 
 /**
  * Resolve the request identity from the presented key (Bearer or ?key=).
- * Owner key wins without a DB lookup; anything else is checked against
- * active tenant_users by token hash. Unknown/revoked -> null.
+ * Owner key wins without a DB lookup; then ADR-0048 preview tokens
+ * (HMAC, stateless); anything else is checked against active tenant_users
+ * by token hash. Unknown/revoked/expired -> null.
  */
 export async function resolveIdentity(
 	db: Db,
@@ -113,6 +249,11 @@ export async function resolveIdentity(
 	if (!presentedKey) return null;
 	if (ownerKey && timingSafeEqual(presentedKey, ownerKey)) {
 		return { kind: "platform_admin" };
+	}
+	if (ownerKey && isPreviewTokenFormat(presentedKey)) {
+		const preview = await verifyPreviewToken(db, ownerKey, presentedKey);
+		if (preview) return preview;
+		return null;
 	}
 	const tokenHash = await hashAccessToken(presentedKey);
 	const row = await db
@@ -209,13 +350,14 @@ export async function revokeTenantUser(
 }
 
 /**
- * Portal session for a tenant user: their name, their organization's
- * display name, and ONLY their allowlisted units. No tenant_id, no
- * user_id, no other tenant — internal terms stay server-side.
+ * Portal session for a tenant user or an ADR-0048 preview: their name,
+ * their organization's display name, and ONLY their allowlisted units.
+ * No tenant_id, no user_id, no other tenant — internal terms stay
+ * server-side.
  */
 export async function getPortalSession(
 	db: Db,
-	identity: Extract<Identity, { kind: "tenant_user" }>,
+	identity: Extract<Identity, { kind: "tenant_user" | "preview" }>,
 ): Promise<PortalSession> {
 	const tenant = await getTenant(db, identity.tenant_id);
 	if (!tenant) throw new Error("unknown tenant");
@@ -229,7 +371,7 @@ export async function getPortalSession(
 			operating_status: u.operating_status,
 		}));
 	return {
-		display_name: identity.display_name,
+		display_name: identity.kind === "preview" ? "Preview" : identity.display_name,
 		tenant_name: tenant.display_name,
 		white_label: tenant.white_label,
 		units,
@@ -243,7 +385,7 @@ export async function getPortalSession(
  */
 export async function getPortalUnit(
 	db: Db,
-	identity: Extract<Identity, { kind: "tenant_user" }>,
+	identity: Extract<Identity, { kind: "tenant_user" | "preview" }>,
 	unitId: string,
 ): Promise<BusinessUnitDetail | null> {
 	if (!identity.unit_ids.includes(unitId)) return null;

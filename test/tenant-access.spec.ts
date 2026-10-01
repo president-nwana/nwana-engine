@@ -295,14 +295,18 @@ describe("portal unit isolation", () => {
 });
 
 describe("portal shells", () => {
-	it("landing: no OC menu, no Organizations, portal gate", () => {
+	it("landing: no OC menu, no Organizations navigation, portal gate", () => {
 		const html = renderPortalLandingHtml();
 		expect(html).toContain('data-portal="landing"');
 		expect(html).toContain("nwana_portal_key");
 		expect(html).toContain("Tenant access");
 		expect(html).not.toContain('aria-label="Operating center"');
-		expect(html).not.toContain("/operating-center/organizations");
 		expect(html).not.toContain("data-org-level");
+		// ADR-0048: the only Organizations links are the preview Exit
+		// action and the expired-preview notice — no navigation chrome.
+		const orgLinks = html.split("/operating-center/organizations").length - 1;
+		expect(orgLinks).toBe(2);
+		expect(html).toContain("Exit preview");
 	});
 
 	it("unit page: data-unit, sanitized, no tenant id", () => {

@@ -145,6 +145,7 @@ import {
 	listTenants,
 } from "./lib/tenants";
 import {
+	createPreviewToken,
 	createTenantUser,
 	getPortalSession,
 	getPortalUnit,
@@ -5846,16 +5847,28 @@ export default {
 					error: "Portal access requires a tenant access key",
 				}, 401);
 			}
-			if (identity.kind !== "tenant_user") {
+			if (identity.kind !== "tenant_user" && identity.kind !== "preview") {
 				return json({
 					ok: false,
 					error: "The tenant portal is for tenant access keys; platform admins use the Operating Center",
 				}, 403);
 			}
+			// ADR-0048: preview sessions are strictly read-only. Admin mode
+			// is the Operating Center itself (Exit Preview); there is no
+			// in-preview privilege switch.
+			if (identity.kind === "preview" && request.method !== "GET") {
+				return json({
+					ok: false,
+					error: "Preview sessions are read-only",
+				}, 403);
+			}
 		}
-		// Narrowed tenant-user identity for the portal handlers below.
+		// Narrowed portal identity for the handlers below: tenant users and
+		// ADR-0048 previews share the same tenant-scoped code paths.
 		const tenantIdentity =
-			portalApiRoute && identity?.kind === "tenant_user" ? identity : null;
+			portalApiRoute && (identity?.kind === "tenant_user" || identity?.kind === "preview")
+				? identity
+				: null;
 
 		// Operating Center (rebuild 2026-09-28; Organizations added 2026-10-01). Canonical GET pages.
 		const htmlPage = (render: () => string) =>
@@ -6431,6 +6444,57 @@ export default {
 				const revoked = await revokeTenantUser(env.nwana_engine_db, tenantId, parts[2]);
 				if (!revoked) return json({ ok: false, error: "not found" }, 404);
 				return json({ ok: true, revoked: true });
+			}
+			// ADR-0048: platform-admin "Preview as Tenant".
+			// POST /tenants/:id/preview — mint a short-lived, read-only,
+			// stateless preview token covering ALL of the tenant's business
+			// units (what a fully-licensed tenant user sees). No DB write,
+			// no synthetic users. The OC client opens
+			// /portal#preview=<token> — no manual token handling.
+			if (request.method === "POST" && parts.length === 2 && parts[1] === "preview") {
+				try {
+					const p = await createPreviewToken(
+						env.nwana_engine_db,
+						env.OPERATING_CENTER_KEY ?? "",
+						tenantId,
+					);
+					return json({
+						ok: true,
+						preview_token: p.token,
+						tenant_id: p.tenant_id,
+						unit_ids: p.unit_ids,
+						expires_at: p.expires_at,
+					});
+				} catch (e) {
+					return json({ ok: false, error: e instanceof Error ? e.message : "invalid" }, 400);
+				}
+			}
+			// POST /tenants/:id/units/:unitId/preview — "Preview as client"
+			// for one business unit.
+			if (
+				request.method === "POST" &&
+				parts.length === 4 &&
+				parts[1] === "units" &&
+				parts[3] === "preview" &&
+				TENANT_ID_RE.test(parts[2])
+			) {
+				try {
+					const p = await createPreviewToken(
+						env.nwana_engine_db,
+						env.OPERATING_CENTER_KEY ?? "",
+						tenantId,
+						[parts[2]],
+					);
+					return json({
+						ok: true,
+						preview_token: p.token,
+						tenant_id: p.tenant_id,
+						unit_ids: p.unit_ids,
+						expires_at: p.expires_at,
+					});
+				} catch (e) {
+					return json({ ok: false, error: e instanceof Error ? e.message : "invalid" }, 400);
+				}
 			}
 			// GET /tenants/:id — tenant with business units derived at read time.
 			if (request.method === "GET" && parts.length === 1) {

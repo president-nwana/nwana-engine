@@ -49,6 +49,13 @@ const ORG_SCRIPT = `
 		if(!r.ok)throw new Error((d&&d.error)||('Request failed: '+r.status));
 		return d;
 	}
+	async function apiPost(path){
+		var r=await fetch(path,{method:'POST',headers:{authorization:'Bearer '+getKey()}});
+		var d=null;try{d=await r.json()}catch(e){}
+		if(r.status===401)throw new Error('Unauthorized — enter the owner key.');
+		if(!r.ok)throw new Error((d&&d.error)||('Request failed: '+r.status));
+		return d;
+	}
 	function esc(v){return String(v??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 	function badge(text,kind){
 		var cls=kind==='ok'?'badge-ok':(kind==='warn'?'badge-warn':'badge');
@@ -96,6 +103,7 @@ const ORG_SCRIPT = `
 			' · <b>White-label:</b> '+(t.white_label?'yes':'no')+'</p>'+
 			'<p class="detail"><b>Enabled modules:</b> '+((t.enabled_modules||[]).map(esc).join(', ')||'UNKNOWN')+'</p>'+
 			'<p class="detail"><b>External systems:</b> '+((t.external_systems||[]).map(function(x){return esc(x.integration)+' ('+esc(x.status)+')'}).join(', ')||'NOT CONNECTED')+'</p>'+
+			'<p><button type="button" class="oc-menu-btn" data-preview-tenant="1">Preview Portal</button></p>'+
 			'<p class="meta"><a href="/operating-center/organizations">← All organizations</a></p></section>';
 		var cards=(t.business_units||[]).map(function(u){
 			return '<div class="panel"><h2>'+esc(u.name)+'</h2>'+
@@ -104,7 +112,8 @@ const ORG_SCRIPT = `
 				' <span class="badge">'+esc(u.legal_entity_status)+'</span></p>'+
 				'<p class="detail"><b>Revenue model:</b> '+esc(u.revenue_model||'UNKNOWN')+'</p>'+
 				'<p class="detail"><b>Connected assets:</b> '+(u.connected_assets&&u.connected_assets.length?esc(u.connected_assets.length)+' linked object(s)':'none')+'</p>'+
-				'<p><a class="oc-menu-btn" href="/operating-center/organizations/'+esc(t.tenant_id)+'/'+esc(u.business_unit_id)+'">Open unit</a></p></div>';
+				'<p><a class="oc-menu-btn" href="/operating-center/organizations/'+esc(t.tenant_id)+'/'+esc(u.business_unit_id)+'">Open unit</a> '+
+				'<button type="button" class="oc-menu-btn secondary" data-preview-unit="'+esc(u.business_unit_id)+'">Preview as client</button></p></div>';
 		}).join('');
 		setHtml(head+'<div class="grid">'+cards+'</div>');
 	}
@@ -114,7 +123,8 @@ const ORG_SCRIPT = `
 		var u=d.unit;
 		var R=window.__unitRender;
 		var links=(window.__ORG_DEEP_LINKS&&window.__ORG_DEEP_LINKS[u.business_unit_id])||[];
-		setHtml(R.body(u,{
+		setHtml('<p><button type="button" class="oc-menu-btn" data-preview-unit="'+R.esc(u.business_unit_id)+'">Preview as client</button></p>'+
+		R.body(u,{
 			links:links,
 			backHtml:'<p class="meta"><a href="/operating-center/organizations/'+R.esc(u.tenant_id)+'">← '+R.esc(u.tenant_id)+'</a></p>',
 			tenantLine:'<p class="detail"><b>Unit ID:</b> '+R.esc(u.business_unit_id)+' · <b>Tenant:</b> '+R.esc(u.tenant_id)+'</p>',
@@ -135,6 +145,28 @@ const ORG_SCRIPT = `
 	if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){if(visible())boot()});
 	else if(visible())boot();
 	try{new MutationObserver(function(){if(visible())boot()}).observe(app,{attributes:true,attributeFilter:['hidden']})}catch(e){}
+	// ADR-0048: Preview as Tenant. Buttons carry data-preview-tenant (whole
+	// tenant) or data-preview-unit (one unit); the server mints a
+	// short-lived preview token and the portal opens in a new tab — no
+	// manual token handling.
+	document.querySelector('#org-body').addEventListener('click',async function(e){
+		var b=e.target&&e.target.closest?e.target.closest('[data-preview-tenant],[data-preview-unit]'):null;
+		if(!b||b.disabled)return;
+		b.disabled=true;
+		try{
+			if(b.hasAttribute('data-preview-tenant')){
+				var d=await apiPost('/api/operating-center/tenants/'+encodeURIComponent(tenantId)+'/preview');
+				if(!d.preview_token)throw new Error('Preview token missing');
+				window.open('/portal#preview='+encodeURIComponent(d.preview_token),'_blank');
+			}else{
+				var uid=b.getAttribute('data-preview-unit')||'';
+				var d2=await apiPost('/api/operating-center/tenants/'+encodeURIComponent(tenantId)+'/units/'+encodeURIComponent(uid)+'/preview');
+				if(!d2.preview_token)throw new Error('Preview token missing');
+				window.open('/portal/unit/'+encodeURIComponent(uid)+'#preview='+encodeURIComponent(d2.preview_token),'_blank');
+			}
+		}catch(err){alert((err&&err.message)||err)}
+		b.disabled=false;
+	});
 })();
 `;
 

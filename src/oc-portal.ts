@@ -18,30 +18,68 @@
 import { ocBareShell } from "./oc-shell";
 import { UNIT_BODY_SCRIPT } from "./oc-unit-body";
 
+const PORTAL_PREVIEW_KEY = "nwana_portal_preview";
+
 const PORTAL_SCRIPT = `
 (function(){
 	var app=document.querySelector('#app');
 	var mode=app.getAttribute('data-portal')||'landing';
 	var unitId=app.getAttribute('data-unit')||'';
 	var booted=false;
-	function getKey(){try{return localStorage.getItem('nwana_portal_key')||''}catch(e){return ''}}
+	// ADR-0048 preview-as-tenant: the OC opens /portal#preview=<token>.
+	// Capture it into sessionStorage (never localStorage — closing the tab
+	// ends the preview) and strip it from the address bar so the token
+	// never lands in history or server logs.
+	try{
+		var m=(location.hash||'').match(/[#&]preview=([^&]+)/);
+		if(m&&m[1]){
+			sessionStorage.setItem('${PORTAL_PREVIEW_KEY}',decodeURIComponent(m[1]));
+			history.replaceState(null,'',location.pathname+location.search);
+		}
+	}catch(e){}
+	function getPreviewKey(){try{return sessionStorage.getItem('${PORTAL_PREVIEW_KEY}')||''}catch(e){return ''}}
+	function isPreview(){return !!getPreviewKey()}
+	function getKey(){var p=getPreviewKey();if(p)return p;try{return localStorage.getItem('nwana_portal_key')||''}catch(e){return ''}}
 	function clearKey(){try{localStorage.removeItem('nwana_portal_key')}catch(e){}}
+	function clearPreview(){try{sessionStorage.removeItem('${PORTAL_PREVIEW_KEY}')}catch(e){}}
 	async function papi(path){
 		var r=await fetch(path,{headers:{authorization:'Bearer '+getKey()}});
 		var d=null;try{d=await r.json()}catch(e){}
-		if(r.status===401)throw new Error('__unauthorized__');
+		if(r.status===401)throw new Error(isPreview()?'__preview_expired__':'__unauthorized__');
 		if(!r.ok)throw new Error((d&&d.error)||('Request failed: '+r.status));
 		return d;
 	}
 	var R=window.__unitRender;
 	function setHtml(html){document.querySelector('#portal-body').innerHTML=html}
 	function errHtml(e){return '<section class="panel"><h2>Could not load</h2><p class="unavailable">'+R.esc(e&&e.message||e)+'</p></section>'}
+	function previewExpiredHtml(){
+		return '<section class="panel"><h2>Preview expired</h2>'+
+			'<p class="unavailable">This preview has expired. Return to the Operating Center and open a new preview.</p>'+
+			'<p><a class="oc-menu-btn" href="/operating-center/organizations">Back to Organizations</a></p></section>';
+	}
+	function showPreviewBanner(tenantName){
+		if(document.querySelector('#preview-banner'))return;
+		var b=document.createElement('div');
+		b.id='preview-banner';
+		b.style.cssText='display:flex;align-items:center;gap:12px;padding:8px clamp(20px,5vw,72px);background:#1a2b23;color:#e8f2ec;font-size:14px';
+		b.innerHTML='<span>Previewing <b></b> as a tenant user · read-only</span>'+
+			'<button type="button" id="preview-exit" class="secondary" style="margin-left:auto">Exit preview</button>';
+		b.querySelector('b').textContent=tenantName||'tenant';
+		b.querySelector('#preview-exit').onclick=function(){clearPreview();location.href='/operating-center/organizations'};
+		document.body.insertBefore(b,document.body.firstChild);
+	}
 	function setHeader(sess){
 		document.querySelector('#portal-org').textContent=sess.tenant_name||'Business portal';
-		document.querySelector('#portal-sub').textContent='Signed in as '+(sess.display_name||'tenant user');
-		var so=document.querySelector('#portal-signout');
-		so.hidden=false;
-		so.onclick=function(){clearKey();location.href='/portal'};
+		if(isPreview()){
+			document.querySelector('#portal-sub').textContent='Preview — read-only tenant view';
+			document.querySelector('#portal-signout').hidden=true;
+			showPreviewBanner(sess.tenant_name);
+		}else{
+			document.querySelector('#portal-sub').textContent='Signed in as '+(sess.display_name||'tenant user');
+			var so=document.querySelector('#portal-signout');
+			so.hidden=false;
+			so.onclick=function(){clearKey();location.href='/portal'};
+		}
 		var pw=document.querySelector('#portal-powered');
 		if(pw&&sess.white_label)pw.hidden=true;
 		if(sess.units&&sess.units.length>1){
@@ -85,6 +123,7 @@ const PORTAL_SCRIPT = `
 			if(mode==='landing')await bootLanding();else await bootUnit();
 		}catch(e){
 			if(e&&e.message==='__unauthorized__'){clearKey();location.reload();return}
+			if(e&&e.message==='__preview_expired__'){clearPreview();setHtml(previewExpiredHtml());return}
 			setHtml(errHtml(e));
 		}
 	}
@@ -112,6 +151,9 @@ function portalShell(opts: {
 		title: opts.title,
 		titleSuffix: "Tenant Portal",
 		headerHtml,
+		// ADR-0048: a preview token in sessionStorage satisfies the gate,
+		// so a platform-admin preview opens the portal directly.
+		previewStorageKey: PORTAL_PREVIEW_KEY,
 		gate: {
 			storageKey: "nwana_portal_key",
 			heading: "Tenant access",
