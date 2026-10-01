@@ -28,7 +28,7 @@ Read these files first:
 The repository is the canonical development memory of NWANA Engine.
 
 If an external platform fact is not verified in the canonical Registry, it must be treated as `UNKNOWN` rather than inferred from a title, URL, internal ID, hierarchy, or similar object.
-NWANA Engine is a zero-cost-first sports infrastructure, integrity, provenance, automation, and proof-processing system developed by the Nordic Walking Association of North America.
+NWANA Engine is a zero-cost-first sports infrastructure, integrity, provenance, automation, and proof-processing system created and developed by Albert Fatikhov for use within the Nordic Walking Association of North America.
 
 
 
@@ -37,6 +37,26 @@ NWANA Engine is a zero-cost-first sports infrastructure, integrity, provenance, 
 
 
 **Organization / Grantee:** Nordic Walking Association of North America (NWANA), a U.S. 501(c)(3) nonprofit organization.
+
+
+
+## Ownership
+
+
+
+**Owner:** Albert Fatikhov
+
+
+
+NWANA Engine, including its source code, product architecture, system design, and project direction, is owned by Albert Fatikhov.
+
+
+
+The Nordic Walking Association of North America (NWANA) uses NWANA Engine as part of its operating infrastructure. Such use does not by itself transfer ownership of NWANA Engine or its source code to NWANA.
+
+
+
+Copyright © 2026 Albert Fatikhov. All rights reserved.
 
 
 
