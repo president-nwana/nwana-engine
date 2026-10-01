@@ -374,9 +374,16 @@ describe("business unit detail honesty", () => {
 	});
 
 	it("parseIntegrations accepts both integration and system keys", async () => {
-		const db = makeDb();
-		db.exec(`INSERT INTO tenants (tenant_id, legal_name, display_name, external_systems)
-			VALUES ('t2','T2','T2','[{"system":"runsignup","status":"connected"},{"integration":"ga4","status":"connected"}]')`);
+		const { db } = makeDb();
+		// The production NWANA seed stores external_systems JSON with the
+		// "system" key (not "integration"); simulate that exact row shape.
+		await createTenant(db, {
+			tenant_id: "t2", legal_name: "T2", display_name: "T2",
+			external_systems: [
+				{ system: "runsignup", status: "connected" },
+				{ integration: "ga4", status: "connected" },
+			] as unknown as Array<{ integration: string; status: string }>,
+		});
 		const tenant = await getTenant(db, "t2");
 		expect(tenant).not.toBeNull();
 		expect(tenant!.external_systems.map((x) => x.integration)).toEqual(["runsignup", "ga4"]);
