@@ -1152,3 +1152,11 @@ Objective: convert NWANA Engine from a single-organization operating system into
 
 ### Explicitly out of scope (not built)
 Full professional league, marketplace build-out, inventory/fulfillment, new challenges/races, redesign of existing NWANA screens, fake customers, paid infrastructure, second source of truth, moving NWANA assets into new legal entities, cap tables/valuation/investor functionality.
+
+### Multi-tenant MVP — final verification (2026-10-01 ~21:30 UTC)
+- Commits on origin/main: `b9b8dd1` (MVP), `cd0084a` (parseIntegrations fix), `1a6cd5f` (test fix).
+- Production Worker version `596e86d9-144f-438f-9df2-50845a66209d` (wrangler deploy; bindings preserved: D1, OPERATING_CENTER_ENABLED=true, PUBLIC_BASE_URL).
+- Parser fix: NWANA seed stored tenant external_systems with key "system"; parser now accepts both "integration" and "system" — no production data rewrite.
+- Live API verified: /tenants (2 tenants), /tenants/nwana (integrations parse: runsignup/google_ads/google_analytics/cloudflare connected), /tenants/nwana/units/nwana-governing (money derived: 1 txn, gross 500¢, net NULL honest), demo unit (not_operating, money/audience null), cross-tenant unit read → 404.
+- Regression: all 7 existing OC sections 200, money overview ok:true, revenue inventory ok:true, google-ads desired-state ok:true.
+- Tests 784/784, tsc clean. Operating cost: VERIFIED $0 (billing: one subscription, 0 USD, Paid/good-standing; no new services).
