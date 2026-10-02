@@ -5979,6 +5979,23 @@ export default {
 			return pngFromBase64(OC_ICON_180_ROUND_BASE64);
 		if (request.method === "GET" && url.pathname === "/favicon.ico")
 			return pngFromBase64(OC_ICON_180_ROUND_BASE64);
+		// Public social images (Instagram/Facebook artwork). Served from D1.
+		if (request.method === "GET" && url.pathname.startsWith("/api/public/social-image/")) {
+			const slug = decodeURIComponent(url.pathname.slice("/api/public/social-image/".length)).trim();
+			if (!slug || slug.includes("/") || slug.includes("..")) return json({ ok: false, error: "Not found" }, 404);
+			const row = await env.nwana_engine_db
+				.prepare(`SELECT jpeg_b64, content_type FROM social_images WHERE slug = ? LIMIT 1`)
+				.bind(slug)
+				.first<{ jpeg_b64: string; content_type: string }>();
+			if (!row?.jpeg_b64) return json({ ok: false, error: "Not found" }, 404);
+			const bytes = Uint8Array.from(atob(row.jpeg_b64), (c) => c.charCodeAt(0));
+			return new Response(bytes, {
+				headers: {
+					"content-type": row.content_type || "image/jpeg",
+					"cache-control": "public, max-age=86400",
+				},
+			});
+		}
 		if (request.method === "GET" && url.pathname === "/operating-center/marketing") return htmlPage(renderMarketingSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/growth") return htmlPage(renderGrowthSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/sport") return htmlPage(renderSportSectionHtml);
@@ -7247,6 +7264,27 @@ export default {
 			} catch (error) {
 				return json({ ok: false, error: error instanceof Error ? error.message : "Site news publish failed" }, 400);
 			}
+		}
+
+		// Upload a social image (platform operator only). Body: { slug, jpeg_b64 }.
+		if (url.pathname === "/api/operating-center/social-images" && request.method === "POST") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const body = (await request.json().catch(() => ({}))) as { slug?: string; jpeg_b64?: string };
+			const slug = (body.slug ?? "").trim();
+			const b64 = (body.jpeg_b64 ?? "").trim();
+			if (!slug || !/^[a-z0-9-]+$/.test(slug)) return json({ ok: false, error: "Valid slug is required" }, 400);
+			if (!b64 || b64.length < 100) return json({ ok: false, error: "jpeg_b64 is required" }, 400);
+			await env.nwana_engine_db
+				.prepare(`INSERT INTO social_images (slug, jpeg_b64, content_type) VALUES (?, ?, 'image/jpeg')
+				          ON CONFLICT(slug) DO UPDATE SET jpeg_b64 = excluded.jpeg_b64`)
+				.bind(slug, b64)
+				.run();
+			return json({
+				ok: true,
+				slug,
+				url: `${env.PUBLIC_BASE_URL ?? "https://nwana-engine.nwana-engine.workers.dev"}/api/public/social-image/${slug}`,
+			});
 		}
 
 		if (url.pathname === "/api/board/submissions" && request.method === "GET") {
