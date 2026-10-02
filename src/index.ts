@@ -6370,6 +6370,15 @@ export default {
 			const { verifySessionToken } = await import("./lib/tenant-access");
 			const session = await verifySessionToken(env.nwana_engine_db, hmacSecret, token);
 			if (!session) return json({ ok: false }, 401);
+			// Tenant display name for tenant-aware branding (2026-10-02).
+			let tenantName = session.tenant_id;
+			try {
+				const t = await env.nwana_engine_db
+					.prepare(`SELECT display_name FROM tenants WHERE tenant_id = ?`)
+					.bind(session.tenant_id)
+					.first<{ display_name: string }>();
+				if (t?.display_name) tenantName = t.display_name;
+			} catch { /* keep tenant_id */ }
 			return json({
 				ok: true,
 				user: {
@@ -6377,6 +6386,7 @@ export default {
 					display_name: session.display_name,
 					role: session.role,
 					tenant_id: session.tenant_id,
+					tenant_name: tenantName,
 					unit_ids: session.unit_ids,
 				},
 				expires_at: session.expires_at,

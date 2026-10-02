@@ -601,7 +601,7 @@ export function nwanaWorkspaceMenu(active: NwanaWorkspacePageId | string): strin
 	const adminLink =
 		'<a class="oc-menu-btn oc-menu-btn-admin" href="/admin" hidden>Platform Admin</a>';
 	const reveal =
-		`<script>(function(){try{var k=null;try{k=sessionStorage.getItem('nwana_engine_session')||''}catch(e){}if(!k)return;fetch('/api/auth/session',{headers:{authorization:'Bearer '+k}}).then(function(r){return r.json()}).then(function(s){if(s&&s.user&&s.user.role==='platform_admin'){document.querySelectorAll('.oc-menu-btn-admin').forEach(function(b){b.hidden=false})}}).catch(function(){})}catch(e){}})();</script>`;
+		`<script>(function(){try{var k=null;try{k=sessionStorage.getItem('nwana_engine_session')||''}catch(e){}if(!k)return;fetch('/api/auth/session',{headers:{authorization:'Bearer '+k}}).then(function(r){return r.json()}).then(function(s){if(!s||!s.user)return;if(s.user.role==='platform_admin'){document.querySelectorAll('.oc-menu-btn-admin').forEach(function(b){b.hidden=false})}var tn=s.user.tenant_name||s.user.tenant_id;if(tn&&s.user.tenant_id!=='nwana'){var h=document.querySelector('header h1');if(h)h.textContent=tn+' Workspace';var nav=document.querySelector('nav.oc-menu');if(nav)nav.setAttribute('aria-label',tn+' workspace');}}).catch(function(){})}catch(e){}})();</script>`;
 	return nav.replace("</nav>", adminLink + "</nav>") + reveal;
 }
 
