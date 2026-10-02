@@ -6110,6 +6110,13 @@ export default {
 			};
 			const now = new Date().toISOString();
 			const vid = (body.venture_id ?? "").trim();
+			if (vid && (body as Record<string, unknown>).action === "delete") {
+				await env.nwana_engine_db
+					.prepare(`DELETE FROM ventures WHERE venture_id = ?`)
+					.bind(vid)
+					.run();
+				return json({ ok: true, venture_id: vid, deleted: true });
+			}
 			if (vid) {
 				// Update existing venture.
 				const allowed = ["name", "kind", "stage", "summary"] as const;

@@ -382,15 +382,51 @@ async function load(){
 		var vs = r.ventures || [];
 		if(!vs.length){ box.innerHTML = '<div class="meta">No ventures yet.</div>'; return; }
 		box.innerHTML = '<div class="venture-grid">' + vs.map(function(v){
-			return '<div class="venture"><span class="stage stage-' + esc(v.stage) + '">' + esc(v.stage) + '</span>' +
+			return '<div class="venture" data-vid="' + esc(v.venture_id) + '"><span class="stage stage-' + esc(v.stage) + '">' + esc(v.stage) + '</span>' +
 				'<h3>' + esc(v.name) + '</h3>' +
 				'<div class="meta">' + esc(v.kind) + (v.tenant_id ? ' · tenant: ' + esc(v.tenant_id) : '') + '</div>' +
 				'<p>' + esc(v.summary || '') + '</p>' +
 				'<label class="meta">Stage: <select data-vstage="' + esc(v.venture_id) + '">' +
 				['idea','forming','active','operating','archived'].map(function(st){
 					return '<option value="' + st + '"' + (v.stage===st?' selected':'') + '>' + st + '</option>';
-				}).join('') + '</select></label></div>';
+				}).join('') + '</select></label>' +
+				'<div class="mrow" style="margin-top:8px"><button type="button" data-vedit="' + esc(v.venture_id) + '">Edit</button>' +
+				'<button type="button" class="secondary" data-vdel="' + esc(v.venture_id) + '">Delete</button></div></div>';
 		}).join('') + '</div>';
+		// Edit: turn card into a form.
+		box.querySelectorAll('[data-vedit]').forEach(function(b){
+			b.addEventListener('click', function(){
+				var card = b.closest('.venture');
+				var v = vs.find(function(x){ return x.venture_id === b.getAttribute('data-vedit'); });
+				if(!v || !card) return;
+				card.innerHTML = '<label class="meta">Name<input type="text" id="ve-name" value="' + esc(v.name) + '" style="width:100%;padding:8px;margin:4px 0"></label>' +
+					'<label class="meta">Kind<input type="text" id="ve-kind" value="' + esc(v.kind) + '" style="width:100%;padding:8px;margin:4px 0"></label>' +
+					'<label class="meta">Summary<textarea id="ve-summary" style="width:100%;padding:8px;margin:4px 0;min-height:80px">' + esc(v.summary || '') + '</textarea></label>' +
+					'<div class="mrow"><button type="button" id="ve-save">Save</button><button type="button" class="secondary" id="ve-cancel">Cancel</button></div>';
+				card.querySelector('#ve-cancel').addEventListener('click', load);
+				card.querySelector('#ve-save').addEventListener('click', async function(){
+					try {
+						await api('/api/admin/ventures', {method:'POST', headers:{'content-type':'application/json'},
+							body: JSON.stringify({venture_id: v.venture_id,
+								name: card.querySelector('#ve-name').value,
+								kind: card.querySelector('#ve-kind').value,
+								summary: card.querySelector('#ve-summary').value})});
+						await load();
+					} catch(e){ alert(e.message); }
+				});
+			});
+		});
+		// Delete with confirm.
+		box.querySelectorAll('[data-vdel]').forEach(function(b){
+			b.addEventListener('click', async function(){
+				if(!confirm('Delete this venture idea?')) return;
+				try {
+					await api('/api/admin/ventures', {method:'POST', headers:{'content-type':'application/json'},
+						body: JSON.stringify({venture_id: b.getAttribute('data-vdel'), action: 'delete'})});
+					await load();
+				} catch(e){ alert(e.message); }
+			});
+		});
 		box.querySelectorAll('[data-vstage]').forEach(function(sel){
 			sel.addEventListener('change', async function(){
 				try {
