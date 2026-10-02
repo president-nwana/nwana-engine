@@ -227,7 +227,8 @@ ${platformAdminMenu("users")}
 	gate.hidden=true;app.hidden=false;
 
 	async function api(path,opts){
-		var r=await fetch(path,Object.assign({headers:authz()},opts||{}));
+		var o=Object.assign({},opts||{});o.headers=Object.assign(authz(),o.headers||{});
+		var r=await fetch(path,o);
 		var d=null;try{d=await r.json()}catch(e){}
 		if(r.status===401){signOut();throw new Error('Unauthorized')}
 		if(r.status===403){throw new Error((d&&d.error)||'Not allowed')}
@@ -365,7 +366,9 @@ var SESSION_KEY='nwana_engine_session';
 function getKey(){try{return sessionStorage.getItem(SESSION_KEY)||''}catch(e){return ''}}
 function authz(){return {'Authorization':'Bearer '+getKey(),'Content-Type':'application/json'}}
 async function api(path, opts){
-	var r = await fetch(path, Object.assign({headers: authz()}, opts || {}));
+	var o = Object.assign({}, opts || {});
+	o.headers = Object.assign(authz(), (o.headers || {}));
+	var r = await fetch(path, o);
 	var t = await r.text();
 	var d = {}; try { d = JSON.parse(t); } catch(e){ d = {ok:false, error: t.slice(0,200)}; }
 	if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status));
