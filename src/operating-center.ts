@@ -552,6 +552,7 @@ export type NwanaWorkspacePageId =
  */
 export type PlatformAdminPageId =
 	| "organizations"
+	| "ventures"
 	| "users"
 	| "modules"
 	| "licensing"

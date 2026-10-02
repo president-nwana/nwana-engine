@@ -189,7 +189,7 @@ import { renderSportSectionHtml } from "./oc-sport";
 import { renderAcademySectionHtml } from "./oc-academy";
 import { renderBoardSectionHtml } from "./oc-board";
 import { renderOperationsSectionHtml } from "./oc-operations";
-import { renderAdminLandingHtml, renderUsersSectionHtml } from "./oc-admin";
+import { renderAdminLandingHtml, renderUsersSectionHtml, renderVenturesSectionHtml } from "./oc-admin";
 import {
 	renderBusinessUnitSectionHtml,
 	renderOrganizationsSectionHtml,
@@ -6040,6 +6040,9 @@ export default {
 		if (request.method === "GET" && url.pathname === "/admin/organizations") {
 			return htmlPage(renderOrganizationsSectionHtml);
 		}
+		if (request.method === "GET" && url.pathname === "/admin/ventures") {
+			return htmlPage(renderVenturesSectionHtml);
+		}
 		if (request.method === "GET" && url.pathname === "/admin/users") {
 			return htmlPage(renderUsersSectionHtml);
 		}
@@ -6087,6 +6090,55 @@ export default {
 			}
 		}
 		// Platform admin: revoke / reactivate / set-password for a user.
+		// Ventures: internal companies growing inside the Engine (platform-admin only).
+		// MVP: capture ideas, track stage. Each venture can later become a tenant.
+		if (url.pathname === "/api/admin/ventures" && request.method === "GET") {
+			const isAdmin = identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" && identity.role === "platform_admin");
+			if (!isAdmin) return json({ ok: false, error: "Platform admin required" }, 403);
+			const rows = await env.nwana_engine_db
+				.prepare(`SELECT venture_id, name, kind, stage, summary, tenant_id, created_at, updated_at FROM ventures ORDER BY created_at ASC`)
+				.all();
+			return json({ ok: true, ventures: rows.results ?? [] });
+		}
+		if (url.pathname === "/api/admin/ventures" && request.method === "POST") {
+			const isAdmin = identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" && identity.role === "platform_admin");
+			if (!isAdmin) return json({ ok: false, error: "Platform admin required" }, 403);
+			const body = (await request.json().catch(() => ({}))) as {
+				venture_id?: string; name?: string; kind?: string; stage?: string; summary?: string;
+			};
+			const now = new Date().toISOString();
+			const vid = (body.venture_id ?? "").trim();
+			if (vid) {
+				// Update existing venture.
+				const allowed = ["name", "kind", "stage", "summary"] as const;
+				const sets: string[] = [];
+				const vals: unknown[] = [];
+				for (const k of allowed) {
+					const v = (body as Record<string, unknown>)[k];
+					if (typeof v === "string" && v.trim()) { sets.push(`${k} = ?`); vals.push(v.trim()); }
+				}
+				if (!sets.length) return json({ ok: false, error: "Nothing to update" }, 400);
+				sets.push("updated_at = ?");
+				vals.push(now, vid);
+				await env.nwana_engine_db
+					.prepare(`UPDATE ventures SET ${sets.join(", ")} WHERE venture_id = ?`)
+					.bind(...vals)
+					.run();
+				return json({ ok: true, venture_id: vid, updated: true });
+			}
+			// Create new venture (idea).
+			const name = (body.name ?? "").trim();
+			if (!name) return json({ ok: false, error: "name is required" }, 400);
+			const newId = "venture-" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "venture-" + Date.now().toString(36);
+			await env.nwana_engine_db
+				.prepare(`INSERT INTO ventures (venture_id, name, kind, stage, summary, created_at, updated_at) VALUES (?, ?, ?, 'idea', ?, ?, ?)`)
+				.bind(newId, name, (body.kind ?? "other").trim() || "other", (body.summary ?? "").trim(), now, now)
+				.run();
+			return json({ ok: true, venture_id: newId, created: true });
+		}
+
 		if (url.pathname.startsWith("/api/admin/users/") && request.method === "POST") {
 			const isAdmin = identity?.kind === "platform_admin" ||
 				(identity?.kind === "session" && identity.role === "platform_admin");

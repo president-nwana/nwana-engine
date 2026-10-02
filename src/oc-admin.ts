@@ -19,6 +19,7 @@ import { type PlatformAdminPageId } from "./operating-center";
 export function platformAdminMenu(active: PlatformAdminPageId | string): string {
 	const items: Array<{ id: PlatformAdminPageId; label: string; href: string }> = [
 		{ id: "organizations", label: "Organizations", href: "/admin/organizations" },
+		{ id: "ventures", label: "Ventures", href: "/admin/ventures" },
 		{ id: "users", label: "Users", href: "/admin/users" },
 		{ id: "modules", label: "Modules", href: "/admin/modules" },
 		{ id: "licensing", label: "Licensing", href: "/admin/licensing" },
@@ -62,6 +63,13 @@ export function renderAdminLandingHtml(): string {
 			title: "Organizations",
 			desc: "Tenants of the NWANA Engine platform — NWANA is the first live tenant.",
 			href: "/admin/organizations",
+			ready: true,
+		},
+		{
+			id: "ventures",
+			title: "Ventures",
+			desc: "Our own companies growing inside the Engine — from idea to operating business. They are the Engine's first test clients.",
+			href: "/admin/ventures",
 			ready: true,
 		},
 		{
@@ -303,6 +311,119 @@ ${platformAdminMenu("users")}
 	});
 
 	loadTenants().then(loadUsers).catch(function(e){msg('users-message',e.message,false)});
+})();
+</script>
+</body>
+</html>`;
+}
+
+export function renderVenturesSectionHtml(): string {
+	return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ventures — Platform Admin</title>
+${ADMIN_STYLE}
+<style>
+.venture-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-top:16px}
+.venture{border:1px solid #dce4df;border-radius:12px;padding:16px;background:#fff}
+.venture h3{margin:0 0 8px}
+.stage{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#eef2ee;color:#37503c;margin-bottom:8px}
+.stage-idea{background:#fff3d6;color:#7a5c00}
+.stage-forming{background:#e3f0ff;color:#1a4fa0}
+.stage-active{background:#e0f5e9;color:#14663a}
+.stage-operating{background:#d6ecff;color:#0b3d91}
+.venture p{font-size:14px;color:#444;margin:8px 0}
+.venture select{margin-top:8px;padding:6px 10px;border-radius:8px;border:1px solid #dce4df}
+.add-form{margin-top:24px;border:1px dashed #b9c6bb;border-radius:12px;padding:16px;background:#fafbfa}
+.add-form input,.add-form textarea{width:100%;padding:10px;border:1px solid #dce4df;border-radius:9px;font-size:15px;box-sizing:border-box;margin:6px 0}
+</style>
+</head>
+<body>
+<header><h1>Ventures</h1><p>Our companies, growing inside the Engine. Ideas first — then forming, active, operating. Each one is a future test client of the Engine.</p></header>
+${platformAdminMenu("ventures")}
+<main>
+<section class="panel" id="gate" hidden>
+	<p class="unavailable">Your session has expired or you are not signed in.</p>
+	<p><a class="oc-menu-btn" href="/login">Sign in</a></p>
+</section>
+<section class="panel" id="content" hidden>
+	<div id="venture-list"><div class="meta">Loading…</div></div>
+	<div class="add-form">
+		<h3>New venture idea</h3>
+		<input type="text" id="v-name" placeholder="Name (e.g. NWANA Travel)">
+		<input type="text" id="v-kind" placeholder="Kind (league, academy, marketplace…)">
+		<textarea id="v-summary" placeholder="What is it, in one paragraph?"></textarea>
+		<div class="mrow"><button type="button" id="v-add">Add idea</button><span class="meta" id="v-msg"></span></div>
+	</div>
+</section>
+</main>
+<script>
+(function(){
+var SESSION_KEY='nwana_engine_session';
+function getKey(){try{return sessionStorage.getItem(SESSION_KEY)||''}catch(e){return ''}}
+function authz(){return {'Authorization':'Bearer '+getKey(),'Content-Type':'application/json'}}
+async function api(path, opts){
+	var r = await fetch(path, Object.assign({headers: authz()}, opts || {}));
+	var t = await r.text();
+	var d = {}; try { d = JSON.parse(t); } catch(e){ d = {ok:false, error: t.slice(0,200)}; }
+	if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status));
+	return d;
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+async function load(){
+	var box = document.querySelector('#venture-list');
+	try {
+		var r = await api('/api/admin/ventures');
+		var vs = r.ventures || [];
+		if(!vs.length){ box.innerHTML = '<div class="meta">No ventures yet.</div>'; return; }
+		box.innerHTML = '<div class="venture-grid">' + vs.map(function(v){
+			return '<div class="venture"><span class="stage stage-' + esc(v.stage) + '">' + esc(v.stage) + '</span>' +
+				'<h3>' + esc(v.name) + '</h3>' +
+				'<div class="meta">' + esc(v.kind) + (v.tenant_id ? ' · tenant: ' + esc(v.tenant_id) : '') + '</div>' +
+				'<p>' + esc(v.summary || '') + '</p>' +
+				'<label class="meta">Stage: <select data-vstage="' + esc(v.venture_id) + '">' +
+				['idea','forming','active','operating','archived'].map(function(st){
+					return '<option value="' + st + '"' + (v.stage===st?' selected':'') + '>' + st + '</option>';
+				}).join('') + '</select></label></div>';
+		}).join('') + '</div>';
+		box.querySelectorAll('[data-vstage]').forEach(function(sel){
+			sel.addEventListener('change', async function(){
+				try {
+					await api('/api/admin/ventures', {method:'POST', headers:{'content-type':'application/json'},
+						body: JSON.stringify({venture_id: sel.getAttribute('data-vstage'), stage: sel.value})});
+					await load();
+				} catch(e){ alert(e.message); }
+			});
+		});
+	} catch(e){ box.innerHTML = '<div class="unavailable">' + esc(e.message) + '</div>'; }
+}
+document.querySelector('#v-add').addEventListener('click', async function(){
+	var msg = document.querySelector('#v-msg');
+	msg.textContent = '';
+	try {
+		var r = await api('/api/admin/ventures', {method:'POST', headers:{'content-type':'application/json'},
+			body: JSON.stringify({
+				name: document.querySelector('#v-name').value,
+				kind: document.querySelector('#v-kind').value,
+				summary: document.querySelector('#v-summary').value
+			})});
+		msg.textContent = 'Added.';
+		document.querySelector('#v-name').value = '';
+		document.querySelector('#v-kind').value = '';
+		document.querySelector('#v-summary').value = '';
+		await load();
+	} catch(e){ msg.textContent = e.message; }
+});
+// Session gate.
+if(!getKey()){
+	document.querySelector('#gate').hidden = false;
+} else {
+	document.querySelector('#gate').hidden = true;
+	document.querySelector('#content').hidden = false;
+	load();
+}
 })();
 </script>
 </body>
