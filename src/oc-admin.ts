@@ -127,7 +127,7 @@ ${ADMIN_STYLE}
 ${platformAdminMenu("")}
 <main>
 <section class="panel"><h2>Administration areas</h2>
-<p class="meta">Manage tenants, users, modules, and licensing. Operational NWANA work lives in the <a href="/operating-center">NWANA Workspace</a>.</p>
+<p class="meta">Manage tenants, users, modules, and licensing.</p><p><a class="oc-menu-btn" href="/operating-center" style="text-decoration:none;display:inline-block">Open NWANA Workspace →</a></p>
 </section>
 <div class="grid">${cardsHtml}</div>
 </main>

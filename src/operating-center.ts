@@ -594,7 +594,14 @@ export function nwanaWorkspaceMenu(active: NwanaWorkspacePageId | string): strin
 		{ id: "board", label: "Board", href: "/operating-center/board" },
 		{ id: "operations", label: "Operations", href: "/operating-center/operations" },
 	];
-	return renderMenu(items, active, "NWANA workspace");
+	// 2026-10-02: platform admins get a way back to /admin. Hidden by default;
+	// revealed client-side only when the session is a platform_admin.
+	const nav = renderMenu(items, active, "NWANA workspace");
+	const adminLink =
+		'<a class="oc-menu-btn oc-menu-btn-admin" href="/admin" hidden>Platform Admin</a>';
+	const reveal =
+		`<script>(function(){try{var k=null;try{k=sessionStorage.getItem('nwana_engine_session')||''}catch(e){}if(!k)return;fetch('/api/auth/session',{headers:{authorization:'Bearer '+k}}).then(function(r){return r.json()}).then(function(s){if(s&&s.user&&s.user.role==='platform_admin'){document.querySelectorAll('.oc-menu-btn-admin').forEach(function(b){b.hidden=false})}}).catch(function(){})}catch(e){}})();</script>`;
+	return nav.replace("</nav>", adminLink + "</nav>") + reveal;
 }
 
 /**
