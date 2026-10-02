@@ -77,17 +77,14 @@ const ORG_SCRIPT = `
 		var d=await api('/api/operating-center/tenants');
 		var cards=(d.tenants||[]).map(function(t){
 			var demo=t.status==='demo';
-			return '<div class="panel"><h2>'+esc(t.display_name)+'</h2>'+
-				'<p class="meta">'+esc(t.legal_name)+'</p>'+
-				'<p><span class="detail"><b>Sport / domain:</b> '+esc(t.sport_domain||'UNKNOWN')+'</span> '+
-				(statusBadge(t.status==='active'?'operating':(t.status==='demo'?'pilot':'not_operating')))+
-				(demo?' '+badge('DEMO TENANT','warn'):'')+'</p>'+
-				'<p class="detail"><b>Business units:</b> '+esc(t.business_unit_count)+
-				' · <b>License:</b> '+esc(t.plan_license_status)+
-				(demo?' · configuration proof only — not a production customer':'')+'</p>'+
-				'<p><a class="oc-menu-btn" href="/admin/organizations/'+esc(t.tenant_id)+'">Open '+esc(t.display_name)+'</a></p></div>';
+			return '<div class="panel" style="margin:0"><h3 style="margin:0 0 6px;font-size:16px">'+esc(t.display_name)+'</h3>'+
+				'<p class="meta" style="margin:0 0 8px">'+esc(t.sport_domain||'UNKNOWN')+' '+
+				(statusBadge(t.status==='active'?'operating':(t.status==='demo'?'pilot':'not_operating')))+'</p>'+
+				'<p class="detail" style="margin:0 0 10px"><b>Units:</b> '+esc(t.business_unit_count)+
+				' · <b>License:</b> '+esc(t.plan_license_status)+'</p>'+
+				'<p style="margin:0"><a class="oc-menu-btn" style="padding:6px 14px;font-size:13px" href="/admin/organizations/'+esc(t.tenant_id)+'">Open →</a></p></div>';
 		}).join('');
-		setHtml(cards||'<section class="panel"><p class="unavailable">No tenants.</p></section>');
+		setHtml(cards?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'+cards+'</div>':'<section class="panel"><p class="unavailable">No tenants.</p></section>');
 	}
 
 	async function bootTenant(){
