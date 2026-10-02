@@ -128,9 +128,8 @@ const STATE_SCRIPT = `
 				else{html+='<p class="meta">No venture linked to this workspace yet.</p>';}
 				html+='<p class="meta">This is your workspace. Money and News below are yours — empty until you add data.</p></div>';
 				var sp=document.querySelector('#state-stats');if(sp)sp.innerHTML=html;
-				var bp=document.querySelector('#state-board');if(bp)bp.innerHTML='';
-				var ap=document.querySelector('#state-activity');if(ap)ap.innerHTML='';
-				var at=document.querySelector('#state-attention');if(at)at.innerHTML='';
+				// Hide entire NWANA panels (headings + links), not just their content divs.
+				['state-board','state-activity','state-attention'].forEach(function(pid){var d=document.querySelector('#'+pid);if(d&&d.closest('section'))d.closest('section').style.display='none';});
 				var ma=document.querySelector('.oc-quick');if(ma){var mb=ma.querySelector('button');if(mb)mb.style.display='none';}
 				return;
 			}
