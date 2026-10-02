@@ -500,19 +500,19 @@ export async function publishNewsToInstagram(
 
 /** Delete an Instagram post by media ID. */
 export async function deleteInstagramPost(db: D1Database, metaToken: string, mediaId: string): Promise<{ ok: boolean; error?: string }> {
-	try {
-		// Try both pages' tokens.
-		for (const pageId of ["595301193675669", "103190499173992"]) {
-			try {
-				const pageToken = await getFacebookPageToken(metaToken, pageId);
-				const resp = await fetch(`https://graph.facebook.com/v23.0/${mediaId}?access_token=${encodeURIComponent(pageToken)}`, { method: "DELETE" });
-				if (resp.ok) return { ok: true };
-			} catch { /* try next page */ }
+	const errors: string[] = [];
+	for (const pageId of ["595301193675669", "103190499173992"]) {
+		try {
+			const pageToken = await getFacebookPageToken(metaToken, pageId);
+			const resp = await fetch(`https://graph.facebook.com/v23.0/${mediaId}?access_token=${encodeURIComponent(pageToken)}`, { method: "DELETE" });
+			const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
+			if (resp.ok && data.success) return { ok: true };
+			errors.push(`${pageId}: ${resp.status} ${JSON.stringify(data).slice(0, 150)}`);
+		} catch (e) {
+			errors.push(`${pageId}: ${e instanceof Error ? e.message : String(e)}`);
 		}
-		return { ok: false, error: "Delete failed on both pages" };
-	} catch (error) {
-		return { ok: false, error: error instanceof Error ? error.message : String(error) };
 	}
+	return { ok: false, error: errors.join(" | ") };
 }
 
 /** Delete a Facebook post by post ID. */
