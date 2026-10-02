@@ -99,6 +99,16 @@ const NEWS_PACK_DATA: Record<string, PackObjectData> = {
 	},
 };
 
+/** Register pack data for a manually composed article so it can be distributed. */
+export function registerManualPack(articleId: string, title: string, text: string): void {
+	NEWS_PACK_DATA[articleId] = {
+		title,
+		canonicalUrl: "https://www.nwaofna.org/news",
+		newsKind: "manual",
+		description: text.slice(0, 500),
+	};
+}
+
 // Prepared distribution channel -> pack channel used for its text.
 // meta-fb-ig and meta-sport reuse the generic pack text (same congratulatory
 // copy as the pack prepared 2026-09-27).

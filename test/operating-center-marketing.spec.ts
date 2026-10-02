@@ -11,12 +11,12 @@ import { renderOperationsSectionHtml } from "../src/oc-operations";
 // separate Summary / Actions / Details views (one visible at a time),
 // deep-linkable via ?tab=<function>&view=<summary|actions|details>.
 
-const FUNCTIONS = ["ads", "analytics", "social", "media", "sites"];
+const FUNCTIONS = ["ads", "analytics", "social", "news", "media", "sites"];
 
 describe("operating center marketing: Summary/Actions/Details", () => {
 	const html = renderMarketingSectionHtml();
 
-	it("renders five function tabs", () => {
+	it("renders six function tabs", () => {
 		for (const f of FUNCTIONS) {
 			expect(html).toContain(`data-tab="${f}"`);
 		}

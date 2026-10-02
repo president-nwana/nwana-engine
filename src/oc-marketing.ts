@@ -653,6 +653,137 @@ const SOCIAL_PANELS = mktFunction(
 );
 
 // ---------------------------------------------------------------------------
+// 3b. News Center — automatic drafts, manual composer, press releases
+// ---------------------------------------------------------------------------
+
+const NEWS_STYLE = `<style>
+	.news-queue .item{border:1px solid #dce4df;border-radius:9px;padding:12px;margin:8px 0;background:#fff}
+	.news-queue .item h4{margin:0 0 6px}
+	.news-composer textarea{width:100%;min-height:120px;font:15px/1.5 system-ui,sans-serif;padding:10px;border:1px solid #dce4df;border-radius:9px;box-sizing:border-box}
+	.news-composer input[type=text]{width:100%;padding:10px;border:1px solid #dce4df;border-radius:9px;font-size:16px;box-sizing:border-box}
+	.dest-checks{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0}
+	.dest-checks label{display:flex;gap:6px;align-items:center;font-size:15px;background:#f5f7f5;padding:8px 12px;border-radius:8px;cursor:pointer}
+	.dest-checks label.disabled{opacity:.45;cursor:not-allowed}
+	.toggle-row{display:flex;gap:10px;align-items:center;margin:6px 0;font-size:15px}
+</style>`;
+
+const NEWS_SUMMARY_HTML = `<section class="panel"><h2>News summary</h2><div id="news-sum">Loading…</div></section>`;
+
+const NEWS_ACTIONS_HTML = NEWS_STYLE + `
+	<section class="panel">
+		<h2>Automatic news</h2>
+		<div class="meta">The Machine watches race results and the race calendar, and drafts news automatically. Drafts wait for your review unless you switch on auto-publish below.</div>
+		<div class="mrow"><button type="button" id="news-check">Check for news now</button><span class="meta" id="news-check-msg"></span></div>
+		<div id="news-auto-settings" style="margin-top:10px"><div class="meta">Loading settings…</div></div>
+	</section>
+	<section class="panel news-queue">
+		<h2>Drafts waiting for review</h2>
+		<div id="news-queue"><div class="meta">Loading…</div></div>
+	</section>
+	<section class="panel news-composer">
+		<h2>Write news manually</h2>
+		<div class="meta">Write once, send everywhere. Tick the destinations and press Publish.</div>
+		<div style="margin:10px 0"><input type="text" id="news-title" placeholder="Headline"></div>
+		<div style="margin:10px 0"><textarea id="news-body" placeholder="News text…"></textarea></div>
+		<div class="dest-checks" id="news-dests">
+			<label><input type="checkbox" value="site" checked> Website</label>
+			<label><input type="checkbox" value="facebook" checked> Facebook</label>
+			<label><input type="checkbox" value="instagram" checked> Instagram</label>
+			<label class="disabled" title="Not connected yet"><input type="checkbox" value="linkedin" disabled> LinkedIn (not connected)</label>
+			<label class="disabled" title="Not connected yet"><input type="checkbox" value="threads" disabled> Threads (not connected)</label>
+		</div>
+		<div class="mrow"><button type="button" id="news-publish">Publish</button><span class="meta" id="news-pub-msg"></span></div>
+	</section>
+	<section class="panel">
+		<h2>Press releases</h2>
+		<div class="meta">Press releases are a separate genre: formal tone, longer form, sent to journalists — not just posted to social. The press-release workspace is being built as its own section.</div>
+	</section>`;
+
+const NEWS_DETAILS_HTML = `<section class="panel"><h2>Recently published</h2><div id="news-recent">Loading…</div></section>`;
+
+const NEWS_SCRIPT = `
+	async function news_loadSummary(){
+		var box=document.querySelector('#news-sum'); if(!box)return;
+		try{
+			var q=await api('/api/operating-center/news/auto-queue');
+			var n=(q.queue||[]).length;
+			box.innerHTML='<div class="detail">'+(n? '<strong>'+n+'</strong> draft'+(n===1?'':'s')+' waiting for your review.' : 'No drafts waiting. The Machine will draft news when results come in or races approach.')+'</div>';
+		}catch(e){box.innerHTML='<div class="unavailable">'+esc(e.message)+'</div>';}
+	}
+	async function news_loadQueue(){
+		var box=document.querySelector('#news-queue'); if(!box)return;
+		try{
+			var q=await api('/api/operating-center/news/auto-queue');
+			if(!(q.queue||[]).length){box.innerHTML='<div class="meta">No drafts. Press \\u201cCheck for news now\\u201d to scan.</div>';return;}
+			box.innerHTML=q.queue.map(function(d){
+				return '<div class="item"><h4>'+esc(d.title)+'</h4><div class="meta">'+esc(d.type_label||d.news_type)+' \\u00b7 '+esc(d.created_at||'')+'</div><div class="detail">'+esc(d.angle||'')+'</div><div class="mrow"><button type="button" data-news-publish="'+esc(d.article_id)+'">Publish to website</button></div></div>';
+			}).join('');
+			box.querySelectorAll('[data-news-publish]').forEach(function(b){
+				b.addEventListener('click',async function(){
+					b.disabled=true;
+					try{await api('/api/operating-center/news/auto-publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({article_id:b.getAttribute('data-news-publish')})});await news_loadQueue();await news_loadSummary();}
+					catch(e){b.disabled=false;alert(e.message);}
+				});
+			});
+		}catch(e){box.innerHTML='<div class="unavailable">'+esc(e.message)+'</div>';}
+	}
+	async function news_loadSettings(){
+		var box=document.querySelector('#news-auto-settings'); if(!box)return;
+		try{
+			var r=await api('/api/operating-center/news/auto-settings');
+			box.innerHTML=(r.settings||[]).map(function(s){
+				return '<label class="toggle-row"><input type="checkbox" data-news-type="'+esc(s.news_type)+'"'+(s.auto_publish?' checked':'')+'> Auto-publish: '+esc(s.type_label)+'</label>';
+			}).join('')+'<div class="meta">When auto-publish is on, the Machine publishes that kind of news to the website immediately \\u2014 no review step.</div>';
+			box.querySelectorAll('[data-news-type]').forEach(function(cb){
+				cb.addEventListener('change',async function(){
+					try{await api('/api/operating-center/news/auto-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({news_type:cb.getAttribute('data-news-type'),auto_publish:cb.checked})});}
+					catch(e){cb.checked=!cb.checked;alert(e.message);}
+				});
+			});
+		}catch(e){box.innerHTML='<div class="unavailable">'+esc(e.message)+'</div>';}
+	}
+	function news_boot(){
+		news_loadSummary(); news_loadQueue(); news_loadSettings();
+		var recent=document.querySelector('#news-recent');
+		if(recent)recent.innerHTML='<div class="meta">Latest site news appears on nwaofna.org/news.</div>';
+		var check=document.querySelector('#news-check');
+		if(check)check.addEventListener('click',async function(){
+			var msg=document.querySelector('#news-check-msg'); if(msg)msg.textContent='Scanning\\u2026';
+			try{
+				var r=await api('/api/operating-center/news/auto-generate',{method:'POST'});
+				var n=(r.drafts||[]).length;
+				if(msg)msg.textContent=n?('Drafted '+n+' item'+(n===1?'':'s')+'.'):('Nothing new found.');
+				await news_loadQueue(); await news_loadSummary();
+			}catch(e){if(msg)msg.textContent=e.message;}
+		});
+		var pub=document.querySelector('#news-publish');
+		if(pub)pub.addEventListener('click',async function(){
+			var msg=document.querySelector('#news-pub-msg');
+			var title=(document.querySelector('#news-title')||{}).value||'';
+			var body=(document.querySelector('#news-body')||{}).value||'';
+			if(!title.trim()||!body.trim()){if(msg)msg.textContent='Headline and text are required.';return;}
+			if(msg)msg.textContent='Publishing\\u2026'; pub.disabled=true;
+			try{
+				var dests=Array.prototype.map.call(document.querySelectorAll('#news-dests input:checked'),function(c){return c.value;});
+				var r=await api('/api/operating-center/news/compose',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:title,body:body,destinations:dests})});
+				if(msg)msg.textContent='Published: '+(r.published||[]).join(', ')+'.';
+				document.querySelector('#news-title').value='';document.querySelector('#news-body').value='';
+				await news_loadSummary();
+			}catch(e){if(msg)msg.textContent=e.message;}
+			pub.disabled=false;
+		});
+	}
+`;
+
+const NEWS_PANELS = mktFunction(
+	"news",
+	"News Center — the Machine drafts news automatically; you review and publish, or write manually and send everywhere at once.",
+	NEWS_SUMMARY_HTML,
+	NEWS_ACTIONS_HTML,
+	NEWS_DETAILS_HTML,
+);
+
+// ---------------------------------------------------------------------------
 // 4. Media
 // ---------------------------------------------------------------------------
 
@@ -1068,6 +1199,7 @@ const MKT_VIEW_SCRIPT = `
 	async function boot_analytics(){__mktBootTab('analytics');}
 	async function boot_social(){__mktBootTab('social');}
 	async function boot_media(){__mktBootTab('media');}
+	async function boot_news(){__mktBootTab('news');}
 	async function boot_sites(){__mktBootTab('sites');}
 	window.__onTabNavigate=function(id){__mktSetView(id,'summary',true);};
 	window.addEventListener('popstate',function(){
@@ -1144,6 +1276,7 @@ export function renderMarketingSectionHtml(): string {
 			{ id: "ads", label: "Ads", panelsHtml: ADS_PANELS, script: ADS_SCRIPT + MKT_VIEW_SCRIPT, reportId: "ads" },
 			{ id: "analytics", label: "Analytics", panelsHtml: ANALYTICS_PANELS, script: ANALYTICS_SCRIPT },
 			{ id: "social", label: "Social", panelsHtml: SOCIAL_PANELS, script: SOCIAL_SCRIPT, reportId: "social" },
+			{ id: "news", label: "News", panelsHtml: NEWS_PANELS, script: NEWS_SCRIPT, reportId: "news" },
 			{ id: "media", label: "Media", panelsHtml: MEDIA_PANELS, script: MEDIA_SCRIPT },
 			{ id: "sites", label: "Sites", panelsHtml: SITES_PANELS, script: SITES_SCRIPT, reportId: "sites" },
 		],

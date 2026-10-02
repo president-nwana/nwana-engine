@@ -117,7 +117,8 @@ import {
 import { renderFundsHtml } from "./operating-center-funds";
 import { renderMediaHtml } from "./operating-center-media";
 import { renderNewsReviewHtml } from "./operating-center-news-review";
-import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFacebook, publishNewsToInstagram } from "./news-review";
+import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFacebook, publishNewsToInstagram, registerManualPack } from "./news-review";
+import { generateAutoNews, listAutoNewsQueue, autoNewsTypeLabel, AUTO_NEWS_TYPES } from "./auto-news";
 import { getExecutiveMoneyView } from "./operating-center-money";
 import {
 	getMoneySyncState,
@@ -7112,6 +7113,134 @@ export default {
 				body.image_slug ?? "",
 			);
 		}
+		// Manual news composer: write once, publish to selected destinations.
+		if (url.pathname === "/api/operating-center/news/compose" && request.method === "POST") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const body = (await request.json().catch(() => ({}))) as {
+				title?: string;
+				body?: string;
+				destinations?: string[];
+			};
+			const title = (body.title ?? "").trim();
+			const text = (body.body ?? "").trim();
+			const dests = (body.destinations ?? []).filter((d) => ["site", "facebook", "instagram"].includes(d));
+			if (!title || !text) return json({ ok: false, error: "Title and body are required" }, 400);
+			if (dests.length === 0) return json({ ok: false, error: "Choose at least one destination" }, 400);
+			const now = new Date().toISOString();
+			const aid = `manual-${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+			const bodyHtml = text.split(/\n\n+/).map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`).join("\n");
+			await env.nwana_engine_db
+				.prepare(
+					`INSERT INTO media_articles (article_id, plan_id, title, angle, status, body_html, created_at, updated_at)
+					 VALUES (?, 'MANUAL-NEWS', ?, '', 'APPROVED', ?, ?, ?)`,
+				)
+				.bind(aid, title, bodyHtml, now, now)
+				.run();
+			const published: string[] = [];
+			// Website.
+			if (dests.includes("site")) {
+				const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) + "-" + aid.slice(-8);
+				const ins = await env.nwana_engine_db
+					.prepare(`INSERT INTO site_news (slug, title, body_html, published_at, kind, created_by) VALUES (?, ?, ?, ?, 'news', 'MANUAL_COMPOSER')`)
+					.bind(slug, title, bodyHtml, now)
+					.run();
+				const siteNewsId = Number(ins.meta?.last_row_id ?? 0) || null;
+				await env.nwana_engine_db
+					.prepare(`UPDATE media_articles SET status = 'PUBLISHED', site_news_id = ?, published_at = ? WHERE article_id = ?`)
+					.bind(siteNewsId, now, aid)
+					.run();
+				published.push("website");
+			}
+			// Facebook + Instagram need pack data.
+			if (dests.includes("facebook") || dests.includes("instagram")) {
+				// Register a temporary pack for this manual article.
+				registerManualPack(aid, title, text);
+			}
+			if (dests.includes("facebook")) {
+				try {
+					const r = await publishNewsToFacebook(env.nwana_engine_db, env.NWANA_META_TOKEN, aid);
+					const rd = (await r.json()) as { ok?: boolean };
+					if (rd.ok) published.push("facebook");
+				} catch {
+					// Facebook failure is reported but doesn't block other destinations.
+				}
+			}
+			if (dests.includes("instagram")) {
+				published.push("instagram (needs a picture — upload one, then post from the article)");
+			}
+			return json({ ok: true, article_id: aid, published });
+		}
+		// Automatic news drafts: scan verified sources and draft articles.
+		if (url.pathname === "/api/operating-center/news/auto-generate" && request.method === "POST") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			try {
+				const result = await generateAutoNews(env.nwana_engine_db);
+				return json({ ok: true, ...result });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Auto-news failed" }, 500);
+			}
+		}
+		if (url.pathname === "/api/operating-center/news/auto-queue" && request.method === "GET") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const queue = await listAutoNewsQueue(env.nwana_engine_db);
+			return json({ ok: true, queue: queue.map((q) => ({ ...q, type_label: autoNewsTypeLabel(q.news_type) })) });
+		}
+		// Publish an auto draft to the site (owner review decision).
+		if (url.pathname === "/api/operating-center/news/auto-publish" && request.method === "POST") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const body = (await request.json().catch(() => ({}))) as { article_id?: string };
+			const articleId = (body.article_id ?? "").trim();
+			if (!articleId) return json({ ok: false, error: "article_id is required" }, 400);
+			const article = await env.nwana_engine_db
+				.prepare(`SELECT article_id, title, body_html FROM media_articles WHERE article_id = ? AND plan_id = 'AUTO-NEWS' AND status = 'DRAFT'`)
+				.bind(articleId)
+				.first<{ article_id: string; title: string; body_html: string }>();
+			if (!article) return json({ ok: false, error: "Draft not found" }, 404);
+			const now = new Date().toISOString();
+			const slug = article.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) + "-" + articleId.slice(-8);
+			const ins = await env.nwana_engine_db
+				.prepare(`INSERT INTO site_news (slug, title, body_html, published_at, kind, created_by) VALUES (?, ?, ?, ?, 'news', 'AUTO_NEWS_REVIEWED')`)
+				.bind(slug, article.title, article.body_html, now)
+				.run();
+			const siteNewsId = Number(ins.meta?.last_row_id ?? 0) || null;
+			await env.nwana_engine_db
+				.prepare(`UPDATE media_articles SET status = 'PUBLISHED', site_news_id = ?, published_at = ?, updated_at = ? WHERE article_id = ?`)
+				.bind(siteNewsId, now, now, articleId)
+				.run();
+			return json({ ok: true, article_id: articleId, slug });
+		}
+		// Auto-publish toggles per news type.
+		if (url.pathname === "/api/operating-center/news/auto-settings" && request.method === "GET") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const rows = await env.nwana_engine_db
+				.prepare(`SELECT news_type, auto_publish FROM auto_news_settings`)
+				.all<{ news_type: string; auto_publish: number }>();
+			const settings = (rows.results ?? []).map((r) => ({
+				news_type: r.news_type,
+				type_label: autoNewsTypeLabel(r.news_type),
+				auto_publish: r.auto_publish === 1,
+			}));
+			return json({ ok: true, settings });
+		}
+		if (url.pathname === "/api/operating-center/news/auto-settings" && request.method === "POST") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const body = (await request.json().catch(() => ({}))) as { news_type?: string; auto_publish?: boolean };
+			const newsType = (body.news_type ?? "").trim();
+			if (!(AUTO_NEWS_TYPES as readonly string[]).includes(newsType)) {
+				return json({ ok: false, error: "Unknown news type" }, 400);
+			}
+			await env.nwana_engine_db
+				.prepare(`UPDATE auto_news_settings SET auto_publish = ?, updated_at = ? WHERE news_type = ?`)
+				.bind(body.auto_publish ? 1 : 0, new Date().toISOString(), newsType)
+				.run();
+			return json({ ok: true, news_type: newsType, auto_publish: !!body.auto_publish });
+		}
 		if (url.pathname === "/api/operating-center/media/plans" && request.method === "GET") {
 			return listMediaPlans(env.nwana_engine_db);
 		}
@@ -8966,6 +9095,15 @@ if (
 			console.log(`[series-2026-cron] athlete stats refreshed for ${Object.keys(refreshed).length} profile(s)`);
 		} catch (err) {
 			console.log(`[series-2026-cron] athlete stats refresh ERROR ${err instanceof Error ? err.message : String(err)}`);
+		}
+		// Automatic news drafts: scan verified sources once a day.
+		// Failure-isolated; drafts wait for owner review unless auto-publish
+		// is enabled for that news type.
+		try {
+			const news = await generateAutoNews(env.nwana_engine_db);
+			console.log(`[series-2026-cron] auto-news drafted ${news.drafts.length} item(s)`);
+		} catch (err) {
+			console.log(`[series-2026-cron] auto-news ERROR ${err instanceof Error ? err.message : String(err)}`);
 		}
 	},
 };
