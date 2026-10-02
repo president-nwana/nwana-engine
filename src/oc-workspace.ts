@@ -22,11 +22,11 @@ const ORGS_SCRIPT = `<script>(function(){
 				'<a class="oc-menu-btn" style="padding:6px 14px;font-size:13px;background:#fff;color:#2f6247;border:1px solid #2f6247" href="#" onclick="wsTeam(\''+String(t.tenant_id).replace(/'/g,"")+'\');return false;">Team</a></div></div>';
 		}).join('')+'</div>';
 	}).catch(function(){});
-	window.wsOpen=function(tid){try{sessionStorage.setItem('nwana_preview_tenant',tid);}catch(e){}window.location.href='/operating-center';};
-	window.wsTeam=function(tid){window.location.href='/my-projects?team='+encodeURIComponent(tid);};
+	window.wsOpen=function(tid){window.location.href='/operating-center';};
+	window.wsTeam=function(tid){alert('Team management for '+tid+' — coming in the tenant workspace.');};
 })();</script>`;
 
-const IDEAS_PANELS = `<div class="panel" style="margin-bottom:14px"><h3 style="font-size:15px;margin:0 0 8px">New idea</h3>
+const IDEAS_PANELS = `<div class="panel" style="margin-bottom:14px"><h3 style="font-size:15px;margin:0 0 8px">New venture</h3>
 	<input id="ws-idea-name" placeholder="Idea name" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px">
 	<textarea id="ws-idea-summary" placeholder="What is it?" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:8px;min-height:60px;margin-bottom:8px"></textarea>
 	<button class="oc-menu-btn" onclick="wsAddIdea()">Add idea</button></div>
@@ -77,11 +77,11 @@ export function renderWorkspaceSectionHtml(): string {
 	return ocSectionShell({
 		section: "workspace",
 		title: "My Workspace",
-		subtitle: "Your organizations and your ideas. Jot it down, let it mature, make it real.",
+		subtitle: "Your organizations and your ventures. Jot it down, let it mature, make it real.",
 		queryTabs: true,
 		tabs: [
 			{ id: "organizations", label: "Organizations", panelsHtml: ORGS_PANELS, script: ORGS_SCRIPT },
-			{ id: "ideas", label: "Ideas", panelsHtml: IDEAS_PANELS, script: IDEAS_SCRIPT },
+			{ id: "ideas", label: "Ventures", panelsHtml: IDEAS_PANELS, script: IDEAS_SCRIPT },
 		],
 	});
 }
