@@ -85,14 +85,17 @@ function addDaysIso(baseIso: string, days: number): string {
 	return d.toISOString().slice(0, 10);
 }
 
-/** Results that are finalized but have no news article yet. */
+/** Results that are finalized but have no news article yet. Only recent
+ *  results (last 14 days) — no congratulations for two-month-old races. */
 async function findUncoveredResults(db: D1Database): Promise<RaceResultRow[]> {
+	const cutoff = addDaysIso(todayIso(), -14);
 	const rows = await db
 		.prepare(
 			`SELECT r.race_id, r.event_id, r.event_name, r.event_date, r.distance,
 			        r.result_count, r.results_json, r.results_url, r.registration_url
 			 FROM race_event_results r
 			 WHERE r.finalized = 1
+			   AND r.event_date >= ?
 			   AND NOT EXISTS (
 			         SELECT 1 FROM media_articles a
 			         WHERE a.auto_news_type = 'race_results'
@@ -101,6 +104,7 @@ async function findUncoveredResults(db: D1Database): Promise<RaceResultRow[]> {
 			 ORDER BY r.event_date DESC
 			 LIMIT 10`,
 		)
+		.bind(cutoff)
 		.all<RaceResultRow>();
 	return rows.results ?? [];
 }
