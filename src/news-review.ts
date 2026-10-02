@@ -82,19 +82,19 @@ const NEWS_PACK_DATA: Record<string, PackObjectData> = {
 		newsDate: "September 27, 2026",
 	},
 	"news-6187c236": {
-		title: "Tomorrow: NWANA Open 1K Nordic Walking Series — October 3",
+		title: "Tomorrow: NWANA Open 1K Virtual Nordic Walking Race — October 3",
 		canonicalUrl: "https://www.nwaofna.org/news/tomorrow-nwana-open-1k-nordic-walking-series-october-3-news-618",
 		newsKind: "race_announcement",
 		description:
-			"The 1K sprint round is tomorrow, October 3, in Saint Petersburg, FL. Registration is still open.",
+			"The 1K virtual race is tomorrow, October 3. Registration is still open — walk anywhere.",
 		newsDate: "October 3, 2026",
 	},
 	"news-b8df178f": {
-		title: "Sunday: NWANA Open 10K Nordic Walking Series — October 4",
+		title: "Sunday: NWANA Open 10K Virtual Nordic Walking Race — October 4",
 		canonicalUrl: "https://www.nwaofna.org/news/sunday-nwana-open-10k-nordic-walking-series-october-4-news-b8d",
 		newsKind: "race_announcement",
 		description:
-			"The 10K endurance round is Sunday, October 4, in Saint Petersburg, FL. Registration is open.",
+			"The 10K virtual race is Sunday, October 4. Registration is open — walk anywhere.",
 		newsDate: "October 4, 2026",
 	},
 };

@@ -1,5 +1,6 @@
 import { RESULT_BACKGROUND_01_JPEG_BASE64 } from "./assets/result-background-01";
 import { RESULT_BACKGROUND_MEN_01_JPEG_BASE64 } from "./assets/result-background-men-01";
+import { RESULT_BACKGROUND_MIXED_01_JPEG_BASE64 } from "./assets/result-background-mixed-01";
 import { getSeries2026LevelDefinitions } from "./series-2026-results";
 
 export interface ResultCardWinner {
@@ -36,7 +37,23 @@ export const RESULT_CARD_PUBLICATION_BLOCKER =
 
 export function isResultCardDesignReady(): boolean {
 	return RESULT_BACKGROUND_01_JPEG_BASE64.length > 0 &&
-		RESULT_BACKGROUND_MEN_01_JPEG_BASE64.length > 0;
+		RESULT_BACKGROUND_MEN_01_JPEG_BASE64.length > 0 &&
+		RESULT_BACKGROUND_MIXED_01_JPEG_BASE64.length > 0;
+}
+
+/**
+ * Pick the congratulations background by who participated:
+ * men only → male image; women only → female image; both → mixed image.
+ */
+export function pickResultBackground(winners: Array<{ gender?: string }>): string {
+	const genders = new Set(
+		(winners ?? []).map((w) => genderLabel(w.gender ?? "")).filter((g) => g === "MEN" || g === "WOMEN"),
+	);
+	const hasMen = genders.has("MEN");
+	const hasWomen = genders.has("WOMEN");
+	if (hasMen && hasWomen) return RESULT_BACKGROUND_MIXED_01_JPEG_BASE64;
+	if (hasWomen) return RESULT_BACKGROUND_01_JPEG_BASE64;
+	return RESULT_BACKGROUND_MEN_01_JPEG_BASE64;
 }
 
 function escapeXml(value: string): string {
@@ -111,9 +128,7 @@ export function buildResultCardSvg(input: ResultCardInput): string {
 	const athlete = primary?.athlete ?? "OFFICIAL RESULTS";
 	const time = primary?.time ?? "";
 	const logo = input.logoUrl ?? NWANA_LOGO_URL;
-	const background = primary && genderLabel(primary.gender) === "WOMEN"
-		? RESULT_BACKGROUND_01_JPEG_BASE64
-		: RESULT_BACKGROUND_MEN_01_JPEG_BASE64;
+	const background = pickResultBackground(input.winners);
 	const levels = input.levels ?? getSeries2026LevelDefinitions(input.distance).map(
 		(level) => ({
 			...level,

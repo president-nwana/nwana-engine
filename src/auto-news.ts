@@ -209,15 +209,16 @@ function buildAnnouncementArticle(
 	const dateLabel = ev.event_date;
 	const title =
 		type === "race_announcement_1d"
-			? `Tomorrow: NWANA Open ${ev.distance} Nordic Walking Series — ${dateLabel}`
-			: `NWANA Open ${ev.distance} Nordic Walking Series — ${dateLabel}`;
+			? `Tomorrow: NWANA Open ${ev.distance} Virtual Nordic Walking Race — ${dateLabel}`
+			: `NWANA Open ${ev.distance} Virtual Nordic Walking Race — ${dateLabel}`;
 	const angle =
 		type === "race_announcement_1d"
-			? `The ${ev.distance} round is tomorrow. Registration is still open.`
-			: `The ${ev.distance} round is ${dateLabel}. Registration is open.`;
+			? `The ${ev.distance} virtual race is tomorrow. Registration is still open — walk anywhere.`
+			: `The ${ev.distance} virtual race is ${dateLabel}. Registration is open — walk anywhere.`;
 	const body =
 		`<p><em>${esc(angle)}</em></p>\n` +
-		`<p>The 2026 NWANA Open ${esc(ev.distance)} Nordic Walking Series continues <strong>${type === "race_announcement_1d" ? "tomorrow, " : ""}${esc(dateLabel)}</strong>.</p>\n` +
+		`<p>The 2026 NWANA Open ${esc(ev.distance)} Virtual Nordic Walking Race continues <strong>${type === "race_announcement_1d" ? "tomorrow, " : ""}${esc(dateLabel)}</strong>.</p>\n` +
+		`<p>All NWANA series races are virtual — walk your distance anywhere and submit your result.</p>\n` +
 		(ev.registration_url ? `<p><a href="${esc(ev.registration_url)}">Register for the ${esc(dateLabel)} ${esc(ev.distance)}</a></p>\n` : "");
 	return { title: `${when === "Tomorrow" ? "Tomorrow" : "Save the date"}: ${title}`, angle, body };
 }
