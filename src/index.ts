@@ -7099,8 +7099,11 @@ export default {
 			return markDistributionSent(env.nwana_engine_db, body.distribution_id ?? "");
 		}
 		if (url.pathname === "/api/operating-center/news/publish-facebook" && request.method === "POST") {
-			const body = (await request.json().catch(() => ({}))) as { article_id?: string };
-			return publishNewsToFacebook(env.nwana_engine_db, env.NWANA_META_TOKEN, body.article_id ?? "");
+			const body = (await request.json().catch(() => ({}))) as { article_id?: string; image_slug?: string };
+			const imageUrl = (body.image_slug ?? "").trim()
+				? `https://nwana-engine.nwana-engine.workers.dev/api/public/social-image/${encodeURIComponent((body.image_slug ?? "").trim())}`
+				: undefined;
+			return publishNewsToFacebook(env.nwana_engine_db, env.NWANA_META_TOKEN, body.article_id ?? "", imageUrl);
 		}
 		if (url.pathname === "/api/operating-center/news/publish-instagram" && request.method === "POST") {
 			const operatorGate = await requirePlatformOperator(request, env);

@@ -310,7 +310,10 @@ export async function markDistributionSent(
  * Owner publishes a prepared news item to the connected Facebook Pages.
  * Unlike approve/mark-sent, this endpoint performs the actual publish via
  * the Meta Graph API using the Worker's NWANA_META_TOKEN (page tokens are
- * derived per page). Text-only post via /{page-id}/feed.
+ * derived per page).
+ *
+ * With an image URL: photo post via /{page-id}/photos (image + caption).
+ * Without: text-only post via /{page-id}/feed.
  *
  * Duplicate-safe: a distribution already marked 'sent' is skipped.
  */
@@ -318,6 +321,7 @@ export async function publishNewsToFacebook(
 	db: D1Database,
 	metaToken: string,
 	articleId: string,
+	imageUrl?: string,
 ): Promise<Response> {
 	const id = (articleId ?? "").trim();
 	if (!id) return jsonResponse({ ok: false, error: "article_id is required" }, 400);
@@ -357,8 +361,14 @@ export async function publishNewsToFacebook(
 		}
 		try {
 			const pageToken = await getFacebookPageToken(metaToken, target.pageId);
-			const body = new URLSearchParams({ message: pack.text, access_token: pageToken });
-			const resp = await fetch(`https://graph.facebook.com/v23.0/${target.pageId}/feed`, {
+			// Photo post when we have an image; text-only feed post otherwise.
+			const endpoint = imageUrl
+				? `https://graph.facebook.com/v23.0/${target.pageId}/photos`
+				: `https://graph.facebook.com/v23.0/${target.pageId}/feed`;
+			const body = imageUrl
+				? new URLSearchParams({ url: imageUrl, caption: pack.text, access_token: pageToken })
+				: new URLSearchParams({ message: pack.text, access_token: pageToken });
+			const resp = await fetch(endpoint, {
 				method: "POST",
 				body,
 			});
