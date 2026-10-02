@@ -410,7 +410,7 @@ export function ocSectionShell(opts: {
 	const tabScripts = tabs.map((t) => t.script).join("\n");
 
 	const headerHtml =
-		`<header><img src="/operating-center/icon-180.v2.png" alt="NWANA Operating Center icon" width="64" height="64"><div><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></div><div style="margin-left:auto;text-align:right"><div id="oc-session-ind" style="font-size:13px;color:var(--muted)"></div><a href="/login" onclick="try{sessionStorage.removeItem('nwana_engine_session')}catch(e){}" style="font-size:13px;color:var(--brand)">Sign out</a></div></header>` +
+		`<header><img src="/operating-center/icon-180.v2.png" alt="NWANA Operating Center icon" width="64" height="64"><div><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></div><div style="margin-left:auto;text-align:right"><div id="oc-session-ind" style="font-size:13px;color:var(--muted)"></div><a href="/login" onclick="try{sessionStorage.removeItem('nwana_engine_session')}catch(e){}" style="font-size:13px;color:#fff;text-decoration:underline">Sign out</a></div></header>` +
 		`\n\t${opts.menuHtml ?? nwanaWorkspaceMenu(opts.section)}` +
 		`\n\t${opts.aboveTabsHtml ? `<div class="oc-quick">${opts.aboveTabsHtml}</div>` : ""}` +
 		`\n\t${tabBar}`;
