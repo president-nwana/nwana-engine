@@ -6691,6 +6691,15 @@ export default {
 			const tid = identity?.kind === "session" ? identity.tenant_id : "nwana";
 			return json(await getExecutiveMoneyView(env.nwana_engine_db, tid));
 		}
+		// Venture info for the workspace (2026-10-02): the idea behind this tenant.
+		if (url.pathname === "/api/operating-center/venture" && request.method === "GET") {
+			const tid = identity?.kind === "session" ? identity.tenant_id : "nwana";
+			const v = await env.nwana_engine_db
+				.prepare(`SELECT venture_id, name, kind, stage, summary, created_at FROM ventures WHERE tenant_id = ? LIMIT 1`)
+				.bind(tid)
+				.first();
+			return json({ ok: true, venture: v ?? null });
+		}
 		// Phase 1 Money Ingestion (Revenue Engine v1): canonical monetary
 		// read paths. ADR-0044: downstream reads D1; these routes never
 		// touch RunSignup. Owner-key gated by the general

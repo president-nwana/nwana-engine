@@ -385,7 +385,7 @@ async function load(){
 			return '<div class="venture" data-vid="' + esc(v.venture_id) + '"><span class="stage stage-' + esc(v.stage) + '">' + esc(v.stage) + '</span>' +
 				'<h3>' + esc(v.name) + '</h3>' +
 				'<div class="meta">' + esc(v.kind) + (v.tenant_id ? ' · tenant: ' + esc(v.tenant_id) : '') + '</div>' +
-				'<p>' + esc(v.summary || '') + '</p>' +
+				'<p>' + esc((v.summary||'').length>220 ? (v.summary||'').slice(0,220)+'…' : (v.summary||'')) + '</p>' +
 				'<label class="meta">Stage: <select data-vstage="' + esc(v.venture_id) + '">' +
 				['idea','forming','active','operating','archived'].map(function(st){
 					return '<option value="' + st + '"' + (v.stage===st?' selected':'') + '>' + st + '</option>';

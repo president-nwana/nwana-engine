@@ -32,6 +32,7 @@ export const OC_BASE_CSS = `
 		header h1{margin:0;font-size:clamp(26px,3.6vw,40px)}header p{margin:6px 0 0;color:#dce9e2}
 		.oc-menu{background:var(--brand);padding:0 clamp(20px,5vw,72px) 18px;display:flex;flex-wrap:wrap;gap:10px}
 		.oc-menu-btn{display:inline-block;background:#2f6247;color:#fff;font-weight:700;padding:10px 20px;border-radius:9px;text-decoration:none}
+		.oc-menu-btn[hidden]{display:none!important}
 		.oc-menu-btn:hover{background:#3a7455}.oc-menu-active{background:#fff;color:var(--brand)}
 		.oc-tabs{background:#10261c;padding:14px clamp(20px,5vw,72px);display:flex;flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:5}
 		.oc-tab{border:1px solid #2f6247;background:transparent;color:#dce9e2;font-weight:650;padding:8px 16px;border-radius:8px;cursor:pointer;width:auto;margin:0}

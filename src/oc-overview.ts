@@ -116,6 +116,25 @@ const STATE_SCRIPT = `
 		return '<span class="badge">'+esc(s)+'</span>';
 	}
 	async function boot_state_summary(){
+		// Non-NWANA tenants see their venture, not NWANA's board/activity (2026-10-02).
+		try{
+			const sess=await api('/api/auth/session').catch(()=>null);
+			const tid=sess&&sess.user?sess.user.tenant_id:'nwana';
+			if(tid&&tid!=='nwana'){
+				const vr=await api('/api/operating-center/venture').catch(()=>({venture:null}));
+				const v=vr.venture;
+				var html='<div class="panel"><h2>'+esc(v?v.name:'Your venture')+'</h2>';
+				if(v){html+='<div class="meta">'+esc(v.kind)+' · stage: '+esc(v.stage)+'</div><p>'+esc(v.summary||'')+'</p>';}
+				else{html+='<p class="meta">No venture linked to this workspace yet.</p>';}
+				html+='<p class="meta">This is your workspace. Money and News below are yours — empty until you add data.</p></div>';
+				var sp=document.querySelector('#state-stats');if(sp)sp.innerHTML=html;
+				var bp=document.querySelector('#state-board');if(bp)bp.innerHTML='';
+				var ap=document.querySelector('#state-activity');if(ap)ap.innerHTML='';
+				var at=document.querySelector('#state-attention');if(at)at.innerHTML='';
+				var ma=document.querySelector('.oc-quick');if(ma){var mb=ma.querySelector('button');if(mb)mb.style.display='none';}
+				return;
+			}
+		}catch(e){}
 		const [o,b]=await Promise.all([api('/api/operating-center/overview'),api('/api/board/submissions')]);
 		state_pendingSubmissionsCache=b.submissions||[];
 		const labels={pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results',active_initiatives:'Active initiatives',public_calendar_competition:'Competitions on public calendar',public_calendar_challenge:'Challenges on public calendar'};
