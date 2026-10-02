@@ -196,6 +196,7 @@ import {
 	renderTenantSectionHtml,
 } from "./oc-organizations";
 import { renderWorkspaceSectionHtml } from "./oc-workspace";
+import { renderDashboardHtml } from "./dashboard";
 import {
 	getAthleteProfile,
 	listAthleteProfiles,
@@ -6066,6 +6067,12 @@ export default {
 		if (request.method === "GET" && url.pathname === "/operating-center/academy") return htmlPage(renderAcademySectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/board") return htmlPage(renderBoardSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/operations") return htmlPage(renderOperationsSectionHtml);
+		// Personal dashboard — user's own admin, separate from Platform Admin and tenant workspace (2026-10-02)
+		if (request.method === "GET" && url.pathname === "/dashboard") {
+			return new Response(renderDashboardHtml(), {
+				headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+			});
+		}
 		if (request.method === "GET" && url.pathname === "/operating-center/workspace") return htmlPage(renderWorkspaceSectionHtml);
 		// Multi-tenant Organizations (ADR-0046): tenant list -> tenant ->
 		// business unit. Exact path first, then the two parameterized levels.
