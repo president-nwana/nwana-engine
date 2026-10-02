@@ -5943,6 +5943,35 @@ export default {
 			if (ocReadOnly && request.method !== "GET") {
 				return json({ ok: false, error: "Demo sessions are read-only" }, 403);
 			}
+			// Board routes are NWANA-governance specific (2026-10-02):
+			// not available to other tenants.
+			if (url.pathname.startsWith("/api/board/")) {
+				const boardAllowed = identity?.kind === "platform_admin" ||
+					(identity?.kind === "session" &&
+						(identity.role === "platform_admin" || identity.tenant_id === "nwana"));
+				if (!boardAllowed) {
+					return json({ ok: false, error: "Not available for this tenant" }, 403);
+				}
+			}
+			// NWANA-operational APIs (2026-10-02): activity, social, operations,
+			// fund, race lifecycle, overview counts are NWANA-specific.
+			// Other tenants get empty responses (never NWANA's data).
+			const nwanaOnlyApis = [
+				"/api/operating-center/activity",
+				"/api/operating-center/social/",
+				"/api/operating-center/operations/",
+				"/api/operating-center/fund",
+				"/api/operating-center/race-lifecycle",
+				"/api/operating-center/overview",
+			];
+			if (nwanaOnlyApis.some((pfx) => url.pathname.startsWith(pfx))) {
+				const nwanaAllowed = identity?.kind === "platform_admin" ||
+					(identity?.kind === "session" &&
+						(identity.role === "platform_admin" || identity.tenant_id === "nwana"));
+				if (!nwanaAllowed) {
+					return json({ ok: true, counts: {}, meetings: [], work_items: [], submissions: [] });
+				}
+			}
 		}
 		if (portalApiRoute) {
 			if (!identity) {
