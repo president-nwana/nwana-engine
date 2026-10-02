@@ -7113,6 +7113,35 @@ export default {
 				body.image_slug ?? "",
 			);
 		}
+		// Press releases: separate genre, separate storage.
+		if (url.pathname === "/api/operating-center/news/press-releases" && request.method === "GET") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const rows = await env.nwana_engine_db
+				.prepare(`SELECT id, headline, dateline, status, created_at FROM press_releases ORDER BY created_at DESC LIMIT 50`)
+				.all<{ id: string; headline: string; dateline: string | null; status: string; created_at: string }>();
+			return json({ ok: true, releases: rows.results ?? [] });
+		}
+		if (url.pathname === "/api/operating-center/news/press-releases" && request.method === "POST") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const body = (await request.json().catch(() => ({}))) as {
+				headline?: string;
+				dateline?: string;
+				body?: string;
+				contact?: string;
+			};
+			const headline = (body.headline ?? "").trim();
+			const text = (body.body ?? "").trim();
+			if (!headline || !text) return json({ ok: false, error: "Headline and body are required" }, 400);
+			const id = `pr-${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+			const now = new Date().toISOString();
+			await env.nwana_engine_db
+				.prepare(`INSERT INTO press_releases (id, headline, dateline, body, contact, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'DRAFT', ?, ?)`)
+				.bind(id, headline, (body.dateline ?? "").trim(), text, (body.contact ?? "").trim(), now, now)
+				.run();
+			return json({ ok: true, id });
+		}
 		// Manual news composer: write once, publish to selected destinations.
 		if (url.pathname === "/api/operating-center/news/compose" && request.method === "POST") {
 			const operatorGate = await requirePlatformOperator(request, env);

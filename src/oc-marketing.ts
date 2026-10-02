@@ -694,9 +694,15 @@ const NEWS_ACTIONS_HTML = NEWS_STYLE + `
 		</div>
 		<div class="mrow"><button type="button" id="news-publish">Publish</button><span class="meta" id="news-pub-msg"></span></div>
 	</section>
-	<section class="panel">
+	<section class="panel news-composer">
 		<h2>Press releases</h2>
-		<div class="meta">Press releases are a separate genre: formal tone, longer form, sent to journalists — not just posted to social. The press-release workspace is being built as its own section.</div>
+		<div class="meta">A press release is a separate genre: formal tone, dateline, quotes, boilerplate — sent to journalists, not posted to social. Draft it here; the media-list distribution is coming next.</div>
+		<div style="margin:10px 0"><input type="text" id="pr-headline" placeholder="Headline"></div>
+		<div style="margin:10px 0"><input type="text" id="pr-dateline" placeholder="Dateline (e.g. SAINT PETERSBURG, Fla. — October 2, 2026)"></div>
+		<div style="margin:10px 0"><textarea id="pr-body" placeholder="Release body…"></textarea></div>
+		<div style="margin:10px 0"><input type="text" id="pr-contact" placeholder="Media contact (name, phone, email)"></div>
+		<div class="mrow"><button type="button" id="pr-save">Save draft</button><span class="meta" id="pr-msg"></span></div>
+		<div id="pr-list" style="margin-top:10px"><div class="meta">Loading drafts…</div></div>
 	</section>`;
 
 const NEWS_DETAILS_HTML = `<section class="panel"><h2>Recently published</h2><div id="news-recent">Loading…</div></section>`;
@@ -756,6 +762,7 @@ const NEWS_SCRIPT = `
 				await news_loadQueue(); await news_loadSummary();
 			}catch(e){if(msg)msg.textContent=e.message;}
 		});
+		news_pr_boot();
 		var pub=document.querySelector('#news-publish');
 		if(pub)pub.addEventListener('click',async function(){
 			var msg=document.querySelector('#news-pub-msg');
@@ -771,6 +778,36 @@ const NEWS_SCRIPT = `
 				await news_loadSummary();
 			}catch(e){if(msg)msg.textContent=e.message;}
 			pub.disabled=false;
+		});
+	}
+	async function news_pr_boot(){
+		var list=document.querySelector('#pr-list');
+		async function load(){
+			if(!list)return;
+			try{
+				var r=await api('/api/operating-center/news/press-releases');
+				var items=r.releases||[];
+				list.innerHTML=items.length?items.map(function(x){
+					return '<div class="item"><h4>'+esc(x.headline)+'</h4><div class="meta">'+esc(x.status)+' · '+esc(x.created_at||'')+'</div></div>';
+				}).join(''):'<div class="meta">No press-release drafts yet.</div>';
+			}catch(e){if(list)list.innerHTML='<div class="unavailable">'+esc(e.message)+'</div>';}
+		}
+		await load();
+		var save=document.querySelector('#pr-save');
+		if(save)save.addEventListener('click',async function(){
+			var msg=document.querySelector('#pr-msg');
+			var headline=(document.querySelector('#pr-headline')||{}).value||'';
+			var dateline=(document.querySelector('#pr-dateline')||{}).value||'';
+			var body=(document.querySelector('#pr-body')||{}).value||'';
+			var contact=(document.querySelector('#pr-contact')||{}).value||'';
+			if(!headline.trim()||!body.trim()){if(msg)msg.textContent='Headline and body are required.';return;}
+			try{
+				await api('/api/operating-center/news/press-releases',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({headline:headline,dateline:dateline,body:body,contact:contact})});
+				if(msg)msg.textContent='Draft saved.';
+				document.querySelector('#pr-headline').value='';document.querySelector('#pr-dateline').value='';
+				document.querySelector('#pr-body').value='';document.querySelector('#pr-contact').value='';
+				await load();
+			}catch(e){if(msg)msg.textContent=e.message;}
 		});
 	}
 `;
