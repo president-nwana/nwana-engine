@@ -117,7 +117,7 @@ import {
 import { renderFundsHtml } from "./operating-center-funds";
 import { renderMediaHtml } from "./operating-center-media";
 import { renderNewsReviewHtml } from "./operating-center-news-review";
-import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFacebook, publishNewsToInstagram, registerManualPack } from "./news-review";
+import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFacebook, publishNewsToInstagram, registerManualPack, deleteInstagramPost, deleteFacebookPost } from "./news-review";
 import { generateAutoNews, listAutoNewsQueue, autoNewsTypeLabel, AUTO_NEWS_TYPES } from "./auto-news";
 import { linkedInConnectUrl, threadsConnectUrl, handleLinkedInCallback, handleThreadsCallback, isSocialConnected, postToLinkedIn, postToThreads } from "./social-oauth";
 import { getExecutiveMoneyView } from "./operating-center-money";
@@ -7120,6 +7120,22 @@ export default {
 				body.article_id ?? "",
 				body.image_slug ?? "",
 			);
+		}
+		// Delete a social post (emergency removal).
+		if (url.pathname === "/api/operating-center/news/delete-post" && request.method === "POST") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const body = (await request.json().catch(() => ({}))) as { network?: string; post_id?: string };
+			const network = (body.network ?? "").trim();
+			const postId = (body.post_id ?? "").trim();
+			if (!postId) return json({ ok: false, error: "post_id is required" }, 400);
+			if (network === "instagram") {
+				return json(await deleteInstagramPost(env.nwana_engine_db, env.NWANA_META_TOKEN, postId));
+			}
+			if (network === "facebook") {
+				return json(await deleteFacebookPost(env.nwana_engine_db, env.NWANA_META_TOKEN, postId));
+			}
+			return json({ ok: false, error: "Unknown network" }, 400);
 		}
 		// Press releases: separate genre, separate storage.
 		if (url.pathname === "/api/operating-center/news/press-releases" && request.method === "GET") {
