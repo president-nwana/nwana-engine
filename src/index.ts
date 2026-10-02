@@ -6715,7 +6715,52 @@ export default {
 			const tid = identity?.kind === "session" ? identity.tenant_id : "nwana";
 			return json(await getExecutiveMoneyView(env.nwana_engine_db, tid));
 		}
+		// Personal ideas: each user has their own ideas (2026-10-02).
+		// Ideas can be promoted to tenants.
+		if (url.pathname === "/api/my/ideas" && request.method === "GET") {
+			if (identity?.kind !== "session") return json({ ok: false, error: "Unauthorized" }, 401);
+			const rows = await env.nwana_engine_db
+				.prepare(`SELECT idea_id, name, summary, stage, tenant_id, created_at FROM user_ideas WHERE user_id = ? ORDER BY created_at DESC`)
+				.bind(identity.user_id)
+				.all();
+			return json({ ok: true, ideas: rows.results ?? [] });
+		}
+		if (url.pathname === "/api/my/ideas" && request.method === "POST") {
+			if (identity?.kind !== "session") return json({ ok: false, error: "Unauthorized" }, 401);
+			const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+			const name = String(body.name || "").trim();
+			if (!name) return json({ ok: false, error: "Name required" }, 400);
+			const idea_id = "idea-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+			await env.nwana_engine_db
+				.prepare(`INSERT INTO user_ideas (idea_id, user_id, name, summary, stage) VALUES (?, ?, ?, ?, 'idea')`)
+				.bind(idea_id, identity.user_id, name, String(body.summary || ""))
+				.run();
+			return json({ ok: true, idea_id });
+		}
+		// Promote idea to tenant
+		if (url.pathname.startsWith("/api/my/ideas/") && url.pathname.endsWith("/promote") && request.method === "POST") {
+			if (identity?.kind !== "session") return json({ ok: false, error: "Unauthorized" }, 401);
+			const idea_id = url.pathname.slice("/api/my/ideas/".length, -"/promote".length);
+			const idea = await env.nwana_engine_db
+				.prepare(`SELECT idea_id, name, summary, tenant_id FROM user_ideas WHERE idea_id = ? AND user_id = ?`)
+				.bind(idea_id, identity.user_id)
+				.first<{ idea_id: string; name: string; summary: string; tenant_id: string | null }>();
+			if (!idea) return json({ ok: false, error: "Not found" }, 404);
+			if (idea.tenant_id) return json({ ok: false, error: "Already a tenant" }, 400);
+			// Create tenant from idea
+			const tenant_id = idea.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "-" + Date.now().toString(36);
+			await env.nwana_engine_db
+				.prepare(`INSERT INTO tenants (tenant_id, display_name, legal_name, organization_type, sport_domain, status) VALUES (?, ?, ?, 'commercial', 'nordic-walking', 'active')`)
+				.bind(tenant_id, idea.name, idea.name)
+				.run();
+			await env.nwana_engine_db
+				.prepare(`UPDATE user_ideas SET tenant_id = ?, stage = 'tenant', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE idea_id = ?`)
+				.bind(tenant_id, idea_id)
+				.run();
+			return json({ ok: true, tenant_id });
+		}
 		// My Projects: tenants accessible to the current user (2026-10-02).
+		// Includes session tenant + tenants from user's promoted ideas.
 		if (url.pathname === "/api/my/tenants" && request.method === "GET") {
 			const isPlatform = identity?.kind === "platform_admin" ||
 				(identity?.kind === "session" && identity.role === "platform_admin");
@@ -6725,9 +6770,13 @@ export default {
 					.prepare(`SELECT tenant_id, display_name, status FROM tenants ORDER BY display_name`)
 					.all();
 			} else if (identity?.kind === "session") {
+				// Own session tenant + tenants from promoted ideas
 				rows = await env.nwana_engine_db
-					.prepare(`SELECT tenant_id, display_name, status FROM tenants WHERE tenant_id = ?`)
-					.bind(identity.tenant_id)
+					.prepare(`SELECT DISTINCT t.tenant_id, t.display_name, t.status FROM tenants t
+						LEFT JOIN user_ideas ui ON ui.tenant_id = t.tenant_id AND ui.user_id = ?
+						WHERE t.tenant_id = ? OR ui.tenant_id IS NOT NULL
+						ORDER BY t.display_name`)
+					.bind(identity.user_id, identity.tenant_id)
 					.all();
 			} else {
 				return json({ ok: false, error: "Unauthorized" }, 401);

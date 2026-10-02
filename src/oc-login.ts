@@ -76,9 +76,9 @@ function routeFor(session) {
 	const role = session.user.role;
 	if (role === 'platform_admin') return '/admin';
 	if (role === 'demo_user') return '/portal';
-	// Tenant owners/admins get the full workspace, whatever the tenant.
-	// (2026-10-02: removed nwana hardcode — any tenant works the same way.)
-	if (role === 'tenant_owner' || role === 'tenant_admin') return '/operating-center';
+	// Tenant owners/admins go to their personal workspace first (2026-10-02):
+	// My Ideas + My Projects. From there they open each tenant's workspace.
+	if (role === 'tenant_owner' || role === 'tenant_admin') return '/my-projects';
 	return '/portal';
 }
 
