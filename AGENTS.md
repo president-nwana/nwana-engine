@@ -100,3 +100,17 @@ If the application uses Durable Objects or Workflows, refer to the relevant best
 
 - Durable Objects: https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/
 - Workflows: https://developers.cloudflare.com/workflows/build/rules-of-workflows/
+
+## Worker deploys — metadata must include d1 + plain_text bindings (2026-10-02)
+
+The Cloudflare script-upload API requires a metadata part. Uploading with
+minimal metadata (main_module + compatibility_date, no bindings) PRESERVES
+secret_text bindings but DELETES the d1 binding and plain_text vars — the
+worker then 1101s on any DB access. Fix: include in metadata bindings:
+d1 `nwana_engine_db` (id b3a8f158-185c-4a37-a61d-a29eb758de7e),
+plain_text OPERATING_CENTER_ENABLED=true,
+plain_text PUBLIC_BASE_URL=https://nwana-engine.nwana-engine.workers.dev.
+Secrets are preserved when omitted from metadata — never send secret values.
+Build: `npx esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --loader:.wasm=binary`.
+Precedent 2026-10-02: version 214 uploaded without bindings (1101), version
+215 re-uploaded with d1+plain_text bindings — all 17 bindings verified intact.
