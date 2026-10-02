@@ -72,6 +72,31 @@ const NEWS_PACK_DATA: Record<string, PackObjectData> = {
 			"Silver medal, M55 10K, Nordic Walking World Championships, Lahti 2026 · 7th, 5K · selected for the U.S. 5K Relay Team",
 		newsDate: "September 26, 2026",
 	},
+	// 2026-10-02: president-directive catch-up posts (5K results, 1K/10K announcements).
+	"news-0919a589": {
+		title: "Congratulations: two series records at the NWANA Open 5K — September 27",
+		canonicalUrl: "https://www.nwaofna.org/news/congratulations-two-series-records-at-the-nwana-open-5k-sept-news-091",
+		newsKind: "race_results",
+		description:
+			"Albert Fatikhov won Elite in 30:38 (new series record), Susan Otto won Performance in 36:35 (new series record), Michael Blanchard won Competitive in 39:11.",
+		newsDate: "September 27, 2026",
+	},
+	"news-6187c236": {
+		title: "Tomorrow: NWANA Open 1K Nordic Walking Series — October 3",
+		canonicalUrl: "https://www.nwaofna.org/news/tomorrow-nwana-open-1k-nordic-walking-series-october-3-news-618",
+		newsKind: "race_announcement",
+		description:
+			"The 1K sprint round is tomorrow, October 3, in Saint Petersburg, FL. Registration is still open.",
+		newsDate: "October 3, 2026",
+	},
+	"news-b8df178f": {
+		title: "Sunday: NWANA Open 10K Nordic Walking Series — October 4",
+		canonicalUrl: "https://www.nwaofna.org/news/sunday-nwana-open-10k-nordic-walking-series-october-4-news-b8d",
+		newsKind: "race_announcement",
+		description:
+			"The 10K endurance round is Sunday, October 4, in Saint Petersburg, FL. Registration is open.",
+		newsDate: "October 4, 2026",
+	},
 };
 
 // Prepared distribution channel -> pack channel used for its text.
