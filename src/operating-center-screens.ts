@@ -368,6 +368,34 @@ type AdsStatusReader = typeof getGoogleAdsStatus;
 type AdsAccountReader = typeof getGoogleAdsAccountSnapshot;
 
 /**
+ * 2026-10-02 cleanup: cache the live Google Ads reads (status + account
+ * snapshot) for 15 minutes per isolate. The Operations overview is fetched on
+ * every page load; without this each load fires an OAuth refresh plus
+ * listAccessibleCustomers, slowing the page and churning the queue's
+ * "regenerated at" timestamp. Injected readers (tests) bypass the cache.
+ */
+const ADS_LIVE_CACHE_TTL_MS = 15 * 60 * 1000;
+let cachedAdsStatus: { at: number; value: Awaited<ReturnType<AdsStatusReader>> } | null = null;
+let cachedAdsAccount: { at: number; value: Awaited<ReturnType<AdsAccountReader>> } | null = null;
+async function cachedGoogleAdsStatus(env: GoogleAdsEnv): Promise<Awaited<ReturnType<AdsStatusReader>>> {
+	const now = Date.now();
+	if (cachedAdsStatus && now - cachedAdsStatus.at < ADS_LIVE_CACHE_TTL_MS) return cachedAdsStatus.value;
+	const value = await getGoogleAdsStatus(env);
+	cachedAdsStatus = { at: now, value };
+	return value;
+}
+async function cachedGoogleAdsAccountSnapshot(
+	env: GoogleAdsEnv,
+	customerId?: string,
+): Promise<Awaited<ReturnType<AdsAccountReader>>> {
+	const now = Date.now();
+	if (cachedAdsAccount && now - cachedAdsAccount.at < ADS_LIVE_CACHE_TTL_MS) return cachedAdsAccount.value;
+	const value = await getGoogleAdsAccountSnapshot(env, customerId);
+	cachedAdsAccount = { at: now, value };
+	return value;
+}
+
+/**
  * Universal machine proposal, produced by the generic Google Ads
  * proposal pipeline (google-ads-proposals.ts) from a normalized
  * intent. The screen renders this record; it never builds proposals
@@ -633,11 +661,7 @@ export async function getFundraisingOverview(db: D1Database) {
 					follow_ups_due_now: fund.follow_ups_due_now,
 					prospect_count: fund.prospects.length,
 					tiers: tierCounts(fund.prospects.map((p) => p.ask_tier)),
-					follow_up_calendar: {
-						due: "2026-10-06",
-						overdue: "2026-10-13",
-						note: "Follow-ups for the 15 letters sent 2026-09-22.",
-					},
+					follow_up_calendar: buildFollowUpCalendar(fund.prospects),
 					prospects: fund.prospects.map((p) => ({
 						name: p.name,
 						ask_tier: p.ask_tier,
@@ -660,6 +684,33 @@ function tierCounts(tiers: string[]): Record<string, number> {
 	return out;
 }
 
+/**
+ * 2026-10-02 cleanup: derive the follow-up window from live prospect data
+ * instead of hardcoded dates. due = earliest follow-up due date among sent
+ * prospects; overdue = earliest date any of them goes overdue (+7 days).
+ */
+function buildFollowUpCalendar(
+	prospects: Array<{ follow_up_due_at: string | null; follow_up_status: string }>,
+): { due: string | null; overdue: string | null; note: string } {
+	const DAY_MS = 24 * 60 * 60 * 1000;
+	const dueDates = prospects
+		.map((p) => p.follow_up_due_at)
+		.filter((d): d is string => !!d)
+		.map((d) => Date.parse(d))
+		.filter((ms) => !Number.isNaN(ms));
+	if (!dueDates.length) {
+		return { due: null, overdue: null, note: "No sent letters awaiting follow-up." };
+	}
+	const dueMs = Math.min(...dueDates);
+	const overdueMs = dueMs + 7 * DAY_MS;
+	const fmt = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+	return {
+		due: fmt(dueMs),
+		overdue: fmt(overdueMs),
+		note: "Derived from the sent letters' actual send dates (follow-up at +14 days, overdue at +21).",
+	};
+}
+
 const FUNDRAISING_SCRIPT = `
 	async function boot(){
 		const box=document.querySelector('#fundraising-list');
@@ -672,7 +723,7 @@ const FUNDRAISING_SCRIPT = `
 			html+='<div class="detail">'+esc(f.description||'')+'</div>';
 			html+='<div class="detail"><b>Goal:</b> $'+esc(f.goal_amount)+' &middot; <b>Raised:</b> $'+esc(f.raised_amount)+' &middot; <b>Prospects:</b> '+esc(f.prospect_count)+'</div>';
 			html+='<div class="detail"><b>Pipeline:</b> '+stages+'</div>';
-			html+='<div class="detail"><b>Follow-ups due now:</b> '+esc(f.follow_ups_due_now)+' (window: due '+esc(f.follow_up_calendar.due)+', overdue '+esc(f.follow_up_calendar.overdue)+')</div>';
+			html+='<div class="detail"><b>Follow-ups due now:</b> '+esc(f.follow_ups_due_now)+(f.follow_up_calendar.due?' (window opens '+esc(f.follow_up_calendar.due)+', overdue after '+esc(f.follow_up_calendar.overdue)+')':' — '+esc(f.follow_up_calendar.note))+'</div>';
 			html+='<div class="detail"><b>Tiers:</b> '+Object.entries(f.tiers||{}).map(([t,n])=>esc(t)+' &times; '+n).join(', ')+'</div></div>';
 			html+='<h3>Prospects</h3>';
 			for(const p of (f.prospects||[])){
@@ -1487,8 +1538,8 @@ export const EXTERNAL_MEETINGS: ExternalMeetingRecord[] = [
 		display_when: "Fri 2026-09-25, 2:00-3:00pm CT (3:00-4:00pm ET, 10:00-11:00pm Riga)",
 		location: "Microsoft Teams",
 		purpose: "Discuss an exclusive sponsorship seller partnership for NWANA's commercial rights.",
-		status: "confirmed",
-		next_step: "Join the call with the Latvian board members. Exclusivity terms (minimum commitments, milestones, termination rights) are decided only if they ask.",
+		status: "done",
+		next_step: "The scheduled date has passed — record what was decided and move any follow-ups into the sellers pipeline.",
 		join_url: "https://teams.microsoft.com/meet/214553368452049?p=YT6qRnvYGwa2tq3PU9",
 		join_access: "Meeting ID 214 553 368 452 049 · Passcode LC7pm2C9",
 	},
@@ -1898,7 +1949,7 @@ export function buildFundraisingReport(data: { generated_at: string; fund: null 
 	name: string; description: string | null; goal_amount: number; raised_amount: number;
 	currency: string; status: string; stage_counts: Record<string, number>;
 	follow_ups_due_now: number; prospect_count: number; tiers: Record<string, number>;
-	follow_up_calendar: { due: string; overdue: string; note: string };
+	follow_up_calendar: { due: string | null; overdue: string | null; note: string };
 	prospects: Array<{ name: string; ask_tier: string; ask_amount: number; stage: string; sent_at: string | null; subject: string; follow_up_due_at: string | null; follow_up_status: string }>;
 } }): string {
 	const f = data.fund;
@@ -1914,7 +1965,7 @@ export function buildFundraisingReport(data: { generated_at: string; fund: null 
 		body += `<tr><th>Status</th><td>${escHtml(f.status)}</td></tr>`;
 		body += `<tr><th>Prospects</th><td>${escHtml(f.prospect_count)}</td></tr>`;
 		body += `<tr><th>Follow-ups due now</th><td>${escHtml(f.follow_ups_due_now)}</td></tr>`;
-		body += `<tr><th>Follow-up window</th><td>Due ${escHtml(f.follow_up_calendar.due)}, overdue ${escHtml(f.follow_up_calendar.overdue)}</td></tr>`;
+		body += `<tr><th>Follow-up window</th><td>${f.follow_up_calendar.due ? `Opens ${escHtml(f.follow_up_calendar.due)}, overdue after ${escHtml(f.follow_up_calendar.overdue)}` : escHtml(f.follow_up_calendar.note)}</td></tr>`;
 		body += `</tbody></table>`;
 		body += `<h2>Pipeline by stage</h2>`;
 		body += `<table><thead><tr><th>Stage</th><th>Count</th></tr></thead><tbody>`;
@@ -2016,8 +2067,8 @@ export interface OperationsOverview {
  */
 export async function getOperationsOverview(
 	env: GoogleAdsEnv,
-	readStatus: AdsStatusReader = getGoogleAdsStatus,
-	readAccount: AdsAccountReader = getGoogleAdsAccountSnapshot,
+	readStatus: AdsStatusReader = cachedGoogleAdsStatus,
+	readAccount: AdsAccountReader = cachedGoogleAdsAccountSnapshot,
 ): Promise<OperationsOverview> {
 	const status = await readStatus(env);
 	let liveCampaigns: GoogleAdsLiveCampaign[] = [];

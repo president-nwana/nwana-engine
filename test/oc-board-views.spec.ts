@@ -26,9 +26,12 @@ describe("operating center board: Summary/Actions/Details", () => {
 		for (const f of FUNCTIONS) {
 			expect(html).toContain(`data-views="${f}"`);
 		}
-		const buttons = html.match(/class="oc-view-btn/g) || [];
-		// 3 per function (action links use other classes)
+		const buttons = html.match(/class="oc-view-btn(?! oc-refresh-btn)/g) || [];
+		// 3 view buttons per function (action links use other classes)
 		expect(buttons.length).toBe(FUNCTIONS.length * 3);
+		const refresh = html.match(/data-refresh="/g) || [];
+		// 1 refresh button per function
+		expect(refresh.length).toBe(FUNCTIONS.length);
 		for (const view of VIEWS) {
 			expect(html).toContain(`data-view="${view}"`);
 			expect(html).toContain(`data-viewpanel="${view}"`);

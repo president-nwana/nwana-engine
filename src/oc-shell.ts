@@ -160,6 +160,20 @@ export function ocBareShell(opts: BareShellOpts): string {
 	</main>
 	<script>
 		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+		/* Human labels for machine codes (2026-10-02 cleanup). Never show raw
+		   snake_case / ALL_CAPS codes to the owner; use human(code). */
+		const HUMAN_LABELS={
+			'registration_open':'Registration open','awaiting_results':'Awaiting results','verifying':'Verifying results','levels_computed':'Levels computed','published':'Published','next_race_prep':'Next race prep',
+			'READY_TO_ACT':'Ready to act','NEEDS_OWNER_INPUT':'Needs your input','BLOCKED_EXTERNAL':'Blocked externally','PENDING':'Pending','IN_PROGRESS':'In progress','DONE':'Done','READY':'Ready','BLOCKED':'Blocked',
+			'NEW':'New','UNDER_REVIEW':'Under review','PROPOSED':'Proposed','APPROVED':'Approved','DRAFT':'Draft','OPEN':'Open','CLOSED':'Closed','AGENDA':'On agenda','DECIDED':'Decided','CONFIRMED':'Confirmed','DEFERRED':'Deferred','REJECTED':'Rejected',
+			'SYNCED':'Synced','NEEDS_OWNER':'Needs your review','ROUTED':'Routed',
+			'sent':'Sent','declined':'Declined','follow_up':'Follow-up','prospect':'Prospect','qualified':'Qualified','committed':'Committed',
+			'QUESTION':'Question','INITIATIVE':'Initiative','PROPOSAL':'Proposal','SOURCE_MATERIAL':'Source material',
+			'LIVE_VERIFIED':'Verified live','PROPOSED':'Proposed','dry_run':'Dry run'
+		};
+		const human=v=>{const s=String(v??'');if(HUMAN_LABELS[s])return HUMAN_LABELS[s];return s.toLowerCase().split('_').filter(Boolean).map(w=>w[0].toUpperCase()+w.slice(1)).join(' ')};
+		const humanDate=v=>{const s=String(v??'');if(!s)return '';const d=new Date(s);if(isNaN(d))return s;return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})};
+		const plural=(n,one,many)=>n+' '+(Number(n)===1?one:many);
 		const KEY_STORAGE='${g.storageKey}';
 		const PREVIEW_STORAGE='${opts.previewStorageKey ?? ""}';
 		const SESSION_KEY='${opts.sessionKey ?? ""}';
@@ -227,6 +241,7 @@ export function ocFunction(
 		`<button type="button" class="oc-view-btn oc-view-active" data-view="summary">Summary</button>` +
 		`<button type="button" class="oc-view-btn" data-view="actions">Actions</button>` +
 		`<button type="button" class="oc-view-btn" data-view="details">Details</button>` +
+		`<button type="button" class="oc-view-btn oc-refresh-btn" data-refresh="${id}" title="Reload this view">↻ Refresh</button>` +
 		`</nav>` +
 		`<div class="oc-view" data-viewpanel="summary" data-func="${id}">${summaryHtml}</div>` +
 		`<div class="oc-view" data-viewpanel="actions" data-func="${id}" hidden>${actionsHtml}</div>` +
@@ -278,6 +293,13 @@ export function ocViewScript(prefix: string, tabIds: string[]): string {
 			if(typeof f==='function'){f().catch(function(e){var m=panel.querySelector('.oc-tab-error');if(m)m.textContent='Error: '+(e&&e.message||e);});}
 		}
 	}
+	/* 2026-10-02 cleanup: manual refresh. Clears the booted flag so the
+	   view loader re-runs and the owner sees fresh data. */
+	function __${prefix}RefreshView(tab,view){
+		var key=tab+':'+view;
+		try{delete __${prefix}BootedViews[key];}catch(e){}
+		__${prefix}ActivateView(tab,view);
+	}
 	function ${setView}(tab,view,push){
 		var u;try{u=new URL(location.href);}catch(e){return;}
 		u.searchParams.set('tab',tab);u.searchParams.set('view',view);
@@ -305,6 +327,14 @@ export function ocViewScript(prefix: string, tabIds: string[]): string {
 		}
 		var b=e.target.closest('.oc-views .oc-view-btn');
 		if(b){
+			if(b.hasAttribute('data-refresh')){
+				var rpanel=b.closest('.oc-tabpanel');
+				var rtab=rpanel?rpanel.getAttribute('data-tab'):'';
+				var ractive=rpanel?rpanel.querySelector('.oc-view-btn.oc-view-active'):null;
+				var rview=ractive?ractive.getAttribute('data-view'):'summary';
+				if(rtab)__${prefix}RefreshView(rtab,rview);
+				return;
+			}
 			var panel=b.closest('.oc-tabpanel');
 			var btab=panel?panel.getAttribute('data-tab'):'';
 			if(btab)${setView}(btab,b.getAttribute('data-view'),true);

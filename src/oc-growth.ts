@@ -167,7 +167,7 @@ const FUNDRAISING_SCRIPT = `
 			const cal=f.follow_up_calendar||{};
 			let html='<div class="item"><strong>'+esc(f.name)+'<span class="badge">'+esc(f.status)+'</span></strong>'+
 				'<div class="detail">Goal '+fundraising_money(f.goal_amount)+' · Raised '+fundraising_money(f.raised_amount)+' · '+esc(f.prospect_count)+' prospect(s)</div>'+
-				'<div class="detail">Follow-ups due now: <strong>'+esc(f.follow_ups_due_now)+'</strong> (window: due '+esc(cal.due||0)+', overdue '+esc(cal.overdue||0)+')</div>'+
+				'<div class="detail">Follow-ups due now: <strong>'+esc(f.follow_ups_due_now)+'</strong>'+(cal.due?' (window opens '+esc(humanDate(cal.due))+', overdue after '+esc(humanDate(cal.overdue))+')':' — '+esc(cal.note||'no sent letters awaiting follow-up'))+'</div>'+
 				'<div class="detail">Tiers: '+Object.entries(f.tiers||{}).map(([t,n])=>esc(t)+' × '+n).join(', ')+'</div></div>';
 			const attn=[];
 			if(Number(f.follow_ups_due_now)>0)attn.push(f.follow_ups_due_now+' follow-up(s) due now — send them from Funds → Actions.');
@@ -201,17 +201,17 @@ const FUNDRAISING_SCRIPT = `
 			const data=await fundraising_fetchOverview();
 			const f=data.fund;
 			if(!f){fail(new Error('No fund objects yet.'));return}
-			const stages=Object.entries(f.stage_counts||{}).filter(([,n])=>n>0).map(([s,n])=>esc(s)+': '+n).join(' · ');
+			const stages=Object.entries(f.stage_counts||{}).filter(([,n])=>n>0).map(([s,n])=>esc(human(s))+': '+n).join(' · ');
 			const prospects=f.prospects||[];
 			pb.innerHTML='<div class="meta">Pipeline: '+(stages||'empty')+'</div>'+
 				(prospects.length?'<table class="data"><thead><tr><th>Prospect</th><th>Stage</th><th>Ask</th><th>Sent</th><th>Follow-up</th></tr></thead><tbody>'+
-				prospects.map(p=>'<tr><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.stage)+'</td><td>'+esc(p.ask_tier)+' · $'+esc(p.ask_amount)+'</td><td>'+esc(p.sent_at?String(p.sent_at).slice(0,10):'—')+'</td><td>'+fundraising_fuText(p)+(p.follow_up_due_at?' ('+esc(String(p.follow_up_due_at).slice(0,10))+')':'')+'</td></tr>').join('')+'</tbody></table>'
+				prospects.map(p=>'<tr><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(human(p.stage))+'</td><td>'+esc(p.ask_tier)+' · $'+esc(p.ask_amount)+'</td><td>'+esc(p.sent_at?humanDate(p.sent_at):'—')+'</td><td>'+fundraising_fuText(p)+(p.follow_up_due_at?' ('+esc(humanDate(p.follow_up_due_at))+')':'')+'</td></tr>').join('')+'</tbody></table>'
 				:'<div class="unavailable">No prospects yet.</div>')+
 				'<p class="meta">Stage moves happen in <a href="/operating-center/growth?tab=funds&view=actions">Funds → Actions</a>.</p>';
 			const cal=f.follow_up_calendar||{};
 			const pending=prospects.filter(p=>p.follow_up_status==='due'||p.follow_up_status==='overdue');
 			cb.innerHTML='<div class="detail">Due in window: <strong>'+esc(cal.due||0)+'</strong> · Overdue: <strong>'+esc(cal.overdue||0)+'</strong></div>'+
-				(pending.length?pending.map(p=>'<div class="meta">'+esc(p.name)+': '+esc(p.follow_up_status)+(p.follow_up_due_at?' — '+esc(String(p.follow_up_due_at).slice(0,10)):'')+'</div>').join(''):'<div class="meta">No follow-ups pending.</div>');
+				(pending.length?pending.map(p=>'<div class="meta">'+esc(p.name)+': '+esc(human(p.follow_up_status))+(p.follow_up_due_at?' — '+esc(humanDate(p.follow_up_due_at)):'')+'</div>').join(''):'<div class="meta">No follow-ups pending.</div>');
 			tb.innerHTML='<div class="detail">'+Object.entries(f.tiers||{}).map(([t,n])=>esc(t)+' × '+n).join(', ')+'</div>';
 		}catch(err){fail(err)}
 	}
@@ -347,10 +347,10 @@ const PARTNERS_DETAILS_HTML = `<section class="panel"><h2>Partner records</h2><d
 const PARTNERS_SCRIPT = `
 	// Same id caveat as sellers: /api/operating-center/partners/overview
 	// strips partner ids, so the map below is the migration 0033 seed.
-	// The only stage value observed in the seed is listed; the stage API
-	// accepts any non-empty value.
+	// Partner pipeline stages. The stage API accepts any non-empty value, so
+	// the owner is never stuck on a single option.
 	const partners_ID_BY_NAME={'AARP':'aarp'};
-	const partners_STAGES=['Draft — no recipient yet'];
+	const partners_STAGES=['Draft — no recipient yet','Recipient named','Outreach sent','In conversation','Proposal shared','Committed','Declined'];
 	async function partners_fetchOverview(){
 		return await api('/api/operating-center/partners/overview');
 	}
@@ -494,7 +494,7 @@ const FUNDS_SCRIPT = `
 				for(const f of funds){
 					html+='<div class="item"><strong>'+esc(f.fund.name)+'</strong>'+
 						(f.prospects||[]).map(p=>{
-							const next=funds_ORDER[funds_ORDER.indexOf(p.stage)+1];
+							const fi=funds_ORDER.indexOf(p.stage);const next=fi>=0?funds_ORDER[fi+1]:null;
 							const btn=next?'<button type="button" class="secondary" data-funds-advance="'+esc(p.id)+'" data-to="'+esc(next)+'">Move to '+esc(funds_LABEL[next])+'</button>':'<span class="meta">Terminal stage</span>';
 							return '<div class="item"><strong>'+esc(p.name)+'<span class="badge">'+esc(funds_LABEL[p.stage]||p.stage)+'</span></strong><div class="mrow">'+btn+'</div></div>';
 						}).join('')+'</div>';
@@ -572,9 +572,36 @@ const IGF_SCRIPT = `
 	const igf_ORDER=['prospect','verified','drafted','sent','follow_up','committed','stewardship','recognition'];
 	const igf_LABEL={prospect:'Prospect',verified:'Verified',drafted:'Drafted',sent:'Sent',follow_up:'Follow-up',committed:'Committed',stewardship:'Stewardship',recognition:'Public recognition'};
 	function igf_money(n){return '$'+Number(n||0).toLocaleString('en-US')}
-	async function igf_findFund(){
+	async function igf_listFunds(){
 		const data=await api('/api/operating-center/fund');
-		return (data.funds||[]).find(x=>x.fund&&x.fund.name==='Instructor Growth Fund')||null;
+		return data.funds||[];
+	}
+	function igf_storedFundId(){try{return localStorage.getItem('igf_fund_id')||''}catch(e){return ''}}
+	function igf_storeFundId(id){try{localStorage.setItem('igf_fund_id',id)}catch(e){}}
+	/* Which fund does the Instructor Growth view track? The owner picks once;
+	   the choice is remembered. With a single fund it is selected automatically. */
+	async function igf_findFund(){
+		const funds=await igf_listFunds();
+		if(!funds.length)return null;
+		const stored=igf_storedFundId();
+		const byId=funds.find(x=>x.fund&&String(x.fund.id)===stored);
+		if(byId)return byId;
+		if(funds.length===1){igf_storeFundId(String(funds[0].fund.id));return funds[0];}
+		return { pick: funds };
+	}
+	function igf_pickerHtml(funds){
+		return '<div class="item"><strong>Which fund should this view track?</strong>'+
+			'<div class="detail">The Instructor Growth view follows one fund. Pick it below — the choice is remembered.</div>'+
+			'<div class="mrow"><select id="igf-fund-pick">'+funds.map(x=>'<option value="'+esc(x.fund.id)+'">'+esc(x.fund.name)+'</option>').join('')+'</select>'+
+			' <button type="button" class="secondary" id="igf-fund-save">Track this fund</button></div></div>';
+	}
+	function igf_wirePicker(box,reboot){
+		const btn=box.querySelector('#igf-fund-save');
+		if(!btn)return;
+		btn.addEventListener('click',function(){
+			const sel=box.querySelector('#igf-fund-pick');
+			if(sel&&sel.value){igf_storeFundId(sel.value);reboot();}
+		});
 	}
 	function igf_fuLine(p){
 		const fu=p.follow_up_status;
@@ -585,7 +612,7 @@ const IGF_SCRIPT = `
 	}
 	function igf_prospectRows(f,withButtons){
 		return (f.prospects||[]).map(p=>{
-			const next=igf_ORDER[igf_ORDER.indexOf(p.stage)+1];
+			const ii=igf_ORDER.indexOf(p.stage);const next=ii>=0?igf_ORDER[ii+1]:null;
 			const btn=withButtons
 				?(next?'<button type="button" class="secondary" data-igf-advance="'+esc(p.id)+'" data-to="'+esc(next)+'">Move to '+esc(igf_LABEL[next])+'</button>':'<span class="meta">Terminal stage</span>')
 				:'';
@@ -610,7 +637,8 @@ const IGF_SCRIPT = `
 		const box=document.querySelector('#igf-sum');
 		try{
 			const f=await igf_findFund();
-			if(!f){box.innerHTML='<div class="unavailable">The Instructor Growth Fund is not seeded yet — the next step is the "Seed fund" owner action in <button type="button" class="secondary" data-qa="funds|actions">Funds → Actions</button>.</div>';return}
+			if(!f){box.innerHTML='<div class="unavailable">No funds yet — create or seed one in <button type="button" class="secondary" data-qa="funds|actions">Funds → Actions</button>.</div>';return}
+			if(f.pick){box.innerHTML=igf_pickerHtml(f.pick);igf_wirePicker(box,boot_igf_summary);return}
 			let html=igf_header(f,false);
 			const attn=[];
 			if(Number(f.follow_ups_due_now)>0)attn.push(f.follow_ups_due_now+' follow-up(s) due now.');
@@ -624,7 +652,8 @@ const IGF_SCRIPT = `
 		const msg=document.querySelector('#igf-act-message');
 		try{
 			const f=await igf_findFund();
-			if(!f){box.innerHTML='<div class="unavailable">The Instructor Growth Fund is not seeded yet — seed it in Funds → Actions.</div>';return}
+			if(!f){box.innerHTML='<div class="unavailable">No funds yet — create or seed one in Funds → Actions.</div>';return}
+			if(f.pick){box.innerHTML=igf_pickerHtml(f.pick);igf_wirePicker(box,boot_igf_actions);return}
 			box.innerHTML=igf_header(f,true)+igf_prospectRows(f,true);
 			box.querySelectorAll('[data-igf-advance]').forEach(b=>b.addEventListener('click',async()=>{
 				msg.textContent='Moving…';
@@ -640,7 +669,8 @@ const IGF_SCRIPT = `
 		const box=document.querySelector('#igf-det');
 		try{
 			const f=await igf_findFund();
-			if(!f){box.innerHTML='<div class="unavailable">The Instructor Growth Fund is not seeded yet.</div>';return}
+			if(!f){box.innerHTML='<div class="unavailable">No funds yet.</div>';return}
+			if(f.pick){box.innerHTML=igf_pickerHtml(f.pick);igf_wirePicker(box,boot_igf_details);return}
 			box.innerHTML=igf_header(f,false)+igf_prospectRows(f,false);
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}

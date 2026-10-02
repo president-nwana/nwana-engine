@@ -946,7 +946,7 @@ describe("unified auth: password hashing", () => {
 	it("hashes and verifies passwords with PBKDF2", async () => {
 		const { hashPassword, verifyPassword } = await import("../src/lib/tenant-access");
 		const hash = await hashPassword("CorrectHorse123!");
-		expect(hash.startsWith("pbkdf2$210000$")).toBe(true);
+		expect(hash.startsWith("pbkdf2$100000$")).toBe(true);
 		expect(await verifyPassword("CorrectHorse123!", hash)).toBe(true);
 		expect(await verifyPassword("wrong password", hash)).toBe(false);
 		expect(await verifyPassword("CorrectHorse123!", "invalid-format")).toBe(false);

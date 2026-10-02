@@ -709,7 +709,7 @@ function makeStageDb(rows: Array<Record<string, unknown>>) {
 		expect(data.stats.connected).toBe(false);
 	});
 
-	it("meetings: two real external entries, Integrity 9 confirmed with owner-gated join data", async () => {
+	it("meetings: two real external entries, Integrity 9 done (date passed) with owner-gated join data", async () => {
 		const fakeDb = {
 			prepare: () => ({
 				all: async () => ({ results: [] }),
@@ -719,7 +719,7 @@ function makeStageDb(rows: Array<Record<string, unknown>>) {
 		expect(data.ok).toBe(true);
 		expect(data.external_meetings).toHaveLength(2);
 		const i9 = data.external_meetings.find((m) => m.id === "integrity9-2026-09-25");
-		expect(i9?.status).toBe("confirmed");
+		expect(i9?.status).toBe("done");
 		expect(i9?.display_when).toContain("2026-09-25");
 		expect(i9?.join_url).toContain("teams.microsoft.com");
 		expect(i9?.join_access).toContain("LC7pm2C9");

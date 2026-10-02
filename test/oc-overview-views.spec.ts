@@ -49,7 +49,7 @@ describe("operating center overview: Summary/Actions/Details", () => {
 	it("keeps the main action quick bar in English", () => {
 		expect(html).toContain(">Review board queue<");
 		expect(html).toContain("/operating-center/board?tab=board&view=actions");
-		expect(html).toContain("The Machine keeps every summary below up to date automatically");
+		expect(html).toContain("use \u21bb Refresh in any section to reload the current view");
 	});
 
 	it("uses canonical ?tab=&view= links, not the old hash form", () => {

@@ -221,7 +221,8 @@ ${platformAdminMenu("users")}
 	async function api(path,opts){
 		var r=await fetch(path,Object.assign({headers:authz()},opts||{}));
 		var d=null;try{d=await r.json()}catch(e){}
-		if(r.status===401||r.status===403){signOut();throw new Error('Unauthorized')}
+		if(r.status===401){signOut();throw new Error('Unauthorized')}
+		if(r.status===403){throw new Error((d&&d.error)||'Not allowed')}
 		return {status:r.status,d:d};
 	}
 

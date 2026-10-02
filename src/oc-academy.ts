@@ -47,14 +47,7 @@ function acaBootFns(tabId: string): string {
 // [data-aca-goto="<tab>|<view>"] buttons for cross-view navigation.
 const ACA_VIEW_SCRIPT =
 	ocViewScript("aca", [
-		"courses",
-		"students",
-		"certifications",
-		"licenses",
-		"edpartners",
-		"academyops",
-		"performance",
-		"promotion",
+		"overview",
 	]) +
 	`
 document.querySelector('#app').addEventListener('click',function(e){
@@ -253,14 +246,29 @@ export function renderAcademySectionHtml(): string {
 		subtitle: "NWANA Academy — courses, students, certifications, instructor licenses.",
 		queryTabs: true,
 		tabs: [
-			{ id: "courses", label: "Courses", panelsHtml: COURSES_PANELS, script: acaBootFns("courses") + ACA_VIEW_SCRIPT },
-			{ id: "students", label: "Students", panelsHtml: STUDENTS_PANELS, script: acaBootFns("students") },
-			{ id: "certifications", label: "Certifications", panelsHtml: CERTIFICATIONS_PANELS, script: acaBootFns("certifications") },
-			{ id: "licenses", label: "Instructor licenses", panelsHtml: LICENSES_PANELS, script: acaBootFns("licenses") },
-			{ id: "edpartners", label: "Education partners", panelsHtml: EDPARTNERS_PANELS, script: acaBootFns("edpartners") },
-			{ id: "academyops", label: "Academy operations", panelsHtml: ACADEMYOPS_PANELS, script: acaBootFns("academyops") },
-			{ id: "performance", label: "Academy performance", panelsHtml: PERFORMANCE_PANELS, script: acaBootFns("performance") },
-			{ id: "promotion", label: "Promotion", panelsHtml: PROMOTION_PANELS, script: acaBootFns("promotion") },
+			{ id: "overview", label: "Overview", panelsHtml: ACADEMY_OVERVIEW_PANELS, script: ACA_VIEW_SCRIPT },
 		],
 	});
 }
+
+const ACADEMY_OVERVIEW_PANELS = ocFunction(
+	"overview",
+	"The Academy is not connected yet — this is the honest state, not a broken page.",
+	`<section class="panel"><h2>Academy — not connected</h2>
+		<p>The NWANA Academy (courses, students, certifications, instructor licenses) lives in Moodle at academy.nwaofna.org. The Engine has no academy integration yet, so there is nothing to show here — and nothing is faked.</p>
+		<p><strong>What will appear here once connected:</strong></p>
+		<p class="meta">&bull; <strong>Courses</strong> — the training program catalog<br>
+		&bull; <strong>Students</strong> — enrollments and progress<br>
+		&bull; <strong>Certifications</strong> — issued instructor certifications<br>
+		&bull; <strong>Instructor licenses</strong> — license records and renewals<br>
+		&bull; <strong>Education partners</strong> — partner organizations<br>
+		&bull; <strong>Academy operations &amp; performance</strong> — running the academy, measured</p>
+		<p class="meta"><strong>Next step:</strong> connecting Moodle is a separate project — it needs scoping and your approval before anything is built. Until then, this section stays parked.</p>
+	</section>`,
+	`<section class="panel"><h2>Actions</h2>
+		<p class="unavailable">There are no Academy actions yet — the integration does not exist, so nothing can be run from here.</p>
+	</section>`,
+	`<section class="panel"><h2>Details</h2>
+		<p class="meta">Planned data source: Moodle at academy.nwaofna.org (not connected). No data has been invented to fill this section.</p>
+	</section>`,
+);

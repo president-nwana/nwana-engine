@@ -588,6 +588,8 @@ export interface RouteUploadResult {
 	upload_id: string;
 	routing: UploadRouting;
 	routing_status: "ROUTED" | "NEEDS_OWNER";
+	/** Human label for the routing destination (what the UI shows). */
+	route_label: string;
 	detail: Record<string, unknown>;
 }
 
@@ -744,7 +746,13 @@ export async function routeUpload(db: D1Database, input: RouteUploadInput): Prom
 
 	await audit(db, uploadId, "UPLOAD_ROUTED", "BOARD", { filename: input.filename, routing, routing_status: routingStatus });
 
-	return { upload_id: uploadId, routing, routing_status: routingStatus, detail };
+	return {
+		upload_id: uploadId,
+		routing,
+		routing_status: routingStatus,
+		route_label: ROUTE_LABELS[routing],
+		detail,
+	};
 }
 
 export async function listUploads(db: D1Database): Promise<Response> {
@@ -753,8 +761,27 @@ export async function listUploads(db: D1Database): Promise<Response> {
 			`SELECT upload_id, filename, mime, size_bytes, uploaded_by, routing, routing_status, routed_detail, created_at
 			 FROM board_uploads ORDER BY created_at DESC LIMIT 50`,
 		)
-		.all();
-	return jsonResponse({ ok: true, uploads: result.results });
+		.all<Record<string, unknown>>();
+	// Shape the rows for the UI: human route labels, a plain-English status,
+	// and the staged-CSV download lifted out of the routed_detail JSON blob
+	// (the client cannot reach it there).
+	const uploads = (result.results ?? []).map((u) => {
+		const routing = String(u.routing ?? "");
+		let staged_csv_url: string | null = null;
+		try {
+			const detail = JSON.parse(String(u.routed_detail ?? "{}")) as Record<string, unknown>;
+			if (typeof detail.staged_csv_url === "string") staged_csv_url = detail.staged_csv_url;
+		} catch {
+			// ignore malformed detail blobs
+		}
+		return {
+			...u,
+			route_label: (ROUTE_LABELS as Record<string, string>)[routing] ?? routing,
+			classification: u.routing_status === "NEEDS_OWNER" ? "needs your review" : "routed",
+			staged_csv_url,
+		};
+	});
+	return jsonResponse({ ok: true, uploads });
 }
 
 // Build the staged import CSV from stored upload content. Quoted and

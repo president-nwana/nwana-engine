@@ -31,7 +31,7 @@ describe("operating center marketing: Summary/Actions/Details", () => {
 		for (const f of FUNCTIONS) {
 			expect(html).toContain(`data-views="${f}"`);
 		}
-		const buttons = html.match(/class="oc-view-btn/g) || [];
+		const buttons = html.match(/class="oc-view-btn(?! oc-refresh-btn)/g) || [];
 		// 3 per function + quick-action links styled as oc-view-btn
 		expect(buttons.length).toBeGreaterThanOrEqual(FUNCTIONS.length * 3);
 		for (const view of ["summary", "actions", "details"]) {
@@ -57,7 +57,7 @@ describe("operating center marketing: Summary/Actions/Details", () => {
 		expect(html).toContain(">Create post<");
 		expect(html).toContain(">Site news<");
 		expect(html).toContain(">Press release<");
-		expect(html).toContain(">Prepare Ads campaign<");
+		expect(html).toContain(">Review Ads proposals<");
 		expect(html).toContain(">Open analytics<");
 	});
 

@@ -30,7 +30,7 @@ describe("operating center sport: Summary/Actions/Details", () => {
 			expect(html).toContain(`data-view="${view}"`);
 			expect(html).toContain(`data-viewpanel="${view}"`);
 		}
-		const buttons = html.match(/class="oc-view-btn/g) || [];
+		const buttons = html.match(/class="oc-view-btn(?! oc-refresh-btn)/g) || [];
 		expect(buttons.length).toBeGreaterThanOrEqual(FUNCTIONS.length * 3);
 	});
 

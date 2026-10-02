@@ -102,7 +102,7 @@ const ADS_SCRIPT = `
 				html+='<div class="item"><strong>Last 30 days <span class="badge-ok">live</span></strong>'
 					+'<div class="detail">'+Number(t.impressions||0).toLocaleString('en-US')+' impressions · '+Number(t.clicks||0).toLocaleString('en-US')+' clicks · CTR '+ctr+' · Spend $'+Number(t.cost_usd||0).toFixed(2)+' · '+Number(t.conversions||0)+' conversions</div>'
 					+'<div class="detail">Period '+esc(m30.data.period.start)+' to '+esc(m30.data.period.end)+' · '+esc(m30.data.data_quality)+'</div>'
-					+'<div class="detail">Full breakdown (campaigns, ad groups, geo, conversion actions): <code>GET /api/operating-center/ads/metrics?preset=last30</code> — the endpoint needs the Operating Center key.</div></div>';
+					+'<div class="detail">The full breakdown (campaigns, ad groups, geo, conversion actions) is included in the Details view below.</div></div>';
 			}else{
 				const dq=m30.data&&m30.data.data_quality;
 				const note=(m30.data&&(m30.data.error||m30.data.quality_note))||m30.error||'Could not read parameterized metrics.';
@@ -148,7 +148,7 @@ const ADS_SCRIPT = `
 			if(live&&live.available&&!live.error){
 				const cs=live.campaigns||[];
 				cb.innerHTML=cs.length?'<table class="data"><thead><tr><th>Campaign</th><th>Status</th><th>Budget/day</th><th>Impr.</th><th>Clicks</th><th>Conv.</th><th>Spend</th></tr></thead><tbody>'+
-					cs.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+esc(c.status)+'</td><td>$'+Number(c.daily_budget_usd).toFixed(2)+'</td><td>'+Number(c.impressions||0).toLocaleString('en-US')+'</td><td>'+Number(c.clicks||0).toLocaleString('en-US')+'</td><td>'+esc(c.conversions)+'</td><td>$'+Number(c.cost_usd).toFixed(2)+'</td></tr>').join('')+'</tbody></table><div class="meta">Account '+esc(live.customer_id)+' · '+esc(live.date_range)+' · read-only</div>'
+					cs.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+esc(human(c.status))+'</td><td>$'+Number(c.daily_budget_usd).toFixed(2)+'</td><td>'+Number(c.impressions||0).toLocaleString('en-US')+'</td><td>'+Number(c.clicks||0).toLocaleString('en-US')+'</td><td>'+esc(c.conversions)+'</td><td>$'+Number(c.cost_usd).toFixed(2)+'</td></tr>').join('')+'</tbody></table><div class="meta">'+esc(live.date_range)+' · Google Ads account · read-only</div>'
 					:'<div class="unavailable">No campaigns found in the connected Google Ads account.</div>';
 			}else if(live&&live.error){
 				cb.innerHTML='<div class="unavailable">Could not read account data: '+esc(live.error)+'</div>';
@@ -261,7 +261,7 @@ const ANALYTICS_SCRIPT = `
 			html+='<div class="detail">'+e[1]+': <strong>'+cur.toLocaleString('en-US')+'</strong>'+(prior!==null?' (prior '+prior.toLocaleString('en-US')+')':'')+' · change '+ga4_fmtPct(t.percent_change)+'</div>';
 		}
 		html+='<div class="detail">Period '+esc(a.period_start)+' to '+esc(a.period_end)+' vs '+esc(a.compare_period_start)+' to '+esc(a.compare_period_end)+' · fetched '+esc(a.fetched_at)+' · '+esc(a.data_quality)+'</div>';
-		html+='<div class="detail">Full audience report: <code>GET /api/operating-center/analytics/audience?preset=last7&compare=1</code> — the endpoint needs the Operating Center key.</div>';
+		html+='<div class="detail">Full audience report: see the Details view below.</div>';
 		html+='</div>';
 		return html;
 	}
@@ -1085,6 +1085,18 @@ const MKT_VIEW_SCRIPT = `
 			if(q.getAttribute('data-qa-press')==='1'){
 				setTimeout(function(){var a=document.querySelector('#article-angle');if(a&&!a.value)a.value='Press release: ';},600);
 			}
+			if(qsel===' #article-form'||qsel==='#article-form'){
+				/* The article form lives inside the plan detail panel: open the
+				   most recent plan first so the form is visible, then scroll. */
+				setTimeout(async function(){
+					try{
+						var pd=await api('/api/operating-center/media/plans');
+						if(pd.plans&&pd.plans.length){await media_openPlan(pd.plans[0].plan_id);}
+					}catch(e){}
+					setTimeout(function(){var el=document.querySelector('#article-form');if(el&&!el.hidden)el.scrollIntoView();},400);
+				},600);
+				return;
+			}
 			if(qsel){setTimeout(function(){var el=document.querySelector(qsel);if(el&&!el.hidden)el.scrollIntoView();},600);}
 			return;
 		}
@@ -1118,7 +1130,7 @@ const MKT_QUICK_ACTIONS =
 	`<button type="button" data-mkt-qa="social|actions|#pack-panel">Create post</button>` +
 	`<button type="button" data-mkt-qa="media|actions|#article-form">Site news</button>` +
 	`<button type="button" data-mkt-qa="media|actions|#article-form" data-qa-press="1">Press release</button>` +
-	`<button type="button" data-mkt-qa="ads|actions|">Prepare Ads campaign</button>` +
+	`<button type="button" data-mkt-qa="ads|details|">Review Ads proposals</button>` +
 	`<button type="button" data-mkt-qa="analytics|summary|">Open analytics</button>`;
 
 export function renderMarketingSectionHtml(): string {

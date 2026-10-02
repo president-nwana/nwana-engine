@@ -118,7 +118,7 @@ const STATE_SCRIPT = `
 	async function boot_state_summary(){
 		const [o,b]=await Promise.all([api('/api/operating-center/overview'),api('/api/board/submissions')]);
 		state_pendingSubmissionsCache=b.submissions||[];
-		const labels={pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results'};
+		const labels={pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results',active_initiatives:'Active initiatives',public_calendar_competition:'Competitions on public calendar',public_calendar_challenge:'Challenges on public calendar'};
 		document.querySelector('#state-stats').innerHTML=Object.entries(o.counts).map(([k,v])=>'<div class="stat"><strong>'+esc(v)+'</strong><span>'+esc(labels[k]||k)+'</span></div>').join('');
 		await Promise.all([state_summaryBoard(),state_summaryActivity(),state_summaryAttention()]);
 	}
@@ -242,7 +242,7 @@ const STATE_SCRIPT = `
 			const order=['registration_open','awaiting_results','verifying','levels_computed','published','next_race_prep'];
 			const counts={};data.distances.forEach(d=>{counts[d.stage]=(counts[d.stage]||0)+1});
 			const prep=data.distances.filter(d=>d.stage==='next_race_prep').length;
-			box.innerHTML='<div class="meta">'+order.filter(s=>counts[s]).map(s=>counts[s]+' × '+esc(s)).join(' · ')+'</div>'+
+			box.innerHTML='<div class="meta">'+order.filter(s=>counts[s]).map(s=>counts[s]+' × '+esc(human(s))).join(' · ')+'</div>'+
 			(prep?'<div class="meta followup-due">'+prep+' prep'+(prep>1?'s':'')+' need'+(prep>1?'':'s')+' review</div>':'<div class="meta">No prep awaiting review.</div>');
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
@@ -420,7 +420,7 @@ const MONEY_SCRIPT = `
 			let html='';
 			if(t){
 				const cents=n=>Math.round(Number(n||0)/100);
-				html+='<div class="item"><strong>Total verified revenue</strong><div class="detail">'+money_fmt(cents(t.total_gross_cents))+' across '+t.donations.event_count+' donations, '+t.registrations.event_count+' registrations, '+t.licenses.event_count+' licenses</div></div>';
+				html+='<div class="item"><strong>Total verified revenue</strong><div class="detail">'+money_fmt(cents(t.total_gross_cents))+' across '+plural(t.donations.event_count,'donation','donations')+', '+plural(t.registrations.event_count,'registration','registrations')+', '+plural(t.licenses.event_count,'license','licenses')+'</div></div>';
 				html+='<div class="item"><strong>Donations</strong><div class="detail">'+money_fmt(cents(t.donations.total_gross_cents))+' · '+t.donations.event_count+' transactions'+(t.donations.total_refunds_cents?' · refunds '+money_fmt(cents(t.donations.total_refunds_cents)):'')+'</div></div>';
 				html+='<div class="item"><strong>Paid registrations</strong><div class="detail">'+money_fmt(cents(t.registrations.total_gross_cents))+' · '+t.registrations.event_count+' transactions'+(t.registrations.total_refunds_cents?' · refunds '+money_fmt(cents(t.registrations.total_refunds_cents)):'')+'</div></div>';
 				const licN=t.licenses.event_count, licP=t.licenses.paid_count||0, licF=t.licenses.free_count||0;
@@ -472,7 +472,7 @@ const MONEY_SCRIPT = `
 			if(data.memberorgs && data.memberorgs.length){
 				html+='<h4>MemberOrg sources</h4>';
 				html+=data.memberorgs.map(m=>{
-					let mh='<div class="meta"><strong>'+esc(m.name)+'</strong> (club '+esc(m.club_id)+'): '+m.membership_count+' memberships ('+m.paid_membership_count+' paid / '+m.free_membership_count+' free) · <strong>'+money_fmt(cents(m.gross_revenue_cents))+' revenue</strong>'+(m.latest_membership_at?' · latest '+esc(String(m.latest_membership_at).slice(0,10)):'')+' · '+esc(m.sync_state)+'</div>';
+					let mh='<div class="meta"><strong>'+esc(m.name)+'</strong> (club '+esc(m.club_id)+'): '+plural(m.membership_count,'membership','memberships')+' ('+m.paid_membership_count+' paid / '+m.free_membership_count+' free) · <strong>'+money_fmt(cents(m.gross_revenue_cents))+' revenue</strong>'+(m.latest_membership_at?' · latest '+esc(humanDate(m.latest_membership_at)):'')+' · '+esc(human(m.sync_state))+'</div>';
 					if(m.memberships && m.memberships.length){
 						mh+=m.memberships.map(r=>'<div class="meta" style="margin-left:12px">• #'+esc(r.membership_id)+' · '+esc(r.level_name||'unknown level')+' · '+(r.is_paid?money_fmt(cents(r.amount_paid_cents))+' paid':'free / complimentary')+' · '+esc(r.start_date||'?')+' → '+esc(r.end_date||'?')+' · '+esc(r.status)+'</div>').join('');
 					}
@@ -643,7 +643,8 @@ const BLOCKERS_DETAILS_HTML = `<section class="panel"><h2>Blockers — full list
 const BLOCKERS_SCRIPT = `
 	function blk_renderItem(r){
 		const badge=r.status==='NEEDS_OWNER_INPUT'?'badge-warn':(r.status==='READY_TO_ACT'?'badge-ok':'badge');
-		let html='<div class="item"><strong>'+esc(r.action||'(no action)')+'<span class="'+badge+'">'+esc(r.status)+'</span></strong>';
+		const title=r.action||r.required_result||r.exact_next_step||'Needs attention';
+		let html='<div class="item"><strong>'+esc(title)+'<span class="'+badge+'">'+esc(human(r.status))+'</span></strong>';
 		html+='<div class="detail"><b>Required result:</b> '+esc(r.required_result||'not assigned')+'</div>';
 		html+='<div class="detail"><b>Channel:</b> '+esc(r.channel||'not assigned')+' <b>Outcome:</b> '+esc(r.business_outcome)+'</div>';
 		if(r.owner_input){html+='<div class="detail"><b>Owner input needed:</b> '+esc(r.owner_input)+'</div>'}
@@ -742,7 +743,7 @@ const BLOCKERS_PANELS = ocFunction(
 const OVERVIEW_QUICK =
 	`<span>Main action:</span>` +
 	`<button type="button" onclick="location.href='/operating-center/board?tab=board&view=actions'">Review board queue</button>` +
-	`<span class="meta">The Machine keeps every summary below up to date automatically; this button takes you to the manual triage point.</span>`;
+	`<span class="meta">Summaries load fresh when you open them; use ↻ Refresh in any section to reload the current view. This button takes you to the manual triage point.</span>`;
 
 const OVERVIEW_VIEW_SCRIPT = ocViewScript("ovw", ["state", "money", "work", "blockers"]);
 

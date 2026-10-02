@@ -119,7 +119,7 @@ const RESULTS_ACTIONS_HTML = `<section class="panel"><h2>Results actions</h2>
 	<h3>Approve results</h3>
 	<div id="results-approve-actions"><div class="unavailable">Loading…</div></div>
 	<div id="results-act">Loading…</div>
-	<h3 style="margin-top:16px">Sync registrations</h3><p class="meta">One POST to /api/series-2026/registrations/sync — pulls RunSignup participant records for all 6 Series 2026 races into the registration data layer (separate from results). Manual only.</p>
+	<h3 style="margin-top:16px">Sync registrations</h3><p class="meta">Pulls the RunSignup participant records for all 6 Series 2026 races into the registration data layer (separate from results). Manual only — press the button below.</p>
 	<div class="item"><strong>Registration sync</strong><div class="detail" id="results-reg-sync-status">Not synced in this session.</div><div class="btnrow"><button type="button" class="secondary" id="results-reg-sync-btn">Sync registrations now</button></div><div class="message" aria-live="polite"></div></div></section>`;
 
 const RESULTS_DETAILS_HTML = `<section class="panel"><h2>Sync status</h2><div class="sync-status" id="results-det-sync">Loading…</div></section>
@@ -267,12 +267,13 @@ const RESULTS_SCRIPT = `
 		const box=document.querySelector('#results-sum');
 		try{
 			const life=await results_fetchLifecycle();
+			const prev=await results_fetchPreview();
 			const distances=life.distances||[];
 			let html='';
 			for(const d of distances){
 				const ev=d.active_event;
-				html+='<div class="item"><strong>'+esc(d.distance)+' — '+esc(d.stage)+'</strong>'+
-					'<div class="detail">'+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||'')+' · ':'')+(d.synced_at?'synced '+esc(d.synced_at):'never synced')+'</div></div>';
+				html+='<div class="item"><strong>'+esc(d.distance)+' — '+esc(human(d.stage))+'</strong>'+
+					'<div class="detail">'+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||'')+' · ':'')+(d.synced_at?'synced '+esc(humanDate(d.synced_at)):'never synced')+'</div></div>';
 			}
 			if(prev.error){
 				html+='<div class="item"><strong>Publication status <span class="badge-warn">unavailable</span></strong><div class="detail">'+esc(prev.error)+'</div></div>';
@@ -294,7 +295,7 @@ const RESULTS_SCRIPT = `
 				if(ready.length)attn.push(ready.length+' result(s) ready for publication — publish them in Actions.');
 			}
 			html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(esc).join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
-			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Computes performance levels, level places, and points from approved results and keeps the per-distance lifecycle (registration_open → awaiting_results → verifying → levels_computed → published → next_race_prep). You approve results in Actions — after that the Machine runs levels, standings, publication, winner news, social, and next-race promotion by itself.</div></div>';
+			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Computes performance levels, level places, and points from approved results and keeps the per-distance lifecycle (Registration open → Awaiting results → Verifying → Levels computed → Published → Next race prep). You approve results in Actions — after that the Machine runs levels, standings, publication, winner news, social, and next-race promotion by itself.</div></div>';
 			box.innerHTML=html;
 			try{
 				const part=await results_fetchParticipation();
@@ -308,7 +309,7 @@ const RESULTS_SCRIPT = `
 			const life=await results_fetchLifecycle();
 			const distances=life.distances||[];
 			let html='<h3>Refresh sync</h3><p class="meta">One POST per distance to /api/operating-center/race-lifecycle/sync. The Machine does not sync automatically.</p>'+
-				distances.map(d=>'<div class="item"><strong>'+esc(d.distance)+'</strong><div class="detail">'+(d.synced_at?'Last synced '+esc(d.synced_at):'Never synced')+'</div><div class="btnrow"><button type="button" class="secondary" data-sync="'+esc(d.distance)+'">Refresh '+esc(d.distance)+'</button></div><div class="message" aria-live="polite"></div></div>').join('');
+				distances.map(d=>'<div class="item"><strong>'+esc(d.distance)+'</strong><div class="detail">'+(d.synced_at?'Last synced '+esc(humanDate(d.synced_at)):'Never synced')+'</div><div class="btnrow"><button type="button" class="secondary" data-sync="'+esc(d.distance)+'">Refresh '+esc(d.distance)+'</button></div><div class="message" aria-live="polite"></div></div>').join('');
 			const prep=distances.filter(d=>d.stage==='next_race_prep'&&d.prep);
 			html+='<h3>Confirm prep</h3>';
 			if(prep.length){
@@ -449,7 +450,7 @@ const RESULTS_SCRIPT = `
 			const lcBox=document.querySelector('#results-det-lifecycle');
 			lcBox.innerHTML=distances.length?distances.map(d=>{
 				const ev=d.active_event;
-				return '<div class="item"><strong>'+esc(d.distance)+' — '+esc(d.stage)+'</strong>'+
+				return '<div class="item"><strong>'+esc(d.distance)+' — '+esc(human(d.stage))+'</strong>'+
 					'<div class="detail">Active event: '+(ev?esc(ev.event_name||'')+' · '+esc(ev.event_date||''): 'none')+'</div>'+
 					(d.owner_action?'<div class="detail">Owner action: '+esc(d.owner_action)+'</div>':'')+
 					'<div class="detail">Write access: '+esc(d.write_access)+' (dry_run)'+(d.prep?' · prep drafts ready':'')+'</div>'+
@@ -887,9 +888,9 @@ const CREATION_SCRIPT = `
 			'<div><label for="link-event">Event ID (optional)</label><input id="link-event" name="event_id" inputmode="numeric" placeholder="needed for periods / pricing"'+(meta.runsignup_event_id?' value="'+esc(meta.runsignup_event_id)+'"':'')+'></div></div>'+
 			'<button type="submit">Verify and link</button><div class="message" id="link-message"></div></form></section>';
 
-		h+='<section class="panel"><h2>2. Read-only credential probe</h2>'+
-			'<p class="meta">A safe GET that never writes anything. The workflow is not ready until this probe succeeds.</p>'+
-			'<button type="button" class="secondary" id="probe-btn">Run read-only probe</button><div class="message" id="probe-message"></div></section>';
+		h+='<section class="panel"><h2>2. Check the RunSignup connection</h2>'+
+			'<p class="meta">A safe read-only check that never changes anything. The setup cannot continue until this check passes.</p>'+
+			'<button type="button" class="secondary" id="probe-btn">Check connection</button><div class="message" id="probe-message"></div></section>';
 
 		h+='<section class="panel"><h2>3. API steps — dry-run plan</h2>'+
 			'<p class="meta">Nothing below is executed until you type APPLY_STEP under a step and confirm it. Steps marked full replace show their payload for review first.</p>';

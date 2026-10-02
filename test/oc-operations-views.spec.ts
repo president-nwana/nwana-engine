@@ -30,7 +30,7 @@ describe("operating center operations: Summary/Actions/Details", () => {
 				expect(html).toContain(`data-viewpanel="${view}"`);
 			}
 		}
-		const buttons = html.match(/class="oc-view-btn/g) || [];
+		const buttons = html.match(/class="oc-view-btn(?! oc-refresh-btn)/g) || [];
 		// 3 per function (+ any oc-view-btn-styled links)
 		expect(buttons.length).toBeGreaterThanOrEqual(FUNCTIONS.length * 3);
 	});

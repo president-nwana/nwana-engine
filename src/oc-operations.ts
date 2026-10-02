@@ -58,9 +58,9 @@ const OPS_SHARED_SCRIPT = `
 		return html;
 	}
 	function ops_unroutedHtml(u){
-		let html='<div class="item"><strong>'+esc(u.rule_id)+'<span class="badge-warn">NEEDS_OWNER_INPUT</span></strong>';
-		html+='<div class="detail">'+esc(u.action_ids.length)+' actions: '+esc(u.action_ids.join(', '))+'</div>';
-		html+='<div class="detail"><b>Owner input needed:</b> '+esc(u.owner_input)+'</div></div>';
+		let html='<div class="item"><strong>'+esc(human(u.rule_id))+'<span class="badge">'+esc(human('NEEDS_OWNER_INPUT'))+'</span></strong>';
+		html+='<div class="detail">'+esc(u.action_ids.length)+' planned actions: '+esc(u.action_ids.map(human).join(', '))+'</div>';
+		html+='<div class="detail"><b>Note:</b> '+esc(u.owner_input)+'</div></div>';
 		return html;
 	}
 	function ops_groupRows(rows){
@@ -79,7 +79,7 @@ const OPS_SHARED_SCRIPT = `
 	function ops_unroutedSection(data){
 		const unrouted=(data.queue&&data.queue.unrouted_rules)||[];
 		if(!unrouted.length)return '';
-		let html='<h3>Actions in config carried by no current source</h3>';
+		let html='<h3>Dormant automation rules</h3><p class="meta">These rules are configured but currently have no live source feeding them. They are parked — not broken, not urgent. They will activate on their own when their source appears.</p>';
 		for(const u of unrouted){html+=ops_unroutedHtml(u)}
 		return html;
 	}
@@ -265,10 +265,23 @@ const SYSTEM_SCRIPT = `
 				if(!seen[t]){seen[t]=1;order.push(t)}
 			}
 			let html='<div class="item"><strong>Exceptions</strong><div class="detail">'+ops_count(rows,'NEEDS_OWNER_INPUT')+' need owner input, '+ops_count(rows,'BLOCKED_EXTERNAL')+' blocked externally.</div><div><button type="button" class="secondary" id="ops-sys-exc">Open Exceptions</button></div></div>';
+			html+='<div class="item"><strong>Sync RunSignup money</strong><div class="detail">Pulls the latest donations and paid registrations from RunSignup into the Engine. This is the explicit owner-triggered sync — nothing syncs automatically.</div><div class="mrow"><button type="button" class="secondary" id="ops-sync-donations">Sync donations</button> <button type="button" class="secondary" id="ops-sync-registrations">Sync registrations</button></div><div class="message" id="ops-sync-message" aria-live="polite"></div></div>';
 			html+=ops_jumpButtonsHtml(order,'None of the current sources maps to a section Actions screen — act from the rows in Details.');
 			box.innerHTML=html;
 			const eb=document.querySelector('#ops-sys-exc');
 			if(eb)eb.addEventListener('click',function(){__opsSetView('exceptions','summary',true)});
+			const sm=document.querySelector('#ops-sync-message');
+			async function ops_runSync(kind,url){
+				if(sm)sm.textContent='Syncing '+kind+'…';
+				try{
+					const r=await api(url,{method:'POST'});
+					if(sm)sm.textContent=r&&r.ok!==false?'Synced '+kind+'. Refresh the Money views to see the update.':'Sync finished with a warning.';
+				}catch(err){if(sm)sm.textContent=err.message}
+			}
+			const sd=document.querySelector('#ops-sync-donations');
+			if(sd)sd.addEventListener('click',function(){ops_runSync('donations','/api/operating-center/money/sync')});
+			const sr=document.querySelector('#ops-sync-registrations');
+			if(sr)sr.addEventListener('click',function(){ops_runSync('registrations','/api/operating-center/money/sync-registrations')});
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
 	async function boot_system_details(){

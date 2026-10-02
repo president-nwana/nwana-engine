@@ -50,7 +50,7 @@ const BOARD_ACTIONS_HTML = `<section class="panel"><h2>Submit to the Board</h2>
 	<p class="meta"><strong>Machine (automatic):</strong> forms the meeting protocol from the queue during the week, schedules the next meeting automatically, and returns unresolved agenda items to the queue when a meeting closes. <strong>Owner (manual):</strong> the forms and the meeting workspace below.</p>
 	<form id="b-board-intake-form"><h3 style="margin:0 0 8px;font-size:18px">New item</h3>
 		<p class="meta">One intake for everything: a question, an initiative, a proposal, a thought, a problem, an opportunity, a task, a report, or a request to speak. Items without a requested meeting date join the nearest upcoming meeting protocol automatically.</p>
-		<label for="b-board-type">Item type</label><select id="b-board-type" name="submission_type"><option>QUESTION</option><option>INITIATIVE</option><option>PROPOSAL</option><option>THOUGHT</option><option>PROBLEM</option><option>OPPORTUNITY</option><option>TASK</option><option>DISCUSSION</option><option>REPORT</option><option>DECISION_REQUEST</option><option>REQUEST_TO_SPEAK</option><option>SOURCE_MATERIAL</option></select>
+		<label for="b-board-type">Item type</label><select id="b-board-type" name="submission_type"><option value="QUESTION">Question</option><option value="INITIATIVE">Initiative</option><option value="PROPOSAL">Proposal</option><option value="THOUGHT">Thought</option><option value="PROBLEM">Problem</option><option value="OPPORTUNITY">Opportunity</option><option value="TASK">Task</option><option value="DISCUSSION">Discussion</option><option value="REPORT">Report</option><option value="DECISION_REQUEST">Decision request</option><option value="REQUEST_TO_SPEAK">Request to speak</option><option value="SOURCE_MATERIAL">Source material</option></select>
 		<label for="b-board-title">Title</label><input id="b-board-title" name="title" required maxlength="200">
 		<label for="b-board-description">Description</label><textarea id="b-board-description" name="description" required></textarea>
 		<label for="b-board-outcome">Requested outcome or desired result</label><textarea id="b-board-outcome" name="requested_outcome"></textarea>
@@ -94,10 +94,10 @@ const BOARD_SCRIPT = `
 			const m=d.upcoming_meeting;
 			const sec=function(title,body){return '<h3>'+esc(title)+'</h3>'+(body||'<div class="unavailable">None.</div>')};
 			const meetingHtml=m
-				?'<div class="item"><strong>'+esc(m.title)+'</strong><div class="meta">'+esc(m.scheduled_for||'unscheduled')+' · '+esc(m.status)+(m.protocol_formed_at?' · protocol formed':' · protocol not formed yet')+'</div><div class="meta">Cadence: '+esc(d.cadence.weekday)+' '+esc(d.cadence.time)+' ('+esc(d.cadence.timezone)+')</div></div>'
+				?'<div class="item"><strong>'+esc(m.title)+'</strong><div class="meta">'+esc(m.scheduled_for||'unscheduled')+' · '+esc(human(m.status))+(m.protocol_formed_at?' · protocol formed':' · protocol not formed yet')+'</div><div class="meta">Cadence: '+esc(d.cadence.weekday)+' '+esc(d.cadence.time)+' ('+esc(d.cadence.timezone)+')</div></div>'
 				:'<div class="unavailable">No upcoming meeting.</div>';
-			const subs=(d.open_submissions||[]).map(function(s){return '<div class="item"><strong>'+esc(s.title)+'</strong><div class="meta">'+esc(s.submission_type)+' · '+esc(s.submitted_by||'—')+'</div></div>'}).join('');
-			const agenda=(d.agenda||[]).map(function(a){return '<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.status)+(a.preexisting?' · on the agenda since before this meeting was created':'')+'</div></div>'}).join('');
+			const subs=(d.open_submissions||[]).map(function(s){return '<div class="item"><strong>'+esc(s.title)+'</strong><div class="meta">'+esc(human(s.submission_type))+' · '+esc(s.submitted_by||'—')+'</div></div>'}).join('');
+			const agenda=(d.agenda||[]).map(function(a){return '<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(human(a.status))+(a.preexisting?' · on the agenda since before this meeting was created':'')+'</div></div>'}).join('');
 			const decisions=(d.recent_decisions||[]).map(function(x){return '<div class="item"><strong>'+esc(x.submission_title||x.decision_text)+'</strong><div class="meta">'+esc(x.outcome||'')+(x.responsible_person?' · '+esc(x.responsible_person):'')+(x.due_date?' · due '+esc(x.due_date):'')+'</div></div>'}).join('');
 			const overdue=(d.overdue_work||[]).map(function(w){return '<div class="item"><strong>'+esc(w.title)+'</strong><div class="meta">'+esc(w.status)+' · due '+esc(w.due_date||'—')+(w.assigned_to?' · '+esc(w.assigned_to):'')+'</div></div>'}).join('');
 			const blocked=(d.blocked_work||[]).map(function(w){return '<div class="item"><strong>'+esc(w.title)+'</strong><div class="meta">Blocked'+(w.blocker?': '+esc(w.blocker):'')+'</div></div>'}).join('');
@@ -161,7 +161,7 @@ const BOARD_SCRIPT = `
 			let html='<div class="item"><strong>Next meeting: '+esc(m.title)+'</strong>'+
 				'<div class="meta">'+(m.scheduled_for?esc(String(m.scheduled_for).slice(0,10))+' · ':'')+esc(label[m.status]||m.status)+when+' · protocol: '+agenda.length+' items'+(pending?' · '+pending+' waiting in the queue':'')+'</div>'+
 				'<div class="meta" style="margin-top:8px">Protocol (fills during the week):</div>';
-			html+=agenda.length?agenda.map(function(a){return '<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.submission_type)+' · '+esc(a.submitted_by)+' · '+esc(a.status)+'</div></div>'}).join(''):'<div class="unavailable">No items yet. New submissions join this protocol automatically.</div>';
+			html+=agenda.length?agenda.map(function(a){return '<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(human(a.submission_type))+' · '+esc(a.submitted_by)+' · '+esc(human(a.status))+'</div></div>'}).join(''):'<div class="unavailable">No items yet. New submissions join this protocol automatically.</div>';
 			html+='<div style="margin-top:8px"><button data-meeting="'+esc(m.meeting_id)+'" style="width:auto">Open meeting workspace</button></div></div>';
 			box.innerHTML=html;
 			box.querySelectorAll('[data-meeting]').forEach(function(btn){btn.addEventListener('click',function(){b_act_selectMeeting(btn.getAttribute('data-meeting'))})});
@@ -201,10 +201,10 @@ const BOARD_SCRIPT = `
 			if(m.status==='DRAFT'||m.status==='OPEN'){
 				const pend=b_act_pendingCache.filter(function(s){return s.status==='PENDING'});
 				html+='<h3 style="margin:16px 0 8px;font-size:18px">Add to agenda</h3>';
-				html+=pend.length?'<form id="b-board-agenda-form">'+pend.map(function(s){return '<label style="font-weight:400"><input type="checkbox" name="sid" value="'+esc(s.submission_id)+'" style="width:auto"> '+esc(s.title)+' <span class="meta">('+esc(s.submission_type)+' · '+esc(s.submitted_by)+')</span></label>'}).join('')+'<button type="submit" style="width:auto">Add selected to agenda</button><div class="message" aria-live="polite"></div></form>':'<div class="unavailable">No pending items in the queue.</div>';
+				html+=pend.length?'<form id="b-board-agenda-form">'+pend.map(function(s){return '<label style="font-weight:400"><input type="checkbox" name="sid" value="'+esc(s.submission_id)+'" style="width:auto"> '+esc(s.title)+' <span class="meta">('+esc(human(s.submission_type))+' · '+esc(s.submitted_by)+')</span></label>'}).join('')+'<button type="submit" style="width:auto">Add selected to agenda</button><div class="message" aria-live="polite"></div></form>':'<div class="unavailable">No pending items in the queue.</div>';
 			}
 			html+='<h3 style="margin:16px 0 8px;font-size:18px">Agenda</h3>';
-			html+=(d.agenda||[]).length?(d.agenda||[]).map(function(a){return '<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(a.submission_type)+' · '+esc(a.submitted_by)+' · '+esc(a.status)+'</div>'+(a.requested_outcome?'<div class="meta">Requested outcome: '+esc(a.requested_outcome)+'</div>':'')+'</div>'}).join(''):'<div class="unavailable">Agenda is empty.</div>';
+			html+=(d.agenda||[]).length?(d.agenda||[]).map(function(a){return '<div class="item"><strong>'+esc(a.title)+'</strong><div class="meta">'+esc(human(a.submission_type))+' · '+esc(a.submitted_by)+' · '+esc(human(a.status))+'</div>'+(a.requested_outcome?'<div class="meta">Requested outcome: '+esc(a.requested_outcome)+'</div>':'')+'</div>'}).join(''):'<div class="unavailable">Agenda is empty.</div>';
 			if(m.status==='OPEN'){
 				html+='<h3 style="margin:16px 0 8px;font-size:18px">Close meeting</h3><form id="b-board-close-form"><label>Minutes</label><textarea name="minutes"></textarea><button type="submit" style="width:auto">Close meeting</button><div class="message" aria-live="polite"></div></form>';
 			}
@@ -246,7 +246,7 @@ const BOARD_SCRIPT = `
 			const data=await api('/api/board/submissions');
 			const subs=data.submissions||[];
 			q.innerHTML=subs.length?subs.map(function(s){
-				return '<div class="item"><strong>'+esc(s.title)+'</strong><div class="meta">'+esc(s.submission_type)+' · '+esc(s.submitted_by||'—')+' · '+esc(s.status)+'</div>'+(s.description?'<div class="detail">'+esc(s.description)+'</div>':'')+(s.requested_outcome?'<div class="meta">Requested outcome: '+esc(s.requested_outcome)+'</div>':'')+'</div>';
+				return '<div class="item"><strong>'+esc(s.title)+'</strong><div class="meta">'+esc(human(s.submission_type))+' · '+esc(s.submitted_by||'—')+' · '+esc(human(s.status))+'</div>'+(s.description?'<div class="detail">'+esc(s.description)+'</div>':'')+(s.requested_outcome?'<div class="meta">Requested outcome: '+esc(s.requested_outcome)+'</div>':'')+'</div>';
 			}).join(''):'<div class="unavailable">No submissions in the board queue.</div>';
 		}catch(err){q.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		const mb=document.querySelector('#b-board-det-meetings');
@@ -288,7 +288,7 @@ const MEETINGS_DETAILS_HTML = `<section class="panel"><h2>External meetings</h2>
 
 const MEETINGS_SCRIPT = `
 	function b_meet_extRow(m){
-		const badge=m.status==='confirmed'?'<span class="badge">'+esc(m.status)+'</span>':'<span class="badge-warn">'+esc(m.status)+'</span>';
+		const badge=m.status==='confirmed'?'<span class="badge">'+esc(human(m.status))+'</span>':'<span class="badge-warn">'+esc(human(m.status))+'</span>';
 		return '<div class="item"><strong>'+esc(m.title)+' '+badge+'</strong>'+
 			'<div class="meta">'+esc(m.counterparty)+'</div>'+
 			'<div class="detail"><b>When:</b> '+esc(m.display_when)+'</div>'+
@@ -319,7 +319,8 @@ const MEETINGS_SCRIPT = `
 		try{
 			const data=await b_meet_fetchOverview();
 			const exts=data.external_meetings||[];
-			ex.innerHTML=exts.length?exts.slice(0,5).map(b_meet_extRow).join(''):'<div class="unavailable">No external meetings tracked.</div>';
+			const extUp=exts.filter(m=>m.status!=='done');
+			ex.innerHTML=extUp.length?extUp.slice(0,5).map(b_meet_extRow).join(''):'<div class="unavailable">No upcoming external meetings.</div>';
 			const up=data.board_upcoming||[];
 			bb.innerHTML=up.length?up.slice(0,5).map(b_meet_boardUpRow).join(''):'<div class="unavailable">No upcoming board meetings (draft or open).</div>';
 		}catch(err){
@@ -338,7 +339,9 @@ const MEETINGS_SCRIPT = `
 		try{
 			const data=await b_meet_fetchOverview();
 			const exts=data.external_meetings||[];
-			ex.innerHTML=exts.length?exts.map(b_meet_extRow).join(''):'<div class="unavailable">No external meetings tracked.</div>';
+			const extUp=exts.filter(m=>m.status!=='done');
+			const extPast=exts.filter(m=>m.status==='done');
+			ex.innerHTML=(extUp.length?extUp.map(b_meet_extRow).join(''):'<div class="unavailable">No upcoming external meetings.</div>')+(extPast.length?'<h4>Past</h4>'+extPast.map(b_meet_extRow).join(''):'');
 			const up=data.board_upcoming||[];
 			bup.innerHTML=up.length?up.map(b_meet_boardUpRow).join(''):'<div class="unavailable">No upcoming board meetings (draft or open).</div>';
 			const past=data.board_past||[];

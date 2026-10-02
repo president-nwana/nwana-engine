@@ -315,8 +315,23 @@ export interface ActivityItem {
 	acknowledged: boolean;
 }
 
+/** Turn a SNAKE_CASE or ALL-CAPS machine code into plain words. */
+function humanizeCode(code: string): string {
+	return code
+		.toLowerCase()
+		.split("_")
+		.filter(Boolean)
+		.map((w) => w[0].toUpperCase() + w.slice(1))
+		.join(" ");
+}
+
 function activityLabel(action: string, module: string, details: string | null): string {
-	const d: Record<string, string> = details ? (JSON.parse(details) as Record<string, string>) : {};
+	let d: Record<string, string> = {};
+	try {
+		d = details ? (JSON.parse(details) as Record<string, string>) : {};
+	} catch {
+		d = {};
+	}
 	switch (action) {
 		case "BOARD_SUBMISSION_CREATED":
 			return `New Board submission: ${d.title ?? d.submission_id ?? "untitled"}`;
@@ -340,8 +355,17 @@ function activityLabel(action: string, module: string, details: string | null): 
 			return `Decision requested: ${d.title ?? d.request_id ?? "item"}`;
 		case "FUND_CREATED":
 			return `Fund created: ${d.name ?? d.fund_id ?? "fund"}`;
-		default:
-			return module ? `${module}: ${action}` : action;
+		default: {
+			// Never show a raw "MODULE: ACTION" code to the owner. Drop a
+			// redundant module prefix ("BOARD: BOARD_SUBMISSION_ADDED") and
+			// render the rest as plain words.
+			let a = action;
+			const mod = (module ?? "").toUpperCase();
+			if (mod && a.toUpperCase().startsWith(mod + "_")) a = a.slice(mod.length + 1);
+			else if (mod && a.toUpperCase().startsWith(mod)) a = a.replace(/^_+/, "");
+			const label = humanizeCode(a || action);
+			return mod && !a.toUpperCase().startsWith(mod) ? `${humanizeCode(module)}: ${label}` : label;
+		}
 	}
 }
 
@@ -356,7 +380,8 @@ export async function getActivityFeed(db: D1Database): Promise<Response> {
 		.then((r) => new Set((r.results ?? []).map((x) => x.item_id)))
 		.catch(() => new Set<string>());
 
-	// Recent audit events: what happened.
+	// Recent audit events: what happened. Defensive: a missing table or
+	// column must degrade the feed, never 500 the Overview card.
 	const events = await db
 		.prepare(
 			`SELECT action, module, details, created_at
@@ -364,7 +389,8 @@ export async function getActivityFeed(db: D1Database): Promise<Response> {
 			 ORDER BY created_at DESC
 			 LIMIT 30`,
 		)
-		.all<{ action: string; module: string | null; details: string | null; created_at: string }>();
+		.all<{ action: string; module: string | null; details: string | null; created_at: string }>()
+		.catch(() => ({ results: [] as { action: string; module: string | null; details: string | null; created_at: string }[] }));
 
 	for (const e of events.results ?? []) {
 		const id = `audit-${e.action}-${e.created_at}`;
@@ -618,7 +644,7 @@ export function renderOperatingCenterHtml(): string {
 	</style>
 </head>
 <body>
-	<header><h1>NWANA Operating Center</h1><p>What is happening, what needs a decision, and what happens next.</p></header>
+	<header><h1>NWANA Operating Center</h1><p>What is happening, what needs a decision, and what happens next. <button type="button" id="oc-home-refresh" class="secondary" style="width:auto;margin-left:8px" title="Reload this page">↻ Refresh</button></p></header>
 	${nwanaWorkspaceMenu("overview")}
 	<main>
 		<section class="panel" id="gate" hidden>
@@ -727,6 +753,10 @@ export function renderOperatingCenterHtml(): string {
 	</main>
 	<script>
 		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+		const HUMAN_LABELS={'registration_open':'Registration open','awaiting_results':'Awaiting results','verifying':'Verifying results','levels_computed':'Levels computed','published':'Published','next_race_prep':'Next race prep','READY_TO_ACT':'Ready to act','NEEDS_OWNER_INPUT':'Needs your input','BLOCKED_EXTERNAL':'Blocked externally','PENDING':'Pending','IN_PROGRESS':'In progress','DONE':'Done','READY':'Ready','BLOCKED':'Blocked','NEW':'New','SYNCED':'Synced','NEEDS_OWNER':'Needs your review','ROUTED':'Routed'};
+		const human=v=>{const s2=String(v??'');if(HUMAN_LABELS[s2])return HUMAN_LABELS[s2];return s2.toLowerCase().split('_').filter(Boolean).map(w=>w[0].toUpperCase()+w.slice(1)).join(' ')};
+		const humanDate=v=>{const s2=String(v??'');if(!s2)return '';const d=new Date(s2);if(isNaN(d))return s2;return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})};
+		const plural=(n,one,many)=>n+' '+(Number(n)===1?one:many);
 		const SESSION_KEY='nwana_engine_session';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
@@ -740,7 +770,7 @@ export function renderOperatingCenterHtml(): string {
 		async function load(){
 			const [o,b]=await Promise.all([api('/api/operating-center/overview'),api('/api/board/submissions')]);
 			pendingSubmissionsCache=b.submissions||[];
-			const labels={pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results'};
+			const labels={pending_board_submissions:'Board items',pending_decisions:'Decisions needed',active_work_items:'Active work',connected_objects:'Connected objects',published_results:'Published results',active_initiatives:'Active initiatives',public_calendar_competition:'Competitions on public calendar',public_calendar_challenge:'Challenges on public calendar'};
 			document.querySelector('#stats').innerHTML=Object.entries(o.counts).map(([k,v])=>'<div class="stat"><strong>'+esc(v)+'</strong><span>'+esc(labels[k]||k)+'</span></div>').join('');
 			document.querySelector('#board-items').innerHTML=b.submissions.length?'<div class="meta">'+b.submissions.length+' pending submissions awaiting triage. The next meeting protocol forms automatically on Sunday.</div>':'<div class="unavailable">No pending Board items.</div>';
 			loadLifecycleSummary();
@@ -986,6 +1016,7 @@ export function renderOperatingCenterHtml(): string {
 		}
 		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
 		if(!getKey()){window.location.href='/login'}else{showApp();load().catch(renderLoadError)}
+		document.querySelector('#oc-home-refresh').addEventListener('click',function(){load().catch(renderLoadError)});
 	</script>
 </body></html>`;
 }

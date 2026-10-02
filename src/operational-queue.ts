@@ -135,8 +135,7 @@ function googleAdsRow(
 			exact_next_step: manualStep,
 			owner_input: null,
 			external_blocker:
-				"The machine's Google Ads integration is read-only (access_level " +
-				"EXPLORER, execution_allowed=false in src/google-ads.ts). It cannot " +
+				"The machine's Google Ads integration is read-only (Explorer access). It cannot " +
 				"create or mutate campaigns. The proposal itself is complete and valid.",
 		};
 	}

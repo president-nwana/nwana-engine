@@ -104,7 +104,6 @@ import {
 	createInitiative,
 	extractOperatingCenterKey,
 	getOperatingCenterOverview,
-	isOperatingCenterAuthorized,
 	listBoardSubmissions,
 	listInitiatives,
 	publishSiteNews,
@@ -346,6 +345,42 @@ function json(data: unknown, status = 200): Response {
 			"access-control-allow-methods": "GET, POST, OPTIONS",
 		},
 	});
+}
+
+/**
+ * Platform-operator gate for privileged routes (2026-10-02 cleanup).
+ * Accepts the emergency owner key OR a platform_admin unified-login session.
+ * Returns null when authorized; otherwise a 401 (no/invalid credential —
+ * the client signs out, correctly) or 403 (valid sign-in, insufficient
+ * privilege — the client shows the message and STAYS signed in).
+ */
+async function requirePlatformOperator(
+	request: Request,
+	env: Env,
+): Promise<Response | null> {
+	const presented = extractOperatingCenterKey(request);
+	if (!presented) return json({ ok: false, error: "Sign-in required" }, 401);
+	// Fast path: the emergency owner key never touches the database.
+	if (env.OPERATING_CENTER_KEY && timingSafeEqual(presented, env.OPERATING_CENTER_KEY)) {
+		return null;
+	}
+	let identity: Awaited<ReturnType<typeof resolveIdentity>> = null;
+	try {
+		identity = await resolveIdentity(env.nwana_engine_db, presented, env.OPERATING_CENTER_KEY);
+	} catch {
+		identity = null;
+	}
+	if (!identity) return json({ ok: false, error: "Sign-in required" }, 401);
+	const isOperator =
+		identity.kind === "platform_admin" ||
+		(identity.kind === "session" && identity.role === "platform_admin");
+	if (!isOperator) {
+		return json(
+			{ ok: false, error: "Only the platform administrator can perform this action." },
+			403,
+		);
+	}
+	return null;
 }
 
 /** Serve a base64-encoded PNG (app icon / favicon). Static, public, cacheable. */
@@ -5629,11 +5664,11 @@ async function publishSeries2026Result(
 	request: Request,
 	env: Env,
 ): Promise<Response> {
-	// Owner gate: external publication (Meta + site news) requires the
-	// operating center key. The confirmation token alone is not enough.
-	if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
-		return json({ ok: false, error: "Unauthorized" }, 401);
-	}
+	// Platform-operator gate: external publication (Meta + site news) requires
+	// the owner key or a platform_admin session. The confirmation token
+	// alone is not enough.
+	const operatorGate = await requirePlatformOperator(request, env);
+	if (operatorGate) return operatorGate;
 	const body = await request.json() as {
 		publication_key?: string;
 		confirmation?: string;
@@ -7115,7 +7150,12 @@ export default {
 			if (m && request.method === "GET") return getStagedCsv(env.nwana_engine_db, m[1]);
 		}
 		if (url.pathname === "/api/operating-center/activity" && request.method === "GET") {
-			return getActivityFeed(env.nwana_engine_db);
+			try {
+				return await getActivityFeed(env.nwana_engine_db);
+			} catch (error) {
+				console.error("getActivityFeed failed:", error);
+				return json({ ok: true, items: [] });
+			}
 		}
 		if (url.pathname === "/api/operating-center/activity/acknowledge" && request.method === "POST") {
 			return acknowledgeRead(request, env.nwana_engine_db);
@@ -7186,9 +7226,8 @@ export default {
 			return json({ ok: true, profile });
 		}
 		if (request.method === "POST" && url.pathname.startsWith("/api/athletes/") && url.pathname.endsWith("/refresh")) {
-			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
-				return json({ ok: false, error: "Athlete stats refresh requires the owner key" }, 401);
-			}
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
 			const slug = decodeURIComponent(
 				url.pathname.slice("/api/athletes/".length, -"/refresh".length).replace(/\/$/, ""),
 			);
@@ -7201,9 +7240,8 @@ export default {
 		// the public website (news feed + winner announcements). Owner key
 		// only; the public site reads from D1 directly.
 		if (url.pathname === "/api/site/news" && request.method === "POST") {
-			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
-				return json({ ok: false, error: "Site news publishing requires the owner key" }, 401);
-			}
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
 			try {
 				return await publishSiteNews(request, env.nwana_engine_db);
 			} catch (error) {
@@ -8099,9 +8137,8 @@ export default {
 		}
 
 		if (request.method === "POST" && url.pathname === "/api/operating-center/youtube/upload") {
-			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
-				return json({ ok: false, error: "Unauthorized" }, 401);
-			}
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
 			try {
 				const body = await request.json() as {
 					sourceUrl?: string;
@@ -8122,9 +8159,8 @@ export default {
 		}
 
 		if (request.method === "POST" && url.pathname === "/api/operating-center/youtube/publish") {
-			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
-				return json({ ok: false, error: "Unauthorized" }, 401);
-			}
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
 			try {
 				const body = await request.json() as { videoId?: string; confirmation?: string };
 				if (body.confirmation !== "PUBLISH") {
@@ -8289,9 +8325,8 @@ export default {
 			request.method === "POST" &&
 			url.pathname === "/api/series-2026/registrations/sync"
 		) {
-			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
-				return json({ ok: false, error: "Unauthorized" }, 401);
-			}
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
 			try {
 				const summary = await syncSeries2026Registrations(env.nwana_engine_db, {
 					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
@@ -8318,9 +8353,8 @@ export default {
 			request.method === "GET" &&
 			url.pathname === "/api/series-2026/registrations/totals"
 		) {
-			if (!isOperatingCenterAuthorized(request, env.OPERATING_CENTER_KEY)) {
-				return json({ ok: false, error: "Unauthorized" }, 401);
-			}
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
 			try {
 				const overview = await getSeries2026ParticipationOverview(env.nwana_engine_db);
 				return json({ ok: true, ...overview });
