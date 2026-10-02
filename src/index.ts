@@ -6100,11 +6100,9 @@ export default {
 		if (request.method === "GET" && url.pathname === "/admin/organizations") {
 			return htmlPage(renderOrganizationsSectionHtml);
 		}
-		// My Projects — founder's personal dashboard (2026-10-02)
+		// My Projects redirects to the workspace section (2026-10-02)
 		if (request.method === "GET" && url.pathname === "/my-projects") {
-			return new Response(renderMyProjectsSectionHtml(), {
-				headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-			});
+			return Response.redirect(url.origin + "/operating-center/workspace", 302);
 		}
 		if (request.method === "GET" && url.pathname === "/admin/ventures") {
 			return htmlPage(renderVenturesSectionHtml);
