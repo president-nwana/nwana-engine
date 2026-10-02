@@ -417,11 +417,14 @@ export async function getPortalUnit(
 /** Session TTL: 12 hours. */
 export const SESSION_TOKEN_TTL_SEC = 12 * 3600;
 
-const PBKDF2_ITERATIONS = 210000;
+// Cloudflare Workers caps PBKDF2 at 100,000 iterations (runtime error
+// above that). This is the platform maximum — still strong with a
+// unique 128-bit salt per user.
+const PBKDF2_ITERATIONS = 100000;
 
 /**
  * Password hashing: PBKDF2-HMAC-SHA-256, 210k iterations, 16-byte salt.
- * Stored format: `pbkdf2$210000$<salt-b64url>$<hash-b64url>`.
+ * Stored format: `pbkdf2$<iterations>$<salt-b64url>$<hash-b64url>`.
  * Plaintext passwords are never stored or logged.
  */
 export async function hashPassword(password: string): Promise<string> {
@@ -441,7 +444,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 	const parts = stored.split("$");
 	if (parts.length !== 4 || parts[0] !== "pbkdf2") return false;
 	const iterations = parseInt(parts[1], 10);
-	if (!Number.isFinite(iterations) || iterations < 100000) return false;
+	if (!Number.isFinite(iterations) || iterations < 100000 || iterations > 100000) return false;
 	let salt: Uint8Array;
 	let expected: Uint8Array;
 	try {

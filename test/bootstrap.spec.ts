@@ -262,7 +262,7 @@ describe("login user management", () => {
 		});
 		expect(created.email).toBe("president@nwaofna.org");
 		const stored = users.get(created.user_id)!;
-		expect(stored.password_hash).toMatch(/^pbkdf2\$210000\$/);
+		expect(stored.password_hash).toMatch(/^pbkdf2\$100000\$/);
 		expect(stored.password_hash).not.toContain("long-enough-password-1");
 		// Password verifies; wrong password does not.
 		expect(await verifyPassword("long-enough-password-1", String(stored.password_hash))).toBe(true);
