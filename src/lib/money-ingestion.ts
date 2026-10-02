@@ -1441,6 +1441,27 @@ export function memberOrgSourceKey(clubId: number | string): string {
 	return `runsignup:memberorg:members:club:${clubId}`;
 }
 
+/**
+ * Compute membership status from start/end dates vs. now.
+ * ACTIVE: now within [start, end]. EXPIRED: now after end. FUTURE: now
+ * before start. UNKNOWN: dates missing/unparseable. Never guessed beyond
+ * what the dates establish.
+ */
+export function membershipStatus(startDate: string | null, endDate: string | null, nowIso?: string): string {
+	const now = (nowIso ?? new Date().toISOString()).slice(0, 10);
+	const parse = (v: string | null): string | null => {
+		if (!v) return null;
+		const m = /^\d{4}-\d{2}-\d{2}/.exec(v);
+		return m ? m[0] : null;
+	};
+	const start = parse(startDate);
+	const end = parse(endDate);
+	if (!start && !end) return "UNKNOWN";
+	if (end && now > end) return "EXPIRED";
+	if (start && now < start) return "FUTURE";
+	return "ACTIVE";
+}
+
 /** Known NWANA MemberOrg source objects (verified 2026-10-01). */
 export const MEMBERORG_SOURCES: Array<{ clubId: number; name: string; publicUrl: string }> = [
 	{
@@ -1576,8 +1597,45 @@ async function syncMemberOrgMembershipsInner(
 		completed_at: nowIso,
 	});
 
+	// Upsert operational membership records (ALL records incl. $0).
+	// $0 records are real issuances (complimentary / Elite / Lifetime /
+	// sponsored); they persist here as operational truth and create $0
+	// money events, never revenue.
+	const membershipUpserts = normalized.map((n) => {
+		const m = n as NormalizedMemberOrgMembership;
+		const status = membershipStatus(m.membershipStart, m.membershipEnd, nowIso);
+		return db
+			.prepare(
+				`INSERT INTO memberorg_memberships (
+					club_id, membership_id, level_name, level_id,
+					amount_paid_cents, membership_cost_cents,
+					start_date, end_date, status, is_paid,
+					transaction_key, source_ref, last_synced_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(club_id, membership_id) DO UPDATE SET
+					level_name = excluded.level_name,
+					level_id = excluded.level_id,
+					amount_paid_cents = excluded.amount_paid_cents,
+					membership_cost_cents = excluded.membership_cost_cents,
+					start_date = excluded.start_date,
+					end_date = excluded.end_date,
+					status = excluded.status,
+					is_paid = excluded.is_paid,
+					transaction_key = excluded.transaction_key,
+					source_ref = excluded.source_ref,
+					last_synced_at = excluded.last_synced_at`,
+			)
+			.bind(
+				m.clubId, m.membershipId, m.membershipLevelName, m.membershipLevelId,
+				m.amounts.amountPaidCents, m.membershipCostCents,
+				m.membershipStart, m.membershipEnd, status, m.isPaid ? 1 : 0,
+				m.transactionKey, m.sourceRef, nowIso,
+			);
+	});
+
 	await db.batch([
 		...statements,
+		...membershipUpserts,
 		db
 			.prepare(
 				`INSERT INTO money_sync_state (source_key, cursor, last_sync_at, last_sync_result)

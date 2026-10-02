@@ -423,7 +423,8 @@ const MONEY_SCRIPT = `
 				html+='<div class="item"><strong>Total verified revenue</strong><div class="detail">'+money_fmt(cents(t.total_gross_cents))+' across '+t.donations.event_count+' donations, '+t.registrations.event_count+' registrations, '+t.licenses.event_count+' licenses</div></div>';
 				html+='<div class="item"><strong>Donations</strong><div class="detail">'+money_fmt(cents(t.donations.total_gross_cents))+' · '+t.donations.event_count+' transactions'+(t.donations.total_refunds_cents?' · refunds '+money_fmt(cents(t.donations.total_refunds_cents)):'')+'</div></div>';
 				html+='<div class="item"><strong>Paid registrations</strong><div class="detail">'+money_fmt(cents(t.registrations.total_gross_cents))+' · '+t.registrations.event_count+' transactions'+(t.registrations.total_refunds_cents?' · refunds '+money_fmt(cents(t.registrations.total_refunds_cents)):'')+'</div></div>';
-				html+='<div class="item"><strong>Licenses / memberships</strong><div class="detail">'+money_fmt(cents(t.licenses.total_gross_cents))+' · '+t.licenses.event_count+' licenses</div></div>';
+				const licN=t.licenses.event_count, licP=t.licenses.paid_count||0, licF=t.licenses.free_count||0;
+				html+='<div class="item"><strong>Licenses / memberships</strong><div class="detail">'+licN+' membership record'+(licN===1?'':'s')+' · '+licP+' paid · '+licF+' free · '+money_fmt(cents(t.licenses.total_gross_cents))+' revenue</div></div>';
 			}
 			html+='<div class="item"><strong>Fundraising</strong><div class="detail">Raised '+money_fmt(f.totals.raised_amount)+' of '+money_fmt(f.totals.goal_amount)+' goal · committed asks '+money_fmt(f.totals.committed_ask_total)+'</div></div>';
 			html+='<div class="item"><strong>Donation feed</strong><div class="detail">'+(d.available?'<span class="badge-ok">Connected</span>':'<span class="badge-warn">Not connected</span>'+(d.reason?' — '+esc(d.reason):''))+'</div></div>';
@@ -459,7 +460,8 @@ const MONEY_SCRIPT = `
 				html+='<h4>Verified revenue by type</h4>';
 				html+='<div class="meta">Donations: <strong>'+money_fmt(cents(t.donations.total_gross_cents))+'</strong> · '+t.donations.event_count+' events / '+t.donations.transaction_count+' transactions'+(t.donations.total_refunds_cents?' · refunds '+money_fmt(cents(t.donations.total_refunds_cents)):'')+(t.donations.latest_occurred_at?' · latest '+esc(String(t.donations.latest_occurred_at).slice(0,10)):'')+'</div>';
 				html+='<div class="meta">Paid registrations: <strong>'+money_fmt(cents(t.registrations.total_gross_cents))+'</strong> · '+t.registrations.event_count+' events / '+t.registrations.transaction_count+' transactions'+(t.registrations.total_refunds_cents?' · refunds '+money_fmt(cents(t.registrations.total_refunds_cents)):'')+(t.registrations.latest_occurred_at?' · latest '+esc(String(t.registrations.latest_occurred_at).slice(0,10)):'')+'</div>';
-				html+='<div class="meta">Licenses / memberships: <strong>'+money_fmt(cents(t.licenses.total_gross_cents))+'</strong> · '+t.licenses.event_count+' licenses'+(t.licenses.total_refunds_cents?' · refunds '+money_fmt(cents(t.licenses.total_refunds_cents)):'')+(t.licenses.latest_occurred_at?' · latest '+esc(String(t.licenses.latest_occurred_at).slice(0,10)):'')+'</div>';
+				const dLicN=t.licenses.event_count, dLicP=t.licenses.paid_count||0, dLicF=t.licenses.free_count||0;
+				html+='<div class="meta">Licenses / memberships: <strong>'+dLicN+' records · '+dLicP+' paid · '+dLicF+' free</strong> · '+money_fmt(cents(t.licenses.total_gross_cents))+' verified revenue'+(t.licenses.total_refunds_cents?' · refunds '+money_fmt(cents(t.licenses.total_refunds_cents)):'')+(t.licenses.latest_occurred_at?' · latest '+esc(String(t.licenses.latest_occurred_at).slice(0,10)):'')+'</div>';
 				html+='<div class="meta"><strong>Total verified: '+money_fmt(cents(t.total_gross_cents))+'</strong>'+(t.total_refunds_cents?' · total refunds '+money_fmt(cents(t.total_refunds_cents)):'')+'</div>';
 			}
 			html+='<h4>Donation feed</h4><div class="meta">'+(d.available?'Connected':'<span class="unavailable">'+esc(d.reason)+'</span>')+'</div>';
@@ -469,7 +471,13 @@ const MONEY_SCRIPT = `
 			}
 			if(data.memberorgs && data.memberorgs.length){
 				html+='<h4>MemberOrg sources</h4>';
-				html+=data.memberorgs.map(m=>'<div class="meta"><strong>'+esc(m.name)+'</strong> (club '+esc(m.club_id)+'): '+m.membership_count+' memberships ('+m.paid_membership_count+' paid / '+m.free_membership_count+' free) · <strong>'+money_fmt(cents(m.gross_revenue_cents))+'</strong>'+(m.latest_membership_at?' · latest '+esc(String(m.latest_membership_at).slice(0,10)):'')+' · '+esc(m.sync_state)+'</div>').join('');
+				html+=data.memberorgs.map(m=>{
+					let mh='<div class="meta"><strong>'+esc(m.name)+'</strong> (club '+esc(m.club_id)+'): '+m.membership_count+' memberships ('+m.paid_membership_count+' paid / '+m.free_membership_count+' free) · <strong>'+money_fmt(cents(m.gross_revenue_cents))+' revenue</strong>'+(m.latest_membership_at?' · latest '+esc(String(m.latest_membership_at).slice(0,10)):'')+' · '+esc(m.sync_state)+'</div>';
+					if(m.memberships && m.memberships.length){
+						mh+=m.memberships.map(r=>'<div class="meta" style="margin-left:12px">• #'+esc(r.membership_id)+' · '+esc(r.level_name||'unknown level')+' · '+(r.is_paid?money_fmt(cents(r.amount_paid_cents))+' paid':'free / complimentary')+' · '+esc(r.start_date||'?')+' → '+esc(r.end_date||'?')+' · '+esc(r.status)+'</div>').join('');
+					}
+					return mh;
+				}).join('');
 			}
 			html+='<h4>Sponsorship revenue</h4><div class="meta">'+(stageLine||'<span class="unavailable">No sponsorship assets yet.</span>')+'</div><div class="meta">'+esc(s.note)+'</div>';
 			html+='<h4>Commitments</h4><div class="meta">Fundraising committed asks: '+money_fmt(f.totals.committed_ask_total)+' · Sponsorship committed assets: <strong>'+s.committed_count+'</strong> (values not recorded)</div>';

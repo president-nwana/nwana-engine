@@ -930,3 +930,14 @@ describe("historical backfill", () => {
 		expect(mocks.urls.length).toBe(1);
 	});
 });
+
+describe("membershipStatus", () => {
+	it("computes ACTIVE / EXPIRED / FUTURE / UNKNOWN from dates", async () => {
+		const { membershipStatus } = await import("../src/lib/money-ingestion");
+		expect(membershipStatus("2026-01-01", "2027-01-01", "2026-06-15T00:00:00Z")).toBe("ACTIVE");
+		expect(membershipStatus("2026-01-01", "2026-06-01", "2026-06-15T00:00:00Z")).toBe("EXPIRED");
+		expect(membershipStatus("2026-07-01", "2027-01-01", "2026-06-15T00:00:00Z")).toBe("FUTURE");
+		expect(membershipStatus(null, null, "2026-06-15T00:00:00Z")).toBe("UNKNOWN");
+		expect(membershipStatus("2026-07-22", "2027-01-01", "2026-10-02T00:00:00Z")).toBe("ACTIVE");
+	});
+});

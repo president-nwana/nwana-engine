@@ -346,3 +346,25 @@ describe("normalizeMemberOrgMembership", () => {
 		expect(normalizeMemberOrgMembership({ amount_paid: "$10.00" }, 3335)).toBeNull();
 	});
 });
+
+describe("normalizeMemberOrgMembership level detail", () => {
+	it("captures level id, name, and dates", () => {
+		const n = normalizeMemberOrgMembership(
+			{
+				membership_id: 1297406,
+				club_membership_level_id: 9481,
+				club_membership_level_name: "Community Nordic Walking Group",
+				amount_paid: "$0.00",
+				membership_cost: "$0.00",
+				membership_start: "2026-07-22",
+				membership_end: "2027-01-01",
+			},
+			3335,
+		)!;
+		expect(n.membershipLevelId).toBe("9481");
+		expect(n.membershipLevelName).toBe("Community Nordic Walking Group");
+		expect(n.membershipStart).toBe("2026-07-22");
+		expect(n.membershipEnd).toBe("2027-01-01");
+		expect(n.isPaid).toBe(false);
+	});
+});

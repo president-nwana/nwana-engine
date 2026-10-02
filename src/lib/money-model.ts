@@ -622,6 +622,7 @@ export interface NormalizedMemberOrgMembership {
 	/** The membership level price (reference only; NOT revenue). */
 	membershipCostCents: number | null;
 	membershipLevelName: string | null;
+	membershipLevelId: string | null;
 	membershipStart: string | null;
 	membershipEnd: string | null;
 	isPaid: boolean;
@@ -678,6 +679,12 @@ export function normalizeMemberOrgMembership(
 		"membershipLevelName",
 		"Membership Level",
 	);
+	const levelIdRaw = pickFirst(
+		record,
+		"club_membership_level_id",
+		"membership_level_id",
+		"membershipLevelId",
+	);
 	const startRaw = pickFirst(record, "membership_start", "membershipStart", "Membership Start");
 	const endRaw = pickFirst(record, "membership_end", "membershipEnd", "Membership End");
 
@@ -724,6 +731,7 @@ export function normalizeMemberOrgMembership(
 		},
 		membershipCostCents: membershipCost.cents,
 		membershipLevelName: levelNameRaw === null ? null : String(levelNameRaw),
+		membershipLevelId: levelIdRaw === null ? null : String(levelIdRaw),
 		membershipStart: startRaw === null ? null : String(startRaw),
 		membershipEnd: endRaw === null ? null : String(endRaw),
 		isPaid,

@@ -41,6 +41,9 @@ export interface ExecutiveMoneyRevenueCategory {
 	total_refunds_cents: number;
 	currency: string;
 	latest_occurred_at: string | null;
+	/** For licenses: paid vs free record counts. */
+	paid_count?: number;
+	free_count?: number;
 }
 
 export interface ExecutiveMoneySourceBreakdown {
@@ -51,6 +54,17 @@ export interface ExecutiveMoneySourceBreakdown {
 	total_refunds_cents: number;
 	latest_occurred_at: string | null;
 	last_sync_at: string | null;
+}
+
+export interface ExecutiveMoneyMembershipRecord {
+	membership_id: string;
+	level_name: string | null;
+	amount_paid_cents: number | null;
+	is_paid: boolean;
+	start_date: string | null;
+	end_date: string | null;
+	status: string;
+	source_ref: string;
 }
 
 export interface ExecutiveMoneyMemberOrg {
@@ -64,6 +78,7 @@ export interface ExecutiveMoneyMemberOrg {
 	latest_membership_at: string | null;
 	sync_state: string;
 	last_sync_at: string | null;
+	memberships: ExecutiveMoneyMembershipRecord[];
 }
 
 export interface ExecutiveMoneyView {
@@ -184,7 +199,7 @@ async function getRevenueCategory(
 				latest_occurred_at: string | null;
 			}>();
 		if (!row) return empty;
-		return {
+		const out: ExecutiveMoneyRevenueCategory = {
 			event_count: num(row.event_count),
 			transaction_count: num(row.transaction_count),
 			total_gross_cents: num(row.total_gross_cents),
@@ -192,6 +207,25 @@ async function getRevenueCategory(
 			currency: "USD",
 			latest_occurred_at: row.latest_occurred_at,
 		};
+		// For licenses: paid vs free record counts (from operational truth).
+		if (eventTypes.some((t) => t.startsWith("license_"))) {
+			try {
+				const pc = await db
+					.prepare(
+						`SELECT COUNT(CASE WHEN is_paid = 1 THEN 1 END) AS paid_count,
+								COUNT(CASE WHEN is_paid = 0 THEN 1 END) AS free_count
+						 FROM memberorg_memberships`,
+					)
+					.first<{ paid_count: number; free_count: number }>();
+				if (pc) {
+					out.paid_count = num(pc.paid_count);
+					out.free_count = num(pc.free_count);
+				}
+			} catch {
+				// Table may not exist yet.
+			}
+		}
+		return out;
 	} catch {
 		return empty;
 	}
@@ -278,7 +312,7 @@ async function getMemberOrgs(db: D1Database): Promise<ExecutiveMoneyMemberOrg[]>
 			club_id: org.clubId, name: org.name, public_url: org.publicUrl,
 			membership_count: 0, paid_membership_count: 0, free_membership_count: 0,
 			gross_revenue_cents: 0, latest_membership_at: null,
-			sync_state: "NOT_SYNCED", last_sync_at: null,
+			sync_state: "NOT_SYNCED", last_sync_at: null, memberships: [],
 		};
 		try {
 			const agg = await db
@@ -302,6 +336,42 @@ async function getMemberOrgs(db: D1Database): Promise<ExecutiveMoneyMemberOrg[]>
 				entry.free_membership_count = entry.membership_count - entry.paid_membership_count;
 				entry.gross_revenue_cents = num(agg.gross_cents);
 				entry.latest_membership_at = agg.latest_at;
+			}
+			try {
+				const recs = await db
+					.prepare(
+						`SELECT membership_id, level_name, amount_paid_cents, is_paid,
+								start_date, end_date, status, source_ref
+						 FROM memberorg_memberships WHERE club_id = ?
+						 ORDER BY membership_id`,
+					)
+					.bind(org.clubId)
+					.all<{
+						membership_id: string; level_name: string | null;
+						amount_paid_cents: number | null; is_paid: number;
+						start_date: string | null; end_date: string | null;
+						status: string; source_ref: string;
+					}>();
+				for (const r of recs.results ?? []) {
+					entry.memberships.push({
+						membership_id: String(r.membership_id),
+						level_name: r.level_name,
+						amount_paid_cents: r.amount_paid_cents,
+						is_paid: Number(r.is_paid) === 1,
+						start_date: r.start_date,
+						end_date: r.end_date,
+						status: String(r.status ?? "UNKNOWN"),
+						source_ref: String(r.source_ref ?? ""),
+					});
+				}
+				// Prefer operational counts (includes $0 records as real issuances).
+				if (entry.memberships.length > 0) {
+					entry.membership_count = entry.memberships.length;
+					entry.paid_membership_count = entry.memberships.filter((m) => m.is_paid).length;
+					entry.free_membership_count = entry.membership_count - entry.paid_membership_count;
+				}
+			} catch {
+				// Table may not exist yet; keep money_events-derived counts.
 			}
 			const sync = await db
 				.prepare(`SELECT last_sync_at, last_error FROM money_sync_state WHERE source_key = ?`)
