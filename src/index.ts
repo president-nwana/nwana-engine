@@ -195,7 +195,6 @@ import {
 	renderOrganizationsSectionHtml,
 	renderTenantSectionHtml,
 } from "./oc-organizations";
-import { renderMyProjectsSectionHtml } from "./oc-my-projects";
 import { renderWorkspaceSectionHtml } from "./oc-workspace";
 import {
 	getAthleteProfile,
@@ -6099,10 +6098,6 @@ export default {
 		}
 		if (request.method === "GET" && url.pathname === "/admin/organizations") {
 			return htmlPage(renderOrganizationsSectionHtml);
-		}
-		// My Projects redirects to the workspace section (2026-10-02)
-		if (request.method === "GET" && url.pathname === "/my-projects") {
-			return Response.redirect(url.origin + "/operating-center/workspace", 302);
 		}
 		if (request.method === "GET" && url.pathname === "/admin/ventures") {
 			return htmlPage(renderVenturesSectionHtml);
