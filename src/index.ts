@@ -6759,6 +6759,52 @@ export default {
 				.run();
 			return json({ ok: true, tenant_id });
 		}
+		// Team management for user's tenants (2026-10-02).
+		// GET /api/my/tenants/:id/users — list team
+		// POST /api/my/tenants/:id/users — add member {email, role}
+		if (url.pathname.match(/^\/api\/my\/tenants\/[^/]+\/users$/) && (request.method === "GET" || request.method === "POST")) {
+			if (identity?.kind !== "session") return json({ ok: false, error: "Unauthorized" }, 401);
+			const m = url.pathname.match(/^\/api\/my\/tenants\/([^/]+)\/users$/);
+			const tenant_id = decodeURIComponent(m![1]);
+			// Verify user can manage this tenant: platform admin, or owns via session/ideas
+			const isPlatform = identity.role === "platform_admin";
+			let canManage = isPlatform || identity.tenant_id === tenant_id;
+			if (!canManage) {
+				const own = await env.nwana_engine_db
+					.prepare(`SELECT 1 FROM user_ideas WHERE user_id = ? AND tenant_id = ? LIMIT 1`)
+					.bind(identity.user_id, tenant_id)
+					.first();
+				canManage = !!own;
+			}
+			if (!canManage) return json({ ok: false, error: "Not your project" }, 403);
+			if (request.method === "GET") {
+				const rows = await env.nwana_engine_db
+					.prepare(`SELECT user_id, display_name, email, role, status FROM tenant_users WHERE tenant_id = ? ORDER BY display_name`)
+					.bind(tenant_id)
+				.all<{ user_id: string; display_name: string; email: string; role: string; status: string }>();
+				return json({ ok: true, users: rows.results ?? [] });
+			}
+			// POST: add member (they must already have a user account; owner invites by email)
+			const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+			const email = String(body.email || "").trim().toLowerCase();
+			const role = String(body.role || "business_unit_user");
+			if (!email) return json({ ok: false, error: "Email required" }, 400);
+			if (!["tenant_admin", "business_unit_user"].includes(role)) return json({ ok: false, error: "Invalid role" }, 400);
+			// Find existing user by email, or create a placeholder invite
+			const existing = await env.nwana_engine_db
+				.prepare(`SELECT user_id, tenant_id FROM tenant_users WHERE email = ? LIMIT 1`)
+				.bind(email)
+				.first<{ user_id: string; tenant_id: string }>();
+			if (existing) {
+				// Move/add to this tenant: update their tenant_id and role
+				await env.nwana_engine_db
+					.prepare(`UPDATE tenant_users SET tenant_id = ?, role = ? WHERE user_id = ?`)
+					.bind(tenant_id, role, existing.user_id)
+					.run();
+				return json({ ok: true, user_id: existing.user_id });
+			}
+			return json({ ok: false, error: "No user with this email. They need to register first." }, 404);
+		}
 		// My Projects: tenants accessible to the current user (2026-10-02).
 		// Includes session tenant + tenants from user's promoted ideas.
 		if (url.pathname === "/api/my/tenants" && request.method === "GET") {
