@@ -7249,6 +7249,10 @@ export default {
 			return markDistributionSent(env.nwana_engine_db, body.distribution_id ?? "");
 		}
 		if (url.pathname === "/api/operating-center/news/publish-facebook" && request.method === "POST") {
+			// Uses NWANA's Meta token — NWANA tenant only (2026-10-02).
+			const fbAllowed = identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" && (identity.role === "platform_admin" || identity.tenant_id === "nwana"));
+			if (!fbAllowed) return json({ ok: false, error: "Not available for this tenant" }, 403);
 			const body = (await request.json().catch(() => ({}))) as { article_id?: string; image_slug?: string };
 			const imageUrl = (body.image_slug ?? "").trim()
 				? `https://nwana-engine.nwana-engine.workers.dev/api/public/social-image/${encodeURIComponent((body.image_slug ?? "").trim())}`
@@ -7256,6 +7260,10 @@ export default {
 			return publishNewsToFacebook(env.nwana_engine_db, env.NWANA_META_TOKEN, body.article_id ?? "", imageUrl);
 		}
 		if (url.pathname === "/api/operating-center/news/publish-instagram" && request.method === "POST") {
+			// Uses NWANA's Meta token — NWANA tenant only (2026-10-02).
+			const igAllowed = identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" && (identity.role === "platform_admin" || identity.tenant_id === "nwana"));
+			if (!igAllowed) return json({ ok: false, error: "Not available for this tenant" }, 403);
 			const operatorGate = await requirePlatformOperator(request, env);
 			if (operatorGate) return operatorGate;
 			const body = (await request.json().catch(() => ({}))) as { article_id?: string; image_slug?: string };

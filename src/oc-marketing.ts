@@ -809,7 +809,7 @@ const NEWS_SCRIPT = `
 	function news_boot(){
 		news_loadSummary(); news_loadQueue(); news_loadSettings(); news_checkSocial(); news_loadPhotos();
 		var recent=document.querySelector('#news-recent');
-		if(recent)recent.innerHTML='<div class="meta">Latest site news appears on nwaofna.org/news.</div>';
+		if(recent){api('/api/auth/session').then(function(ss){var tid=ss&&ss.user?ss.user.tenant_id:'nwana';recent.innerHTML=tid==='nwana'?'<div class="meta">Latest site news appears on nwaofna.org/news.</div>':'<div class="meta">Your published news will appear here.</div>';}).catch(function(){recent.innerHTML='<div class="meta">Your published news will appear here.</div>';});}
 		var check=document.querySelector('#news-check');
 		if(check)check.addEventListener('click',async function(){
 			var msg=document.querySelector('#news-check-msg'); if(msg)msg.textContent='Scanning\\u2026';
