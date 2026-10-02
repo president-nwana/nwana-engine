@@ -12,6 +12,7 @@ import {
 	normalizeAmount,
 	normalizeRunSignupDonation,
 	normalizeRunSignupRegistration,
+	normalizeMemberOrgMembership,
 	receiptEventKey,
 	snapshotHash,
 	stableHash,
@@ -275,5 +276,73 @@ describe("normalizeRunSignupRegistration", () => {
 		const b = normalizeRunSignupRegistration({ registration_id: 7, amount_paid: "$5.00" });
 		expect(a!.eventKey).toBe(b!.eventKey);
 		expect(a!.snapshotHash).toBe(b!.snapshotHash);
+	});
+});
+
+describe("normalizeMemberOrgMembership", () => {
+	it("uses amount_paid (not membership_cost) as the verified payment", () => {
+		const n = normalizeMemberOrgMembership(
+			{
+				membership_id: 1300736,
+				amount_paid: "$22.90",
+				membership_cost: "$22.90",
+				club_membership_level_name: "Annual Athlete License - Regular",
+				membership_start: "2026-08-03",
+				membership_end: "2028-01-01",
+			},
+			3335,
+		)!;
+		expect(n.isPaid).toBe(true);
+		expect(n.amounts.grossCents).toBe(2290);
+		expect(n.amounts.grossStatus).toBe("VERIFIED");
+		expect(n.eventType).toBe("license_purchased");
+		// Stable MemberOrg identity, never mixed with race transaction IDs.
+		expect(n.sourceTransactionId).toBe("memberorg:3335:membership:1300736");
+		expect(n.transactionKey).toBe("runsignup:memberorg:3335:membership:1300736");
+		expect(n.transactionKey).not.toContain("rsu_transaction");
+		expect(n.sourceRef).toBe("memberorg:3335/membership:1300736");
+	});
+
+	it("creates $0 events for free memberships without revenue", () => {
+		const n = normalizeMemberOrgMembership(
+			{
+				membership_id: 1297406,
+				amount_paid: "$0.00",
+				membership_cost: "$0.00",
+				membership_start: "2026-07-22",
+			},
+			3335,
+		)!;
+		expect(n.isPaid).toBe(false);
+		expect(n.amounts.grossCents).toBe(0);
+		expect(n.eventType).toBe("license_purchased");
+	});
+
+	it("never guesses license_renewed from dates", () => {
+		// Even a membership that starts right after another ends is still
+		// license_purchased: renewal requires source-provided proof.
+		const n = normalizeMemberOrgMembership(
+			{ membership_id: 999, amount_paid: "$55.00", membership_start: "2027-01-02" },
+			3335,
+		)!;
+		expect(n.eventType).toBe("license_purchased");
+	});
+
+	it("event keys are stable for the same membership", () => {
+		const a = normalizeMemberOrgMembership({ membership_id: 42, amount_paid: "$10.00" }, 3335);
+		const b = normalizeMemberOrgMembership({ membership_id: 42, amount_paid: "$10.00" }, 3335);
+		expect(a!.eventKey).toBe(b!.eventKey);
+		expect(a!.snapshotHash).toBe(b!.snapshotHash);
+	});
+
+	it("different clubs never collide", () => {
+		const a = normalizeMemberOrgMembership({ membership_id: 42, amount_paid: "$10.00" }, 3335);
+		const b = normalizeMemberOrgMembership({ membership_id: 42, amount_paid: "$10.00" }, 3338);
+		expect(a!.transactionKey).not.toBe(b!.transactionKey);
+		expect(a!.eventKey).not.toBe(b!.eventKey);
+	});
+
+	it("returns null without a membership_id", () => {
+		expect(normalizeMemberOrgMembership({ amount_paid: "$10.00" }, 3335)).toBeNull();
 	});
 });

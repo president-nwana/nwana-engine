@@ -416,9 +416,17 @@ const MONEY_SCRIPT = `
 		const box=document.querySelector('#money-sum');
 		try{
 			const data=await money_fetchMoney();
-			const f=data.fundraising, s=data.sponsorship, d=data.donations;
-			let html='<div class="item"><strong>Fundraising</strong><div class="detail">Raised '+money_fmt(f.totals.raised_amount)+' of '+money_fmt(f.totals.goal_amount)+' goal · committed asks '+money_fmt(f.totals.committed_ask_total)+'</div></div>';
-			html+='<div class="item"><strong>Donations</strong><div class="detail">'+(d.available?'<span class="badge-ok">Connected</span>':'<span class="badge-warn">Not connected</span>'+(d.reason?' — '+esc(d.reason):''))+'</div></div>';
+			const f=data.fundraising, s=data.sponsorship, d=data.donations, t=data.total_verified_revenue;
+			let html='';
+			if(t){
+				const cents=n=>Math.round(Number(n||0)/100);
+				html+='<div class="item"><strong>Total verified revenue</strong><div class="detail">'+money_fmt(cents(t.total_gross_cents))+' across '+t.donations.event_count+' donations, '+t.registrations.event_count+' registrations, '+t.licenses.event_count+' licenses</div></div>';
+				html+='<div class="item"><strong>Donations</strong><div class="detail">'+money_fmt(cents(t.donations.total_gross_cents))+' · '+t.donations.event_count+' transactions'+(t.donations.total_refunds_cents?' · refunds '+money_fmt(cents(t.donations.total_refunds_cents)):'')+'</div></div>';
+				html+='<div class="item"><strong>Paid registrations</strong><div class="detail">'+money_fmt(cents(t.registrations.total_gross_cents))+' · '+t.registrations.event_count+' transactions'+(t.registrations.total_refunds_cents?' · refunds '+money_fmt(cents(t.registrations.total_refunds_cents)):'')+'</div></div>';
+				html+='<div class="item"><strong>Licenses / memberships</strong><div class="detail">'+money_fmt(cents(t.licenses.total_gross_cents))+' · '+t.licenses.event_count+' licenses</div></div>';
+			}
+			html+='<div class="item"><strong>Fundraising</strong><div class="detail">Raised '+money_fmt(f.totals.raised_amount)+' of '+money_fmt(f.totals.goal_amount)+' goal · committed asks '+money_fmt(f.totals.committed_ask_total)+'</div></div>';
+			html+='<div class="item"><strong>Donation feed</strong><div class="detail">'+(d.available?'<span class="badge-ok">Connected</span>':'<span class="badge-warn">Not connected</span>'+(d.reason?' — '+esc(d.reason):''))+'</div></div>';
 			const stageLine=Object.entries(s.stage_counts).map(([st,c])=>esc(st)+': <strong>'+c+'</strong>').join(' · ');
 			html+='<div class="item"><strong>Sponsorship revenue</strong><div class="detail">'+(stageLine||'<span class="unavailable">No sponsorship assets yet.</span>')+'</div></div>';
 			html+='<div class="item"><strong>Commitments</strong><div class="detail">Fundraising committed asks: '+money_fmt(f.totals.committed_ask_total)+' · Sponsorship committed assets: <strong>'+s.committed_count+'</strong> (values not recorded)</div></div>';
@@ -439,14 +447,30 @@ const MONEY_SCRIPT = `
 		const box=document.querySelector('#money-det');
 		try{
 			const data=await money_fetchMoney();
-			const f=data.fundraising, s=data.sponsorship, d=data.donations;
+			const f=data.fundraising, s=data.sponsorship, d=data.donations, t=data.total_verified_revenue;
+			const cents=n=>Math.round(Number(n||0)/100);
 			const fundRows=f.funds.map(x=>'<div class="meta">'+esc(x.name)+': raised '+money_fmt(x.raised_amount)+' of '+money_fmt(x.goal_amount)+' goal · committed asks '+money_fmt(x.committed_ask_total)+'</div>').join('');
 			const stageLine=Object.entries(s.stage_counts).map(([st,c])=>esc(st)+': <strong>'+c+'</strong>').join(' · ');
 			const pipeStages={};
 			for(const x of f.funds){for(const [st,amt] of Object.entries(x.ask_by_stage||{})){pipeStages[st]=(pipeStages[st]||0)+Number(amt||0)}}
 			const pipeLine=Object.entries(pipeStages).map(([st,amt])=>esc(st)+': <strong>'+money_fmt(amt)+'</strong>').join(' · ');
 			let html='<h4>Fundraising</h4><div class="meta">Total raised '+money_fmt(f.totals.raised_amount)+' of '+money_fmt(f.totals.goal_amount)+' goal · committed asks '+money_fmt(f.totals.committed_ask_total)+'</div>'+fundRows;
-			html+='<h4>Donations</h4><div class="meta">'+(d.available?'Connected':'<span class="unavailable">'+esc(d.reason)+'</span>')+'</div>';
+			if(t){
+				html+='<h4>Verified revenue by type</h4>';
+				html+='<div class="meta">Donations: <strong>'+money_fmt(cents(t.donations.total_gross_cents))+'</strong> · '+t.donations.event_count+' events / '+t.donations.transaction_count+' transactions'+(t.donations.total_refunds_cents?' · refunds '+money_fmt(cents(t.donations.total_refunds_cents)):'')+(t.donations.latest_occurred_at?' · latest '+esc(String(t.donations.latest_occurred_at).slice(0,10)):'')+'</div>';
+				html+='<div class="meta">Paid registrations: <strong>'+money_fmt(cents(t.registrations.total_gross_cents))+'</strong> · '+t.registrations.event_count+' events / '+t.registrations.transaction_count+' transactions'+(t.registrations.total_refunds_cents?' · refunds '+money_fmt(cents(t.registrations.total_refunds_cents)):'')+(t.registrations.latest_occurred_at?' · latest '+esc(String(t.registrations.latest_occurred_at).slice(0,10)):'')+'</div>';
+				html+='<div class="meta">Licenses / memberships: <strong>'+money_fmt(cents(t.licenses.total_gross_cents))+'</strong> · '+t.licenses.event_count+' licenses'+(t.licenses.total_refunds_cents?' · refunds '+money_fmt(cents(t.licenses.total_refunds_cents)):'')+(t.licenses.latest_occurred_at?' · latest '+esc(String(t.licenses.latest_occurred_at).slice(0,10)):'')+'</div>';
+				html+='<div class="meta"><strong>Total verified: '+money_fmt(cents(t.total_gross_cents))+'</strong>'+(t.total_refunds_cents?' · total refunds '+money_fmt(cents(t.total_refunds_cents)):'')+'</div>';
+			}
+			html+='<h4>Donation feed</h4><div class="meta">'+(d.available?'Connected':'<span class="unavailable">'+esc(d.reason)+'</span>')+'</div>';
+			if(data.sources && data.sources.length){
+				html+='<h4>Revenue by source</h4>';
+				html+=data.sources.map(x=>'<div class="meta">'+esc(x.source_label)+': <strong>'+money_fmt(cents(x.total_gross_cents))+'</strong> · '+x.event_count+' events'+(x.total_refunds_cents?' · refunds '+money_fmt(cents(x.total_refunds_cents)):'')+(x.latest_occurred_at?' · latest '+esc(String(x.latest_occurred_at).slice(0,10)):'')+(x.last_sync_at?' · synced '+esc(String(x.last_sync_at).slice(0,10)):'')+'</div>').join('');
+			}
+			if(data.memberorgs && data.memberorgs.length){
+				html+='<h4>MemberOrg sources</h4>';
+				html+=data.memberorgs.map(m=>'<div class="meta"><strong>'+esc(m.name)+'</strong> (club '+esc(m.club_id)+'): '+m.membership_count+' memberships ('+m.paid_membership_count+' paid / '+m.free_membership_count+' free) · <strong>'+money_fmt(cents(m.gross_revenue_cents))+'</strong>'+(m.latest_membership_at?' · latest '+esc(String(m.latest_membership_at).slice(0,10)):'')+' · '+esc(m.sync_state)+'</div>').join('');
+			}
 			html+='<h4>Sponsorship revenue</h4><div class="meta">'+(stageLine||'<span class="unavailable">No sponsorship assets yet.</span>')+'</div><div class="meta">'+esc(s.note)+'</div>';
 			html+='<h4>Commitments</h4><div class="meta">Fundraising committed asks: '+money_fmt(f.totals.committed_ask_total)+' · Sponsorship committed assets: <strong>'+s.committed_count+'</strong> (values not recorded)</div>';
 			html+='<h4>Pipeline totals</h4><div class="meta">'+(pipeLine||'<span class="unavailable">No asks in pipeline yet.</span>')+'</div><div class="meta">'+esc(data.disclaimer)+'</div>';

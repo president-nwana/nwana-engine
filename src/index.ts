@@ -128,6 +128,7 @@ import {
 	reconcileRunSignupDonations,
 	syncRunSignupDonations,
 	syncRunSignupRegistrations,
+	syncMemberOrgMemberships,
 	backfillRunSignupDonations,
 	backfillRunSignupRegistrations,
 } from "./lib/money-ingestion";
@@ -6269,6 +6270,25 @@ export default {
 					pageSize: typeof body.page_size === "number" ? body.page_size : undefined,
 					maxPages: typeof body.max_pages === "number" ? body.max_pages : undefined,
 				},
+			);
+			return json(result, result.ok ? 200 : 502);
+		}
+		// MemberOrg membership sync (2026-10-01): documented
+		// GET /rest/club/:club_id/members. Ingests every membership (paid and
+		// $0) as license_purchased events; $0 records create $0-gross events
+		// (existence preserved, revenue unaffected). Idempotent; owner-gated.
+		// Body: { club_id }.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/money/sync-memberorg") {
+			let body: { club_id?: unknown } = {};
+			try {
+				body = (await request.json()) as typeof body;
+			} catch {
+				body = {};
+			}
+			const result = await syncMemberOrgMemberships(
+				env.nwana_engine_db,
+				env.RUNSIGNUP_ACCESS_TOKEN,
+				{ clubId: String(body.club_id ?? "") },
 			);
 			return json(result, result.ok ? 200 : 502);
 		}

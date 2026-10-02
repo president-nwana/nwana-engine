@@ -56,9 +56,11 @@ import {
 	MONEY_SYNC_SOURCE_KEY,
 	normalizeRunSignupDonation,
 	normalizeRunSignupRegistration,
+	normalizeMemberOrgMembership,
 	RACE_EVENT_IDS,
 	type NormalizedMoneyRecord,
 	type NormalizedRunSignupDonation,
+	type NormalizedMemberOrgMembership,
 	RUNSIGNUP_DONATION_RACE_ID,
 	RUNSIGNUP_SOURCE_SYSTEM,
 } from "./money-model";
@@ -1417,4 +1419,190 @@ export async function backfillRunSignupRegistrations(
 	const raceId = opts.raceId;
 	const eventIds = opts.eventIds ?? RACE_EVENT_IDS[raceId] ?? [];
 	return runBackfill(db, runSignupToken, "registrations", raceId, eventIds, opts);
+}
+
+
+/* ============================================================================
+ * MemberOrg membership sync (2026-10-01).
+ *
+ * Source: documented GET /rest/club/:club_id/members (verified working with
+ * the current grant 2026-10-01). Returns membership records with separate
+ * `amount_paid` (verified payment) and `membership_cost` (level price).
+ *
+ * Every membership (paid or $0) is ingested as a `license_purchased` event
+ * via normalizeMemberOrgMembership; $0 records create $0-gross events so
+ * their EXISTENCE is preserved without affecting revenue totals.
+ * Idempotent: INSERT OR IGNORE on deterministic membership-record keys, so
+ * re-syncing the same records creates zero new events.
+ * Owner-triggered only (no cron/polling), like the other money syncs.
+ * ========================================================================== */
+
+export function memberOrgSourceKey(clubId: number | string): string {
+	return `runsignup:memberorg:members:club:${clubId}`;
+}
+
+/** Known NWANA MemberOrg source objects (verified 2026-10-01). */
+export const MEMBERORG_SOURCES: Array<{ clubId: number; name: string; publicUrl: string }> = [
+	{
+		clubId: 3335,
+		name: "NWANA NW Groups",
+		publicUrl: "https://runsignup.com/MemberOrg/NWANANWGroups",
+	},
+	{
+		clubId: 3338,
+		name: "NW Group Miami",
+		publicUrl: "https://runsignup.com/MemberOrg/NWGroupMiami",
+	},
+];
+
+async function fetchMemberOrgPages(
+	runSignupToken: string,
+	clubId: number | string,
+	pageSize: number,
+	maxPages: number,
+): Promise<{ ok: true; pages: FetchPage[] } | { ok: false; error: string; failureInterpretation: string }> {
+	const pages: FetchPage[] = [];
+	for (let page = 1; page <= maxPages; page++) {
+		const url =
+			`https://api.runsignup.com/rest/club/${clubId}/members` +
+			`?format=json&results_per_page=${pageSize}&page=${page}&current_members_only=F`;
+		const result = await runSignupGetJson<unknown>(url, runSignupToken);
+		if (!result.ok) {
+			return {
+				ok: false,
+				error:
+					`RunSignup club/${clubId}/members read failed: http=${result.http_status ?? "?"} ` +
+					`api_error=${result.api_error_code ?? "-"} ${result.api_error_msg ?? ""}`.trim(),
+				failureInterpretation: "SOURCE_READ_FAILED",
+			};
+		}
+		const data = result.data as Record<string, unknown>;
+		const records = (data["club_members"] ?? data["members"] ?? []) as Array<
+			Record<string, unknown>
+		>;
+		pages.push({ records });
+		if (records.length < pageSize) break;
+	}
+	return { ok: true, pages };
+}
+
+export async function syncMemberOrgMemberships(
+	db: D1Database,
+	runSignupToken: string,
+	opts: { clubId: number | string; pageSize?: number; maxPages?: number },
+): Promise<MoneySyncResult> {
+	try {
+		return await syncMemberOrgMembershipsInner(db, runSignupToken, opts);
+	} catch (e) {
+		const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+		return {
+			ok: false, sourceKey: memberOrgSourceKey(opts.clubId), incremental: false, fetched: 0,
+			skippedNoIdentity: 0, transactionsNew: 0, eventsIngested: 0,
+			eventsDuplicate: 0, lifecycleEvents: 0, identityUpgrades: [],
+			cursor: null, lastSyncAt: new Date().toISOString(),
+			error: `UNCAUGHT: ${msg}`, failureInterpretation: "UNCAUGHT_EXCEPTION",
+		};
+	}
+}
+
+async function syncMemberOrgMembershipsInner(
+	db: D1Database,
+	runSignupToken: string,
+	opts: { clubId: number | string; pageSize?: number; maxPages?: number },
+): Promise<MoneySyncResult> {
+	const clubId = opts.clubId;
+	const pageSize = opts.pageSize ?? 100;
+	const maxPages = opts.maxPages ?? 20;
+	const sourceKey = memberOrgSourceKey(clubId);
+	const nowIso = new Date().toISOString();
+
+	const fail = async (error: string, failureInterpretation?: string): Promise<MoneySyncResult> => {
+		await db.batch([
+			db
+				.prepare(
+					`INSERT INTO money_sync_state (source_key, last_sync_at, last_error)
+					 VALUES (?, ?, ?)
+					 ON CONFLICT(source_key) DO UPDATE SET
+						last_sync_at = excluded.last_sync_at,
+						last_error = excluded.last_error`,
+				)
+				.bind(sourceKey, nowIso, error),
+		]);
+		return {
+			ok: false, sourceKey, incremental: false, fetched: 0,
+			skippedNoIdentity: 0, transactionsNew: 0, eventsIngested: 0,
+			eventsDuplicate: 0, lifecycleEvents: 0, identityUpgrades: [],
+			cursor: null, lastSyncAt: nowIso, error, failureInterpretation,
+		};
+	};
+
+	if (!runSignupToken) return fail("RunSignup access token is not configured", "TOKEN_INVALID");
+	if (!/^\d+$/.test(String(clubId))) return fail(`invalid clubId: ${clubId}`, "INVALID_INPUT");
+
+	const fetched = await fetchMemberOrgPages(runSignupToken, clubId, pageSize, maxPages);
+	if (!fetched.ok) return fail(fetched.error, fetched.failureInterpretation);
+
+	// Normalize every membership (paid and $0). No paid-only filter: $0
+	// records must exist in canonical state without creating revenue.
+	const normalized: NormalizedMoneyRecord[] = [];
+	let skippedNoIdentity = 0;
+	let fetchedCount = 0;
+	for (const p of fetched.pages) {
+		for (const r of p.records) {
+			fetchedCount++;
+			const n = normalizeMemberOrgMembership(r, clubId);
+			if (!n) { skippedNoIdentity++; continue; }
+			normalized.push(n);
+		}
+	}
+
+	const { statements, eventInsertIndexes, outcome } = await buildIngestBatch(db, normalized, {});
+
+	const paidCount = normalized.filter((n) => (n as NormalizedMemberOrgMembership).isPaid).length;
+	const paidGross = normalized
+		.filter((n) => (n as NormalizedMemberOrgMembership).isPaid)
+		.reduce((sum, n) => sum + ((n as NormalizedMemberOrgMembership).amounts.grossCents ?? 0), 0);
+
+	const resultJson = JSON.stringify({
+		kind: "memberorg_memberships",
+		club_id: String(clubId),
+		fetched: fetchedCount,
+		memberships: normalized.length,
+		paidCount,
+		paidGrossCents: paidGross,
+		transactionsNew: outcome.transactionsNew,
+		eventsIngested: outcome.eventsIngested,
+		eventsDuplicate: outcome.eventsAttempted - outcome.eventsIngested,
+		completed_at: nowIso,
+	});
+
+	await db.batch([
+		...statements,
+		db
+			.prepare(
+				`INSERT INTO money_sync_state (source_key, cursor, last_sync_at, last_sync_result)
+				 VALUES (?, ?, ?, ?)
+				 ON CONFLICT(source_key) DO UPDATE SET
+					cursor = excluded.cursor,
+					last_sync_at = excluded.last_sync_at,
+					last_sync_result = excluded.last_sync_result,
+					last_error = NULL`,
+			)
+			.bind(sourceKey, String(fetchedCount), nowIso, resultJson),
+	]);
+
+	return {
+		ok: true,
+		sourceKey,
+		incremental: true,
+		fetched: fetchedCount,
+		skippedNoIdentity,
+		transactionsNew: outcome.transactionsNew,
+		eventsIngested: outcome.eventsIngested,
+		eventsDuplicate: outcome.eventsAttempted - outcome.eventsIngested,
+		lifecycleEvents: outcome.lifecycleEvents,
+		identityUpgrades: outcome.identityUpgrades,
+		cursor: String(fetchedCount),
+		lastSyncAt: nowIso,
+	};
 }

@@ -54,6 +54,17 @@ Read before making changes:
 - BLOCKED (reported per directive): Athlete License / membership purchases, license renewals, MemberOrg payments — NO documented RunSignup/TicketSignup API endpoint exists for club/member transactions (verified via official API docs; Sept 30 finding reconfirmed). Required action: owner dashboard export or RunSignup API support for club transactions. No synthetic data created; these remain UNKNOWN/NOT CONNECTED.
 - Verification: Machine totals vs source totals match per race (backfill recorded source-side counts/sums; D1 canonical sums verified equal). Incremental ingestion wired: `syncRunSignupDonations` and `syncRunSignupRegistrations` both seed from completed backfills. Tests 830/830, tsc clean. Operating cost: VERIFIED $0 (Cloudflare Free Plan).
 
+## MEMBERORG MONEY COVERAGE + EXECUTIVE MONEY VIEW — DEPLOYED LIVE 2026-10-01
+
+- MemberOrg auto-sync is NOT blocked: the documented `GET /rest/club/:club_id/members` endpoint works with the current grant (verified live 2026-10-01). It returns membership records with SEPARATE `amount_paid` (verified payment) and `membership_cost` (level price) fields.
+- VERIFIED SEMANTICS: `membership_cost` is the PRICE, not proof of payment. Revenue is derived from `amount_paid` only. The public NWANA license page confirms Annual Athlete License - Regular lists at $55/yr with mid-year prorating (explains odd amounts like $22.90/$31.64).
+- New: `normalizeMemberOrgMembership` → `license_purchased` events (never `license_renewed` without source proof); identity `memberorg:{club_id}:membership:{membership_id}` (never mixed with race IDs); $0 memberships create $0-gross events (existence preserved, revenue unaffected). `POST /api/operating-center/money/sync-memberorg` (owner-gated, idempotent).
+- MemberOrg sources live: NWANA NW Groups (club 3335) — 1 membership (1297406, $0, SYNCED); NW Group Miami (club 3338) — 0 memberships (SYNCED, verified $0). Both display in Money Details even at $0.
+- Executive Money View fixed: `total_verified_revenue` { donations, registrations, licenses, total } + per-source breakdown + MemberOrg list, all read live from money_events/money_transactions/money_sync_state. UI Summary shows Total verified revenue with Donations / Paid registrations / Licenses lines; Details shows breakdown by type, by source, MemberOrgs.
+- Canonical totals 2026-10-01: donations 17/$170 + registrations 13/$195 + licenses 1/$0 = $365 total verified revenue. $0 refunds.
+- BLOCKED: XLSX import of 13 main-MemberOrg licenses — the file `20261001-NordicWalkingAssociationofNorthAmericaNWANA-memberships.xlsx` never arrived (0 message attachments, full filesystem search 2026-10-01); main NWANA MemberOrg numeric club ID unknown (not exposed publicly). Import pipeline is built and ready; needs the file or the club ID.
+- Tests 836/836, tsc clean. Operating cost: VERIFIED $0.
+
 ## READ THIS FIRST
 
 Do not reconstruct NWANA Engine from chat memory.

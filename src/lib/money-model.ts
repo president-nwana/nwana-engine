@@ -541,11 +541,6 @@ export function normalizeRunSignupRegistration(
 	};
 }
 
-/** A normalized monetary record of any kind the canonical store ingests. */
-export type NormalizedMoneyRecord =
-	| NormalizedRunSignupDonation
-	| NormalizedRunSignupRegistration;
-
 /**
  * Derive the lifecycle event for a changed monetary snapshot, or null when
  * the change does not map to a known lifecycle transition.
@@ -574,3 +569,178 @@ export function deriveLifecycleEvent(
 	// adapter can observe them. Not derivable here -> null.
 	return null;
 }
+
+/* ============================================================================
+ * MemberOrg membership normalizer (2026-10-01).
+ *
+ * Source: RunSignup MemberOrg (club) membership records, via the documented
+ * GET /rest/club/:club_id/members endpoint or a dashboard XLSX export of the
+ * same records.
+ *
+ * VERIFIED SEMANTICS (2026-10-01, from the live API response shape):
+ * - `amount_paid` = the actual amount paid for the membership. This is the
+ *   verified payment indicator. A non-zero amount_paid confirms real money.
+ * - `membership_cost` = the price of the membership level (may be prorated;
+ *   e.g. Annual Athlete License - Regular lists at $55/yr, mid-year purchases
+ *   are prorated). It is the PRICE, not proof of payment. A non-zero
+ *   membership_cost alone does NOT confirm that money changed hands.
+ * Revenue is therefore derived from amount_paid, never from membership_cost.
+ *
+ * Identity: `memberorg:{club_id}:membership:{membership_id}` — a stable
+ * MemberOrg/Membership source identity, namespaced so it can never collide
+ * with race transaction IDs (rsu_transaction:*).
+ * Event identity: membership-record based
+ * (`runsignup:evt:license_purchased:membership:{membership_id}`), so repeated
+ * imports of the same record are idempotent via INSERT OR IGNORE.
+ *
+ * Event type is ALWAYS `license_purchased`. `license_renewed` is used only
+ * when the source data provably distinguishes a renewal; neither the API
+ * nor the dashboard export provides that proof, so renewals are never
+ * guessed from dates.
+ *
+ * $0 records (amount_paid = 0 / missing) still produce a `license_purchased`
+ * event with $0 gross: the membership's EXISTENCE is preserved in the
+ * canonical store, but revenue totals are unaffected.
+ * ========================================================================== */
+
+export type MembershipIdentitySource =
+	| "amount_paid"
+	| "membership_record_fallback";
+
+export interface NormalizedMemberOrgMembership {
+	sourceSystem: typeof RUNSIGNUP_SOURCE_SYSTEM;
+	clubId: string;
+	membershipId: string;
+	sourceTransactionId: string;
+	identitySource: MembershipIdentitySource;
+	transactionKey: string;
+	membershipRef: string;
+	eventKey: string;
+	occurredAt: string | null;
+	currency: string;
+	amounts: MoneyAmounts;
+	/** The membership level price (reference only; NOT revenue). */
+	membershipCostCents: number | null;
+	membershipLevelName: string | null;
+	membershipStart: string | null;
+	membershipEnd: string | null;
+	isPaid: boolean;
+	sourceRef: string;
+	snapshot: Record<string, unknown>;
+	snapshotHash: string;
+	// Generalized record fields.
+	recordId: string;
+	numericId: number;
+	recordRef: string;
+	eventType: MoneyEventType;
+	secondaryEventKey: null;
+	secondaryEventType: null;
+}
+
+export function normalizeMemberOrgMembership(
+	record: Record<string, unknown>,
+	clubId: number | string,
+): NormalizedMemberOrgMembership | null {
+	const memberIdRaw = pickFirst(record, "membership_id", "membershipId", "membershipID");
+	if (memberIdRaw === null || memberIdRaw === undefined || String(memberIdRaw) === "")
+		return null;
+	const membershipId = String(memberIdRaw);
+	const clubIdStr = String(clubId);
+	const membershipRef = `membership:${membershipId}`;
+
+	// Stable MemberOrg identity — never mixed with race transaction IDs.
+	const sourceTransactionId = `memberorg:${clubIdStr}:${membershipRef}`;
+
+	// amount_paid is the ONLY verified payment indicator. membership_cost is
+	// the level price (reference). Revenue comes from amount_paid.
+	const amountPaid = normalizeAmount(pickFirst(record, "amount_paid", "amountPaid"));
+	const membershipCost = normalizeAmount(
+		pickFirst(record, "membership_cost", "membershipCost", "Membership Cost"),
+	);
+	const paidCents = amountPaid.cents ?? 0;
+	const isPaid = amountPaid.status === AMOUNT_VERIFIED && paidCents > 0;
+
+	const occurredAt = normalizeOccurredAt(
+		pickFirst(
+			record,
+			"registration_date",
+			"registrationDate",
+			"member_since",
+			"memberSince",
+			"membership_start",
+			"membershipStart",
+		),
+	);
+	const levelNameRaw = pickFirst(
+		record,
+		"club_membership_level_name",
+		"membership_level_name",
+		"membershipLevelName",
+		"Membership Level",
+	);
+	const startRaw = pickFirst(record, "membership_start", "membershipStart", "Membership Start");
+	const endRaw = pickFirst(record, "membership_end", "membershipEnd", "Membership End");
+
+	const snapshot: Record<string, unknown> = {
+		membership_id: membershipId,
+		club_id: clubIdStr,
+		occurred_at: occurredAt,
+		currency: "USD",
+		gross_cents: isPaid ? paidCents : 0,
+		gross_status: amountPaid.status,
+		amount_paid_cents: amountPaid.cents,
+		amount_paid_status: amountPaid.status,
+		membership_cost_cents: membershipCost.cents,
+		membership_cost_status: membershipCost.status,
+		net_cents: null,
+		net_status: AMOUNT_UNKNOWN,
+		refund_cents: null,
+		refund_status: AMOUNT_UNKNOWN,
+		is_paid: isPaid,
+	};
+
+	return {
+		sourceSystem: RUNSIGNUP_SOURCE_SYSTEM,
+		clubId: clubIdStr,
+		membershipId,
+		sourceTransactionId,
+		identitySource: "membership_record_fallback",
+		transactionKey: transactionKey(RUNSIGNUP_SOURCE_SYSTEM, sourceTransactionId),
+		membershipRef,
+		eventKey: receiptEventKey(RUNSIGNUP_SOURCE_SYSTEM, "license_purchased", `memberorg:${clubIdStr}:${membershipRef}`),
+		occurredAt,
+		currency: "USD",
+		amounts: {
+			grossCents: isPaid ? paidCents : 0,
+			grossStatus: amountPaid.status,
+			feeCents: null,
+			feeStatus: AMOUNT_UNKNOWN,
+			amountPaidCents: amountPaid.cents,
+			amountPaidStatus: amountPaid.status,
+			netCents: null,
+			netStatus: AMOUNT_UNKNOWN,
+			refundCents: null,
+			refundStatus: AMOUNT_UNKNOWN,
+		},
+		membershipCostCents: membershipCost.cents,
+		membershipLevelName: levelNameRaw === null ? null : String(levelNameRaw),
+		membershipStart: startRaw === null ? null : String(startRaw),
+		membershipEnd: endRaw === null ? null : String(endRaw),
+		isPaid,
+		sourceRef: `memberorg:${clubIdStr}/membership:${membershipId}`,
+		snapshot,
+		snapshotHash: snapshotHash(snapshot),
+		recordId: membershipId,
+		numericId: /^\d+$/.test(membershipId) ? Number(membershipId) : 0,
+		recordRef: membershipRef,
+		eventType: "license_purchased",
+		secondaryEventKey: null,
+		secondaryEventType: null,
+	};
+}
+
+/** A normalized monetary record of any kind the canonical store ingests. */
+export type NormalizedMoneyRecord =
+	| NormalizedRunSignupDonation
+	| NormalizedRunSignupRegistration
+	| NormalizedMemberOrgMembership;
