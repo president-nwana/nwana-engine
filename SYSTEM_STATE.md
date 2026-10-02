@@ -1209,3 +1209,26 @@ Full professional league, marketplace build-out, inventory/fulfillment, new chal
 - Deploy: same esbuild + Script Upload API path as ADR-0047 (6.87 MB bundle); secret_text bindings re-declared as `{type:"inherit"}` so the API carried all 14 existing secrets forward (verified post-deploy: 14 secret_text + 1 D1 + 2 plain_text, values intact; compat date + observability unchanged). Production Worker version `24d6b579-06f4-4626-ae27-3f70716d5828` (#186, 2026-10-01T23:35:08Z), supersedes #185 (`b61b7b10`).
 - Operating cost: VERIFIED $0 (no new Worker/cron/D1/service; HMAC verify is local CPU; billing unchanged: one Cloudflare Free Plan subscription, 0 USD).
 - Operating cost: VERIFIED $0 (no new Worker/cron/D1/paid services; billing unchanged — one Cloudflare Free Plan subscription, 0 USD).
+
+## NWANA WORKSPACE CLEANUP — 2026-10-02 (deployed as 1d31a54)
+
+Albert: "the workspace is not for athletes, it's for cyberneticians." Full audit
+(`~/workspace/nwana-workspace-audit-2026-10-02.md`) then cleanup, all deployed.
+
+- Authz: `requirePlatformOperator` — privileged routes accept owner key OR
+  platform_admin session. 401 = unauthenticated only; 403 = forbidden with a
+  human message, client stays signed in. Fixes instant logout on YouTube
+  upload/publish and registrations sync. (Audit's "8 dead media routes" claim
+  was wrong — verified live, all registered.)
+- Overview: activity feed can no longer 500; human labels for stats, stages,
+  blockers, money; "(no action)" rows show real titles.
+- Sport: fixed `prev is not defined` crash; human stages/dates.
+- Board uploads: server returns route_label/classification/staged_csv_url.
+- Refresh: per-view ↻ buttons everywhere + home page; fixed false "auto up to date" copy.
+- Growth: IGF fund picker (was dead), terminal-stage guard, real partner stages,
+  dynamic follow-up window from prospect send dates.
+- Operations: money sync buttons (explicit owner trigger per standing rule),
+  de-alarmed dormant-rules copy, 15-min Google Ads cache.
+- Academy: 8 dead tabs collapsed to one parked panel.
+- Stale sweep: Integrity 9 marked done, meetings split past/upcoming.
+- Tests 855/855, tsc clean. Money intact ($365). Operating cost VERIFIED $0.
