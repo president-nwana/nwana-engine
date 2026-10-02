@@ -100,6 +100,12 @@ function makeDb() {
 						});
 						return { success: true, meta: { changes: 1 } };
 					}
+					if (s.startsWith("UPDATE bootstrap_grants SET used_at = NULL WHERE token_hash = ?")) {
+						for (const g of grants.values()) {
+							if (g.token_hash === args[0]) g.used_at = null;
+						}
+						return { success: true, meta: { changes: 1 } };
+					}
 					if (s.startsWith("UPDATE bootstrap_grants SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?")) {
 						const [now, token_hash] = args;
 						let changes = 0;
@@ -188,6 +194,26 @@ describe("bootstrap grant flow", () => {
 		).rejects.toThrow("setup code");
 		expect(users.size).toBe(0);
 		expect(await bootstrapClosed(db)).toBe(false);
+	});
+
+	it("a failed attempt does not burn the grant (validate-first + release)", async () => {
+		const { db } = makeDb();
+		const grant = await mintBootstrapGrant(db);
+		// Bad input: validation fails BEFORE the grant is consumed.
+		await expect(
+			bootstrapFirstAdmin(db, grant.grant_token, {
+				email: "not-an-email",
+				password: "long-enough-password-1",
+				display_name: "X",
+			}),
+		).rejects.toThrow("invalid email");
+		// The same grant still works for a good attempt.
+		const created = await bootstrapFirstAdmin(db, grant.grant_token, {
+			email: "admin@example.org",
+			password: "long-enough-password-1",
+			display_name: "Admin",
+		});
+		expect(created.role).toBe("platform_admin");
 	});
 
 	it("expired grants cannot be used", async () => {

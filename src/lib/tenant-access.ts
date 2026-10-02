@@ -734,15 +734,38 @@ export async function consumeBootstrapGrant(db: Db, grantToken: string): Promise
 }
 
 /**
+ * Release a consumed grant (undo consumeBootstrapGrant). Used when admin
+ * creation fails after consuming, so a transient failure does not burn
+ * the single-use code.
+ */
+export async function releaseBootstrapGrant(db: Db, grantToken: string): Promise<void> {
+	if (!grantToken || typeof grantToken !== "string") return;
+	const tokenHash = await sha256Hex(grantToken);
+	await db
+		.prepare("UPDATE bootstrap_grants SET used_at = NULL WHERE token_hash = ?")
+		.bind(tokenHash)
+		.run();
+}
+
+/**
  * Create the first platform_admin via bootstrap. Requires a valid,
  * unconsumed grant token (single-use). Refuses if bootstrap is closed.
- * The caller must have validated input; the password is hashed here.
+ * Input is validated BEFORE the grant is consumed, and the grant is
+ * released if creation fails — a failed attempt never burns the code.
+ * The password is hashed here (never stored or logged in plaintext).
  */
 export async function bootstrapFirstAdmin(
 	db: Db,
 	grantToken: string,
 	input: { email: string; password: string; display_name: string },
 ): Promise<TenantUserPublic> {
+	// Validate first: bad input must not consume the single-use grant.
+	const email = input.email.toLowerCase().trim();
+	if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("invalid email");
+	if (!input.password || input.password.length < 12) {
+		throw new Error("password must be at least 12 characters");
+	}
+	if (!input.display_name.trim()) throw new Error("display_name is required");
 	if (await bootstrapClosed(db)) {
 		throw new Error("bootstrap is closed: a platform administrator already exists");
 	}
@@ -750,21 +773,27 @@ export async function bootstrapFirstAdmin(
 	if (!consumed) {
 		throw new Error("invalid, expired, or already-used setup code");
 	}
-	// Re-check after consuming: a concurrent bootstrap must not create a
-	// second first-admin. (The loser gets a clear error, not a duplicate.)
-	if (await bootstrapClosed(db)) {
-		throw new Error("bootstrap is closed: a platform administrator already exists");
+	try {
+		// Re-check after consuming: a concurrent bootstrap must not create
+		// a second first-admin. (The loser gets a clear error, not a duplicate.)
+		if (await bootstrapClosed(db)) {
+			throw new Error("bootstrap is closed: a platform administrator already exists");
+		}
+		// The first admin belongs to the nwana tenant (platform operator).
+		// They administer all tenants from /admin.
+		return await createLoginUser(db, "nwana", {
+			email: input.email,
+			password: input.password,
+			display_name: input.display_name,
+			role: "platform_admin",
+			unit_ids: [],
+			note: "First platform administrator (bootstrap)",
+		});
+	} catch (e) {
+		// Do not burn the grant on failure.
+		await releaseBootstrapGrant(db, grantToken);
+		throw e;
 	}
-	// The first admin belongs to the nwana tenant (platform operator).
-	// They administer all tenants from /admin.
-	return createLoginUser(db, "nwana", {
-		email: input.email,
-		password: input.password,
-		display_name: input.display_name,
-		role: "platform_admin",
-		unit_ids: [],
-		note: "First platform administrator (bootstrap)",
-	});
 }
 
 /** List all users across tenants (platform admin only). */
