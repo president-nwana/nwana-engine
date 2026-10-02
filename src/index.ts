@@ -5913,14 +5913,25 @@ export default {
 		// demo_user and other-tenant sessions are portal-only (403 here).
 		// demo_user sessions are read-only everywhere (403 on non-GET).
 		if (operatingCenterApiRoute) {
-			const ocAllowed =
-				identity?.kind === "platform_admin" ||
-				(identity?.kind === "session" &&
-					(identity.role === "platform_admin" ||
-						(identity.tenant_id === "nwana" &&
-							(identity.role === "tenant_owner" ||
-								identity.role === "tenant_admin" ||
-								identity.role === "business_unit_user"))));
+			// Tenant gate (2026-10-02): NWANA is no longer special-cased.
+			// Any active tenant's owner/admin/user may use the operating center;
+			// data isolation is enforced per-query by tenant_id.
+			let ocAllowed = identity?.kind === "platform_admin";
+			if (!ocAllowed && identity?.kind === "session") {
+				if (identity.role === "platform_admin") {
+					ocAllowed = true;
+				} else if (
+					identity.role === "tenant_owner" ||
+					identity.role === "tenant_admin" ||
+					identity.role === "business_unit_user"
+				) {
+					const t = await env.nwana_engine_db
+						.prepare(`SELECT status FROM tenants WHERE tenant_id = ?`)
+						.bind(identity.tenant_id)
+						.first<{ status: string }>();
+					ocAllowed = t?.status === "active";
+				}
+			}
 			if (!ocAllowed) {
 				return json({
 					ok: false,
@@ -6638,7 +6649,8 @@ export default {
 			return json(await getOperationsOverview(env));
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/money/overview") {
-			return json(await getExecutiveMoneyView(env.nwana_engine_db));
+			const tid = identity?.kind === "session" ? identity.tenant_id : "nwana";
+			return json(await getExecutiveMoneyView(env.nwana_engine_db, tid));
 		}
 		// Phase 1 Money Ingestion (Revenue Engine v1): canonical monetary
 		// read paths. ADR-0044: downstream reads D1; these routes never
@@ -7305,9 +7317,10 @@ export default {
 			// Website.
 			if (dests.includes("site")) {
 				const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) + "-" + aid.slice(-8);
+				const tid = identity?.kind === "session" ? identity.tenant_id : "nwana";
 				const ins = await env.nwana_engine_db
-					.prepare(`INSERT INTO site_news (slug, title, body_html, published_at, kind, created_by) VALUES (?, ?, ?, ?, 'news', 'MANUAL_COMPOSER')`)
-					.bind(slug, title, bodyHtml, now)
+					.prepare(`INSERT INTO site_news (slug, title, body_html, published_at, kind, created_by, tenant_id) VALUES (?, ?, ?, ?, 'news', 'MANUAL_COMPOSER', ?)`)
+					.bind(slug, title, bodyHtml, now, tid)
 					.run();
 				const siteNewsId = Number(ins.meta?.last_row_id ?? 0) || null;
 				await env.nwana_engine_db

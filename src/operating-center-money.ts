@@ -126,7 +126,7 @@ const num = (value: unknown): number => {
 // state (money_events), per ADR-0044. This reads Engine state only — it
 // never re-reads RunSignup. Falls back to "not connected" when the money
 // event store has no rows yet (or the migration has not run here).
-async function getDonationOutcome(db: D1Database): Promise<ExecutiveMoneyView["donations"]> {	const unavailable = (reason: string): ExecutiveMoneyView["donations"] => ({
+async function getDonationOutcome(db: D1Database, tenantId: string = "nwana"): Promise<ExecutiveMoneyView["donations"]> {	const unavailable = (reason: string): ExecutiveMoneyView["donations"] => ({
 		available: false,
 		reason,
 		event_count: 0,
@@ -139,8 +139,9 @@ async function getDonationOutcome(db: D1Database): Promise<ExecutiveMoneyView["d
 			.prepare(
 				`SELECT COUNT(*) AS event_count,
 						COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0) AS total_gross_cents
-				 FROM money_events WHERE event_type = 'donation_received'`,
+				 FROM money_events WHERE event_type = 'donation_received' AND tenant_id = ?`,
 			)
+			.bind(tenantId)
 			.first<{ event_count: number; total_gross_cents: number }>();
 		const sync = await db
 			.prepare(`SELECT last_sync_at FROM money_sync_state WHERE source_key = ?`)
@@ -176,6 +177,7 @@ async function getDonationOutcome(db: D1Database): Promise<ExecutiveMoneyView["d
 async function getRevenueCategory(
 	db: D1Database,
 	eventTypes: string[],
+	tenantId: string = "nwana",
 ): Promise<ExecutiveMoneyRevenueCategory> {
 	const empty: ExecutiveMoneyRevenueCategory = {
 		event_count: 0, transaction_count: 0, total_gross_cents: 0,
@@ -190,9 +192,9 @@ async function getRevenueCategory(
 						COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0) AS total_gross_cents,
 						COALESCE(SUM(CASE WHEN refund_status = 'VERIFIED' THEN refund_cents ELSE 0 END), 0) AS total_refunds_cents,
 						MAX(occurred_at) AS latest_occurred_at
-				 FROM money_events WHERE event_type IN (${placeholders})`,
+				 FROM money_events WHERE event_type IN (${placeholders}) AND tenant_id = ?`,
 			)
-			.bind(...eventTypes)
+			.bind(...eventTypes, tenantId)
 			.first<{
 				event_count: number; transaction_count: number;
 				total_gross_cents: number; total_refunds_cents: number;
@@ -236,7 +238,7 @@ async function getRevenueCategory(
  * Includes $0 sources: a source with zero events still appears when it has
  * a sync-state row (verified $0 is production truth, not absence).
  */
-async function getSourceBreakdown(db: D1Database): Promise<ExecutiveMoneySourceBreakdown[]> {
+async function getSourceBreakdown(db: D1Database, tenantId: string = "nwana"): Promise<ExecutiveMoneySourceBreakdown[]> {
 	const out: ExecutiveMoneySourceBreakdown[] = [];
 	try {
 		const events = await db
@@ -247,10 +249,11 @@ async function getSourceBreakdown(db: D1Database): Promise<ExecutiveMoneySourceB
 						COALESCE(SUM(CASE WHEN refund_status = 'VERIFIED' THEN refund_cents ELSE 0 END), 0) AS total_refunds_cents,
 						MAX(occurred_at) AS latest_occurred_at
 				 FROM money_events
-				 WHERE source_ref LIKE '%/%'
+				 WHERE source_ref LIKE '%/%' AND tenant_id = ?
 				 GROUP BY source_prefix
 				 ORDER BY source_prefix`,
 			)
+			.bind(tenantId)
 			.all<{
 				source_prefix: string; event_count: number; total_gross_cents: number;
 				total_refunds_cents: number; latest_occurred_at: string | null;
@@ -305,7 +308,7 @@ const MEMBERORG_CATALOG: Array<{ clubId: string; name: string; publicUrl: string
  * $0 is production truth: a MemberOrg with no paid memberships still
  * appears with its verified counts.
  */
-async function getMemberOrgs(db: D1Database): Promise<ExecutiveMoneyMemberOrg[]> {
+async function getMemberOrgs(db: D1Database, tenantId: string = "nwana"): Promise<ExecutiveMoneyMemberOrg[]> {
 	const out: ExecutiveMoneyMemberOrg[] = [];
 	for (const org of MEMBERORG_CATALOG) {
 		const entry: ExecutiveMoneyMemberOrg = {
@@ -323,9 +326,9 @@ async function getMemberOrgs(db: D1Database): Promise<ExecutiveMoneyMemberOrg[]>
 							MAX(occurred_at) AS latest_at
 					 FROM money_events
 					 WHERE event_type IN ('license_purchased', 'license_renewed')
-					   AND source_ref LIKE ?`,
+					   AND source_ref LIKE ? AND tenant_id = ?`,
 				)
-				.bind(`memberorg:${org.clubId}/%`)
+				.bind(`memberorg:${org.clubId}/%`, tenantId)
 				.first<{
 					membership_count: number; paid_count: number;
 					gross_cents: number; latest_at: string | null;
@@ -391,17 +394,18 @@ async function getMemberOrgs(db: D1Database): Promise<ExecutiveMoneyMemberOrg[]>
 
 export async function getExecutiveMoneyView(
 	db: D1Database,
+	tenantId: string = "nwana",
 ): Promise<ExecutiveMoneyView> {
 	const [fundView, sponsorshipView, donationOutcome, donationsCat, registrationsCat, licensesCat, sources, memberorgs] =
 		await Promise.all([
 			getFundView(db),
 			getSponsorshipAssetsView(db),
-			getDonationOutcome(db),
-			getRevenueCategory(db, ["donation_received", "fundraiser_donation_received"]),
-			getRevenueCategory(db, ["registration_paid"]),
-			getRevenueCategory(db, ["license_purchased", "license_renewed"]),
-			getSourceBreakdown(db),
-			getMemberOrgs(db),
+			getDonationOutcome(db, tenantId),
+			getRevenueCategory(db, ["donation_received", "fundraiser_donation_received"], tenantId),
+			getRevenueCategory(db, ["registration_paid"], tenantId),
+			getRevenueCategory(db, ["license_purchased", "license_renewed"], tenantId),
+			getSourceBreakdown(db, tenantId),
+			getMemberOrgs(db, tenantId),
 		]);
 
 	const total_verified_revenue = {
