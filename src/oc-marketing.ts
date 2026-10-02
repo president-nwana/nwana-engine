@@ -701,6 +701,10 @@ const NEWS_ACTIONS_HTML = NEWS_STYLE + `
 			<a class="oc-menu-btn" href="/integrations/linkedin/connect" target="_blank" rel="noopener" id="connect-linkedin" hidden>Connect LinkedIn</a>
 			<a class="oc-menu-btn" href="/integrations/threads/connect" target="_blank" rel="noopener" id="connect-threads" hidden>Connect Threads</a>
 		</div>
+		<div class="meta" id="linkedin-manual-row" style="margin-bottom:10px" hidden>
+			<strong>No LinkedIn API approval yet?</strong> Use LinkedIn\u2019s official share dialog — no approval needed:
+			<a href="#" id="linkedin-share-dialog">Open LinkedIn share dialog</a> (paste the article link, add your text, post — two clicks).
+		</div>
 		<div class="mrow"><button type="button" id="news-publish">Publish</button><span class="meta" id="news-pub-msg"></span></div>
 	</section>
 	<section class="panel news-composer">
@@ -757,6 +761,14 @@ const NEWS_SCRIPT = `
 			});
 		}catch(e){box.innerHTML='<div class="unavailable">'+esc(e.message)+'</div>';}
 	}
+	document.addEventListener('click',function(e){
+		var t=e.target.closest('#linkedin-share-dialog');
+		if(!t)return;
+		e.preventDefault();
+		var url=prompt('Paste the news article URL to share on LinkedIn:','https://nwana-engine.nwana-engine.workers.dev/news');
+		if(!url)return;
+		window.open('https://www.linkedin.com/sharing/share-offsite/?url='+encodeURIComponent(url.trim()),'_blank','width=600,height=640');
+	});
 	async function news_checkSocial(){
 		try{
 			var r=await api('/api/operating-center/news/social-status');
@@ -764,8 +776,9 @@ const NEWS_SCRIPT = `
 			var th=document.querySelector('#dest-threads input');
 			var ls=document.querySelector('#linkedin-status');
 			var ts=document.querySelector('#threads-status');
-			if(r.linkedin){ if(li){li.disabled=false;li.checked=true;} if(ls)ls.textContent='(connected)'; var cl=document.querySelector('#connect-linkedin'); if(cl)cl.hidden=true; }
-			else { if(ls)ls.textContent='(not connected)'; var cl2=document.querySelector('#connect-linkedin'); if(cl2)cl2.hidden=false; }
+			var mr=document.querySelector('#linkedin-manual-row');
+			if(r.linkedin){ if(li){li.disabled=false;li.checked=true;} if(ls)ls.textContent='(connected)'; var cl=document.querySelector('#connect-linkedin'); if(cl)cl.hidden=true; if(mr)mr.hidden=true; }
+			else { if(ls)ls.textContent='(not connected)'; var cl2=document.querySelector('#connect-linkedin'); if(cl2)cl2.hidden=false; if(mr)mr.hidden=false; }
 			if(r.threads){ if(th){th.disabled=false;th.checked=true;} if(ts)ts.textContent='(connected)'; var ct=document.querySelector('#connect-threads'); if(ct)ct.hidden=true; }
 			else { if(ts)ts.textContent='(not connected)'; var ct2=document.querySelector('#connect-threads'); if(ct2)ct2.hidden=false; }
 		}catch(e){}
