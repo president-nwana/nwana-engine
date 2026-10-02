@@ -127,6 +127,9 @@ import {
 	listMoneyTransactions,
 	reconcileRunSignupDonations,
 	syncRunSignupDonations,
+	syncRunSignupRegistrations,
+	backfillRunSignupDonations,
+	backfillRunSignupRegistrations,
 } from "./lib/money-ingestion";
 import {
 	ACTION_STATUSES,
@@ -6244,6 +6247,59 @@ export default {
 			);
 			return json(result, result.ok ? 200 : 502);
 		}
+		// Monetary coverage: incremental sync of PAID race registrations for
+		// one race. Explicit, bounded, owner-gated. Body: { race_id,
+		// event_ids?: [...], page_size?: n, max_pages?: n }.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/money/sync-registrations") {
+			let body: { race_id?: unknown; event_ids?: unknown; page_size?: unknown; max_pages?: unknown } = {};
+			try {
+				body = (await request.json()) as typeof body;
+			} catch {
+				body = {};
+			}
+			const eventIds = Array.isArray(body.event_ids)
+				? body.event_ids.filter((v): v is number => Number.isInteger(v))
+				: undefined;
+			const result = await syncRunSignupRegistrations(
+				env.nwana_engine_db,
+				env.RUNSIGNUP_ACCESS_TOKEN,
+				{
+					raceId: Number(body.race_id),
+					eventIds,
+					pageSize: typeof body.page_size === "number" ? body.page_size : undefined,
+					maxPages: typeof body.max_pages === "number" ? body.max_pages : undefined,
+				},
+			);
+			return json(result, result.ok ? 200 : 502);
+		}
+		// Monetary coverage: controlled historical backfill for one race and
+		// one kind. Bounded per call, resumable, idempotent; tracks progress
+		// under {sourceKey}:backfill and NEVER writes the incremental cursor.
+		// Explicit, owner-gated. Body: { kind: "donations"|"registrations",
+		// race_id, event_ids?: [...], page_size?: n, max_pages?: n }.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/money/backfill") {
+			let body: { kind?: unknown; race_id?: unknown; event_ids?: unknown; page_size?: unknown; max_pages?: unknown } = {};
+			try {
+				body = (await request.json()) as typeof body;
+			} catch {
+				body = {};
+			}
+			const kind = body.kind === "registrations" ? "registrations" : "donations";
+			const eventIds = Array.isArray(body.event_ids)
+				? body.event_ids.filter((v): v is number => Number.isInteger(v))
+				: undefined;
+			const pageSize = typeof body.page_size === "number" ? body.page_size : undefined;
+			const maxPages = typeof body.max_pages === "number" ? body.max_pages : undefined;
+			const result =
+				kind === "registrations"
+					? await backfillRunSignupRegistrations(env.nwana_engine_db, env.RUNSIGNUP_ACCESS_TOKEN, {
+							raceId: Number(body.race_id), eventIds, pageSize, maxPages,
+						})
+					: await backfillRunSignupDonations(env.nwana_engine_db, env.RUNSIGNUP_ACCESS_TOKEN, {
+							raceId: Number(body.race_id), pageSize, maxPages,
+						});
+			return json(result, result.ok ? 200 : 502);
+		}
 		// Phase 1 Money Ingestion: diagnostic — inspect the live shape of one
 		// donation record. Returns field names plus allowlisted non-PII
 		// scalars only; the record's `user` object (donor PII) is never
@@ -6257,6 +6313,7 @@ export default {
 				await inspectDonationRecordShape(env.RUNSIGNUP_ACCESS_TOKEN, donationId),
 			);
 		}
+
 
 		// Phase 2 Executable Revenue Inventory (Revenue Engine v1): canonical
 		// inventory of every revenue-producing object. Money metrics derive

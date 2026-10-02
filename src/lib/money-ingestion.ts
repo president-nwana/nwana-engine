@@ -55,6 +55,9 @@ import {
 	type MoneyEventType,
 	MONEY_SYNC_SOURCE_KEY,
 	normalizeRunSignupDonation,
+	normalizeRunSignupRegistration,
+	RACE_EVENT_IDS,
+	type NormalizedMoneyRecord,
 	type NormalizedRunSignupDonation,
 	RUNSIGNUP_DONATION_RACE_ID,
 	RUNSIGNUP_SOURCE_SYSTEM,
@@ -280,22 +283,34 @@ async function fetchDonationPages(
 function normalizeRecords(
 	pages: FetchPage[],
 	raceId: number,
-): { normalized: NormalizedRunSignupDonation[]; skippedNoIdentity: number; fetched: number } {
-	const normalized: NormalizedRunSignupDonation[] = [];
+	normalizer: (record: Record<string, unknown>, raceId: number) => NormalizedMoneyRecord | null,
+	filter?: (n: NormalizedMoneyRecord) => boolean,
+): { normalized: NormalizedMoneyRecord[]; skippedNoIdentity: number; skippedFiltered: number; fetched: number } {
+	const normalized: NormalizedMoneyRecord[] = [];
 	let skippedNoIdentity = 0;
+	let skippedFiltered = 0;
 	let fetched = 0;
 	for (const p of pages) {
 		for (const r of p.records) {
 			fetched++;
-			const n = normalizeRunSignupDonation(r, raceId);
+			const n = normalizer(r, raceId);
 			if (!n) {
 				skippedNoIdentity++;
+				continue;
+			}
+			if (filter && !filter(n)) {
+				skippedFiltered++;
 				continue;
 			}
 			normalized.push(n);
 		}
 	}
-	return { normalized, skippedNoIdentity, fetched };
+	return { normalized, skippedNoIdentity, skippedFiltered, fetched };
+}
+
+/** Only paid registrations are monetary (amount_paid > 0). */
+function isPaidRegistration(n: NormalizedMoneyRecord): boolean {
+	return (n.amounts.amountPaidCents ?? 0) > 0;
 }
 
 interface IngestOutcome {
@@ -304,17 +319,18 @@ interface IngestOutcome {
 	eventsIngested: number;
 	lifecycleEvents: number;
 	identityUpgrades: Array<{ from: string; to: string }>;
-	maxDonationId: number;
+	maxRecordId: number;
 }
 
 /**
- * Shared ingestion core: normalized donations -> canonical D1 writes, in one
- * atomic batch. Used by both incremental sync and explicit reconciliation.
+ * Shared ingestion core: normalized monetary records -> canonical D1 writes,
+ * in one atomic batch. Used by incremental syncs, explicit reconciliation,
+ * and historical backfills across all source kinds (donations, registrations).
  * Returns the statements (without the checkpoint) plus the outcome stats.
  */
 async function buildIngestBatch(
 	db: D1Database,
-	normalized: NormalizedRunSignupDonation[],
+	normalized: NormalizedMoneyRecord[],
 	opts?: { fundId?: string | null },
 ): Promise<{
 	statements: D1PreparedStatement[];
@@ -330,7 +346,7 @@ async function buildIngestBatch(
 		eventsIngested: 0,
 		lifecycleEvents: 0,
 		identityUpgrades: [],
-		maxDonationId: 0,
+		maxRecordId: 0,
 	};
 	// True if at least one NEW transaction was attributed to a fund.
 	let fundCredited = false;
@@ -389,7 +405,7 @@ async function buildIngestBatch(
 	const insertEvent = (
 		eventKey: string,
 		eventType: MoneyEventType,
-		n: NormalizedRunSignupDonation,
+		n: NormalizedMoneyRecord,
 		amountOverrides?: { refundCents: number | null },
 	) => {
 		if (!isKnownEventType(eventType)) return; // defense in depth for the CHECK
@@ -433,9 +449,8 @@ async function buildIngestBatch(
 	};
 
 	for (const n of normalized) {
-		const numericId = Number(n.donationId);
-		if (Number.isFinite(numericId) && numericId > outcome.maxDonationId) {
-			outcome.maxDonationId = numericId;
+		if (n.numericId > outcome.maxRecordId) {
+			outcome.maxRecordId = n.numericId;
 		}
 		let prev = existing.get(n.transactionKey);
 
@@ -510,13 +525,17 @@ async function buildIngestBatch(
 						fundId,
 					),
 			);
-			insertEvent(n.eventKey, "donation_received", n);
-			if (n.fundraiserEventKey) insertEvent(n.fundraiserEventKey, "fundraiser_donation_received", n);
+			insertEvent(n.eventKey, n.eventType, n);
+			if (n.secondaryEventKey && n.secondaryEventType) {
+				insertEvent(n.secondaryEventKey, n.secondaryEventType, n);
+			}
 			// Phase 4: post-donation automated action. A newly ingested
 			// donation on the Phase 4 funnel object automatically records
 			// the next revenue action in the canonical Revenue Inventory.
 			// Append-only: one action record per donation; the object's
 			// next_revenue_action points at the latest donation.
+			// Donations only — registrations and other kinds never trigger it.
+			if (n.eventType === "donation_received") {
 			statements.push(
 				db
 					.prepare(
@@ -533,9 +552,10 @@ async function buildIngestBatch(
 						PHASE4_FUNNEL_OBJECT_KEY,
 						PHASE4_POST_DONATION_ACTION,
 						"pending",
-						`Donation ${n.donationId} ingested: gross ${n.amounts.grossCents}¢ ${n.amounts.grossStatus}, fee ${n.amounts.feeCents}¢ ${n.amounts.feeStatus}, amount_paid ${n.amounts.amountPaidCents}¢ ${n.amounts.amountPaidStatus}, net ${n.amounts.netStatus}. Attribution: ${ATTRIBUTION_UNKNOWN}.`,
+						`Donation ${n.recordId} ingested: gross ${n.amounts.grossCents}¢ ${n.amounts.grossStatus}, fee ${n.amounts.feeCents}¢ ${n.amounts.feeStatus}, amount_paid ${n.amounts.amountPaidCents}¢ ${n.amounts.amountPaidStatus}, net ${n.amounts.netStatus}. Attribution: ${ATTRIBUTION_UNKNOWN}.`,
 					),
 			);
+			}
 			continue;
 		}
 
@@ -550,7 +570,7 @@ async function buildIngestBatch(
 			const key = lifecycleEventKey(
 				n.sourceSystem,
 				lifecycle.eventType,
-				n.donationRef,
+				n.recordRef,
 				n.snapshotHash,
 			);
 			insertEvent(key, lifecycle.eventType, n, { refundCents: lifecycle.refundCents });
@@ -657,19 +677,25 @@ export async function syncRunSignupDonations(
 	}
 
 	// --- Incremental source read: strictly newer than the stored cursor. ----
+	// A completed historical backfill seeds the cursor (handoff, not merge):
+	// the backfill never writes the incremental cursor itself.
 	const prevState = await getMoneySyncState(db, sourceKey);
 	const prevCursor =
 		typeof prevState?.["cursor"] === "string" && prevState["cursor"] !== ""
 			? String(prevState["cursor"])
 			: null;
-	const incremental = prevCursor !== null;
+	let effectiveCursor = prevCursor;
+	if (!effectiveCursor) {
+		effectiveCursor = await seedCursorFromBackfill(db, sourceKey);
+	}
+	const incremental = effectiveCursor !== null;
 
 	const fetched = await fetchDonationPages(
 		runSignupToken,
 		raceId,
 		pageSize,
 		maxPages,
-		prevCursor,
+		effectiveCursor,
 	);
 	if (!fetched.ok) {
 		return fail(fetched.error, fetched.failureInterpretation);
@@ -679,6 +705,7 @@ export async function syncRunSignupDonations(
 	const { normalized, skippedNoIdentity, fetched: fetchedCount } = normalizeRecords(
 		fetched.pages,
 		raceId,
+		normalizeRunSignupDonation,
 	);
 
 	// --- Ingest (shared core) ------------------------------------------------
@@ -692,7 +719,7 @@ export async function syncRunSignupDonations(
 	// An incremental sync that finds nothing new keeps the previous cursor —
 	// it is never nulled by an empty read.
 	const nextCursor =
-		outcome.maxDonationId > 0 ? String(outcome.maxDonationId) : prevCursor;
+		outcome.maxRecordId > 0 ? String(outcome.maxRecordId) : prevCursor;
 	const resultJson = JSON.stringify({
 		incremental,
 		prevCursor,
@@ -830,6 +857,7 @@ export async function reconcileRunSignupDonations(
 	const { normalized, skippedNoIdentity } = normalizeRecords(
 		[{ records }],
 		raceId,
+		normalizeRunSignupDonation,
 	);
 	void skippedNoIdentity;
 
@@ -1001,4 +1029,392 @@ export async function getMoneySyncState(
 		.bind(sourceKey)
 		.first<Record<string, unknown>>();
 	return row ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-source monetary coverage: paid race registrations (RunSignup).
+//
+// Source: GET /rest/race/{race_id}/participants (documented; requires
+// event_id). Incremental cursor: after_registration_id (documented).
+// Only PAID registrations (amount_paid > 0) are monetary and ingested.
+// No fund attribution: the owner decision covers race 212466 donations only.
+// ---------------------------------------------------------------------------
+
+const REGISTRATIONS_PAGE_SIZE = 100;
+const REGISTRATIONS_MAX_PAGES = 25;
+
+export function registrationsSourceKey(raceId: number): string {
+	return `runsignup:registrations:race:${raceId}`;
+}
+
+export function donationsSourceKey(raceId: number): string {
+	return `runsignup:donations:race:${raceId}`;
+}
+
+function registrationsUrl(
+	raceId: number,
+	eventIds: number[],
+	page: number,
+	pageSize: number,
+	afterRegistrationId?: string | null,
+): string {
+	let url =
+		`https://api.runsignup.com/rest/race/${raceId}/participants` +
+		`?format=json&results_per_page=${pageSize}&page=${page}&sort=registration_id%20ASC` +
+		`&include_memberships=T&event_id=${encodeURIComponent(eventIds.join(","))}`;
+	if (afterRegistrationId) url += `&after_registration_id=${encodeURIComponent(afterRegistrationId)}`;
+	return url;
+}
+
+/** Flatten the participants response (top-level array of per-event wrappers). */
+function extractParticipantRecords(data: unknown): Record<string, unknown>[] {
+	const out: Record<string, unknown>[] = [];
+	const arr = Array.isArray(data) ? data : [data];
+	for (const el of arr) {
+		if (!el || typeof el !== "object" || Array.isArray(el)) continue;
+		const d = el as Record<string, unknown>;
+		const direct = d["participants"];
+		if (Array.isArray(direct)) out.push(...(direct as Record<string, unknown>[]));
+		const ev = d["event"];
+		if (ev && typeof ev === "object" && !Array.isArray(ev)) {
+			const nested = (ev as Record<string, unknown>)["participants"];
+			if (Array.isArray(nested)) out.push(...(nested as Record<string, unknown>[]));
+		}
+	}
+	return out;
+}
+
+async function fetchRegistrationPages(
+	runSignupToken: string,
+	raceId: number,
+	eventIds: number[],
+	pageSize: number,
+	maxPages: number,
+	afterRegistrationId: string | null,
+): Promise<{ ok: true; pages: FetchPage[] } | { ok: false; error: string; failureInterpretation: string }> {
+	const pages: FetchPage[] = [];
+	for (let page = 1; page <= maxPages; page++) {
+		const result = await runSignupGetJson<unknown>(
+			registrationsUrl(raceId, eventIds, page, pageSize, afterRegistrationId),
+			runSignupToken,
+		);
+		if (!result.ok) {
+			const interpretation = classifyRunSignupFailure(
+				result.api_error_code,
+				result.api_error_msg,
+				result.http_status,
+			);
+			return {
+				ok: false,
+				error:
+					`RunSignup participants read failed (race ${raceId} page ${page}): ` +
+					`http=${result.http_status ?? "?"} api_error=${result.api_error_code ?? "-"} ` +
+					`${result.api_error_msg ?? ""}`.trim(),
+				failureInterpretation: interpretation,
+			};
+		}
+		const records = extractParticipantRecords(result.data);
+		pages.push({ records });
+		if (records.length < pageSize) break; // last page
+	}
+	return { ok: true, pages };
+}
+
+/** Seed an incremental cursor from a completed backfill (handoff, not merge). */
+async function seedCursorFromBackfill(
+	db: D1Database,
+	sourceKey: string,
+): Promise<string | null> {
+	const bf = await getMoneySyncState(db, `${sourceKey}:backfill`);
+	if (!bf) return null;
+	try {
+		const parsed = JSON.parse(String(bf["last_sync_result"] ?? "{}")) as Record<string, unknown>;
+		if (parsed["status"] === "complete" && parsed["max_id"] !== undefined) {
+			return String(parsed["max_id"]);
+		}
+	} catch {
+		// malformed backfill state: do not seed
+	}
+	return null;
+}
+
+/**
+ * Incremental registration sync: strictly newer than the stored cursor via
+ * the documented after_registration_id filter. Checkpoint advances in the
+ * same atomic batch as the ingested events. Explicit owner trigger only.
+ */
+export async function syncRunSignupRegistrations(
+	db: D1Database,
+	runSignupToken: string,
+	opts: { raceId: number; eventIds?: number[]; pageSize?: number; maxPages?: number },
+): Promise<MoneySyncResult> {
+	const raceId = opts.raceId;
+	const eventIds = opts.eventIds ?? RACE_EVENT_IDS[raceId] ?? [];
+	const pageSize = opts.pageSize ?? REGISTRATIONS_PAGE_SIZE;
+	const maxPages = opts.maxPages ?? REGISTRATIONS_MAX_PAGES;
+	const sourceKey = registrationsSourceKey(raceId);
+	const nowIso = new Date().toISOString();
+
+	const fail = async (error: string, failureInterpretation?: string): Promise<MoneySyncResult> => {
+		await db.batch([
+			db
+				.prepare(
+					`INSERT INTO money_sync_state (source_key, last_sync_at, last_error)
+					 VALUES (?, ?, ?)
+					 ON CONFLICT(source_key) DO UPDATE SET
+						last_sync_at = excluded.last_sync_at,
+						last_error = excluded.last_error`,
+				)
+				.bind(sourceKey, nowIso, error),
+		]);
+		return {
+			ok: false, sourceKey, incremental: false, fetched: 0,
+			skippedNoIdentity: 0, transactionsNew: 0, eventsIngested: 0,
+			eventsDuplicate: 0, lifecycleEvents: 0, identityUpgrades: [],
+			cursor: null, lastSyncAt: nowIso, error, failureInterpretation,
+		};
+	};
+
+	if (!runSignupToken) return fail("RunSignup access token is not configured", "TOKEN_INVALID");
+	if (!Number.isInteger(raceId) || raceId <= 0) return fail(`invalid raceId: ${raceId}`, "INVALID_INPUT");
+	if (eventIds.length === 0) return fail(`no event IDs known for race ${raceId}`, "INVALID_INPUT");
+
+	const prevState = await getMoneySyncState(db, sourceKey);
+	const prevCursor =
+		typeof prevState?.["cursor"] === "string" && prevState["cursor"] !== ""
+			? String(prevState["cursor"])
+			: null;
+	let effectiveCursor = prevCursor;
+	let seeded = false;
+	if (!effectiveCursor) {
+		const seededCursor = await seedCursorFromBackfill(db, sourceKey);
+		if (seededCursor) {
+			effectiveCursor = seededCursor;
+			seeded = true;
+		}
+	}
+	const incremental = effectiveCursor !== null;
+
+	const fetched = await fetchRegistrationPages(
+		runSignupToken, raceId, eventIds, pageSize, maxPages, effectiveCursor,
+	);
+	if (!fetched.ok) return fail(fetched.error, fetched.failureInterpretation);
+
+	const { normalized, skippedNoIdentity, skippedFiltered, fetched: fetchedCount } =
+		normalizeRecords(fetched.pages, raceId, normalizeRunSignupRegistration, isPaidRegistration);
+
+	const { statements, eventInsertIndexes, outcome } = await buildIngestBatch(db, normalized, {});
+
+	const nextCursor =
+		outcome.maxRecordId > 0 ? String(outcome.maxRecordId) : effectiveCursor;
+	const resultJson = JSON.stringify({
+		incremental, seededFromBackfill: seeded, prevCursor,
+		fetched: fetchedCount, skippedNoIdentity, skippedFree: skippedFiltered,
+		transactionsNew: outcome.transactionsNew,
+		eventsAttempted: outcome.eventsAttempted,
+		lifecycleEvents: outcome.lifecycleEvents,
+	});
+	statements.push(
+		db
+			.prepare(
+				`INSERT INTO money_sync_state (source_key, cursor, last_sync_at, last_sync_result, last_error)
+				 VALUES (?, ?, ?, ?, NULL)
+				 ON CONFLICT(source_key) DO UPDATE SET
+					cursor = excluded.cursor,
+					last_sync_at = excluded.last_sync_at,
+					last_sync_result = excluded.last_sync_result,
+					last_error = NULL`,
+			)
+			.bind(sourceKey, nextCursor, nowIso, resultJson),
+	);
+
+	const eventsIngested = await executeBatch(db, statements, eventInsertIndexes);
+	return {
+		ok: true, sourceKey, incremental, fetched: fetchedCount,
+		skippedNoIdentity, transactionsNew: outcome.transactionsNew,
+		eventsIngested, eventsDuplicate: outcome.eventsAttempted - eventsIngested,
+		lifecycleEvents: outcome.lifecycleEvents, identityUpgrades: outcome.identityUpgrades,
+		cursor: nextCursor, lastSyncAt: nowIso,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Historical backfill: controlled, resumable, separate from incremental
+// cursors. Pages full history (bounded), ingests idempotently, tracks
+// progress under {sourceKey}:backfill. Never writes the incremental cursor;
+// the incremental sync seeds from a COMPLETED backfill only.
+// ---------------------------------------------------------------------------
+
+export interface MoneyBackfillResult {
+	ok: boolean;
+	sourceKey: string;
+	backfillKey: string;
+	kind: "donations" | "registrations";
+	raceId: number;
+	pagesDone: number;
+	fetched: number;
+	transactionsNew: number;
+	eventsIngested: number;
+	eventsDuplicate: number;
+	/** Source-side totals observed during this backfill (for verification). */
+	sourceCount: number;
+	sourceGrossCents: number;
+	maxId: number;
+	complete: boolean;
+	lastSyncAt: string;
+	error?: string;
+	failureInterpretation?: string;
+}
+
+const BACKFILL_PAGE_SIZE = 100;
+const BACKFILL_MAX_PAGES = 25;
+
+async function runBackfill(
+	db: D1Database,
+	runSignupToken: string,
+	kind: "donations" | "registrations",
+	raceId: number,
+	eventIds: number[],
+	opts?: { pageSize?: number; maxPages?: number },
+): Promise<MoneyBackfillResult> {
+	const pageSize = opts?.pageSize ?? BACKFILL_PAGE_SIZE;
+	const maxPages = opts?.maxPages ?? BACKFILL_MAX_PAGES;
+	const sourceKey = kind === "donations" ? donationsSourceKey(raceId) : registrationsSourceKey(raceId);
+	const backfillKey = `${sourceKey}:backfill`;
+	const nowIso = new Date().toISOString();
+
+	const fail = (error: string, failureInterpretation?: string): MoneyBackfillResult => ({
+		ok: false, sourceKey, backfillKey, kind, raceId,
+		pagesDone: 0, fetched: 0, transactionsNew: 0, eventsIngested: 0,
+		eventsDuplicate: 0, sourceCount: 0, sourceGrossCents: 0, maxId: 0,
+		complete: false, lastSyncAt: nowIso, error, failureInterpretation,
+	});
+
+	if (!runSignupToken) return fail("RunSignup access token is not configured", "TOKEN_INVALID");
+	if (!Number.isInteger(raceId) || raceId <= 0) return fail(`invalid raceId: ${raceId}`, "INVALID_INPUT");
+	if (kind === "registrations" && eventIds.length === 0) {
+		return fail(`no event IDs known for race ${raceId}`, "INVALID_INPUT");
+	}
+
+	// Resume from previous backfill progress, if any.
+	const prevBf = await getMoneySyncState(db, backfillKey);
+	let resumeCursor: string | null = null;
+	let pagesDone = 0;
+	let sourceCount = 0;
+	let sourceGrossCents = 0;
+	let maxId = 0;
+	if (prevBf) {
+		try {
+			const parsed = JSON.parse(String(prevBf["last_sync_result"] ?? "{}")) as Record<string, unknown>;
+			if (parsed["status"] === "complete") {
+				return {
+					ok: true, sourceKey, backfillKey, kind, raceId,
+					pagesDone: Number(parsed["pages_done"] ?? 0),
+					fetched: Number(parsed["source_count"] ?? 0),
+					transactionsNew: 0, eventsIngested: 0, eventsDuplicate: 0,
+					sourceCount: Number(parsed["source_count"] ?? 0),
+					sourceGrossCents: Number(parsed["source_gross_cents"] ?? 0),
+					maxId: Number(parsed["max_id"] ?? 0),
+					complete: true, lastSyncAt: nowIso,
+				};
+			}
+			resumeCursor = typeof prevBf["cursor"] === "string" ? prevBf["cursor"] : null;
+			pagesDone = Number(parsed["pages_done"] ?? 0);
+			sourceCount = Number(parsed["source_count"] ?? 0);
+			sourceGrossCents = Number(parsed["source_gross_cents"] ?? 0);
+			maxId = Number(parsed["max_id"] ?? 0);
+		} catch {
+			// malformed: start over
+		}
+	}
+
+	const normalizer = kind === "donations" ? normalizeRunSignupDonation : normalizeRunSignupRegistration;
+	const filter = kind === "donations" ? undefined : isPaidRegistration;
+	let fetched: { ok: true; pages: FetchPage[] } | { ok: false; error: string; failureInterpretation: string };
+	if (kind === "donations") {
+		fetched = await fetchDonationPages(runSignupToken, raceId, pageSize, maxPages, resumeCursor);
+	} else {
+		fetched = await fetchRegistrationPages(runSignupToken, raceId, eventIds, pageSize, maxPages, resumeCursor);
+	}
+	if (!fetched.ok) return fail(fetched.error, fetched.failureInterpretation);
+
+	const { normalized, fetched: fetchedCount } = normalizeRecords(fetched.pages, raceId, normalizer, filter);
+
+	// Source-side totals for verification (single read, no redundant re-read).
+	let windowCount = 0;
+	let windowGross = 0;
+	for (const n of normalized) {
+		windowCount++;
+		windowGross += n.amounts.grossCents ?? 0;
+		if (n.numericId > maxId) maxId = n.numericId;
+	}
+	sourceCount += windowCount;
+	sourceGrossCents += windowGross;
+	pagesDone += fetched.pages.length;
+
+	// Fund attribution only for the owner-decided race (donations).
+	const fundId = kind === "donations" ? (RACE_TO_FUND_ID.get(raceId) ?? null) : null;
+	const { statements, eventInsertIndexes, outcome } = await buildIngestBatch(db, normalized, { fundId });
+
+	// A window is complete when the source returned fewer than a full page.
+	const lastPage = fetched.pages[fetched.pages.length - 1];
+	const complete = !lastPage || lastPage.records.length < pageSize;
+	const backfillCursor = String(maxId);
+
+	const resultJson = JSON.stringify({
+		status: complete ? "complete" : "in_progress",
+		kind, race_id: raceId,
+		pages_done: pagesDone,
+		source_count: sourceCount,
+		source_gross_cents: sourceGrossCents,
+		max_id: maxId,
+		completed_at: complete ? nowIso : null,
+	});
+	statements.push(
+		db
+			.prepare(
+				`INSERT INTO money_sync_state (source_key, cursor, last_sync_at, last_sync_result, last_error)
+				 VALUES (?, ?, ?, ?, NULL)
+				 ON CONFLICT(source_key) DO UPDATE SET
+					cursor = excluded.cursor,
+					last_sync_at = excluded.last_sync_at,
+					last_sync_result = excluded.last_sync_result,
+					last_error = NULL`,
+			)
+			.bind(backfillKey, backfillCursor, nowIso, resultJson),
+	);
+
+	const eventsIngested = await executeBatch(db, statements, eventInsertIndexes);
+
+	if (fundId) await recalculateFundRaised(db, fundId);
+
+	return {
+		ok: true, sourceKey, backfillKey, kind, raceId,
+		pagesDone, fetched: fetchedCount,
+		transactionsNew: outcome.transactionsNew,
+		eventsIngested,
+		eventsDuplicate: outcome.eventsAttempted - eventsIngested,
+		sourceCount, sourceGrossCents, maxId,
+		complete, lastSyncAt: nowIso,
+	};
+}
+
+/** Controlled historical backfill for race donations (all races). */
+export async function backfillRunSignupDonations(
+	db: D1Database,
+	runSignupToken: string,
+	opts: { raceId: number; pageSize?: number; maxPages?: number },
+): Promise<MoneyBackfillResult> {
+	return runBackfill(db, runSignupToken, "donations", opts.raceId, [], opts);
+}
+
+/** Controlled historical backfill for paid race registrations. */
+export async function backfillRunSignupRegistrations(
+	db: D1Database,
+	runSignupToken: string,
+	opts: { raceId: number; eventIds?: number[]; pageSize?: number; maxPages?: number },
+): Promise<MoneyBackfillResult> {
+	const raceId = opts.raceId;
+	const eventIds = opts.eventIds ?? RACE_EVENT_IDS[raceId] ?? [];
+	return runBackfill(db, runSignupToken, "registrations", raceId, eventIds, opts);
 }

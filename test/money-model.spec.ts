@@ -11,6 +11,7 @@ import {
 	lifecycleEventKey,
 	normalizeAmount,
 	normalizeRunSignupDonation,
+	normalizeRunSignupRegistration,
 	receiptEventKey,
 	snapshotHash,
 	stableHash,
@@ -221,5 +222,58 @@ describe("deriveLifecycleEvent", () => {
 
 	it("returns null when refund fields are absent (UNKNOWN)", () => {
 		expect(deriveLifecycleEvent({ refund_cents: 0 }, base({ donation_amount: 120 }))).toBeNull();
+	});
+});
+
+describe("normalizeRunSignupRegistration", () => {
+	it("normalizes a paid registration record", () => {
+		const n = normalizeRunSignupRegistration({
+			registration_id: 2645624,
+			event_id: 12890,
+			rsu_transaction_id: 263659,
+			transaction_id: "ay_852631042119552C_0",
+			race_fee: "$55.00",
+			processing_fee: "$2.75",
+			amount_paid: "$57.75",
+			registration_date: "9/7/2021 15:15",
+			status: "active",
+		}, 210016);
+		expect(n).not.toBeNull();
+		expect(n!.registrationId).toBe("2645624");
+		expect(n!.identitySource).toBe("rsu_transaction_id");
+		expect(n!.sourceTransactionId).toBe("rsu_transaction:263659:registration:2645624");
+		expect(n!.transactionKey).toBe("runsignup:rsu_transaction:263659:registration:2645624");
+		expect(n!.eventType).toBe("registration_paid");
+		expect(n!.eventKey).toBe("runsignup:evt:registration_paid:registration:2645624");
+		expect(n!.recordRef).toBe("registration:2645624");
+		expect(n!.amounts.grossCents).toBe(5500);
+		expect(n!.amounts.feeCents).toBe(275);
+		expect(n!.amounts.amountPaidCents).toBe(5775);
+		expect(n!.amounts.netCents).toBeNull();
+		expect(n!.amounts.netStatus).toBe(AMOUNT_UNKNOWN);
+		expect(n!.secondaryEventKey).toBeNull();
+		expect(n!.sourceRef).toBe("race:210016/registration:2645624");
+		expect(n!.numericId).toBe(2645624);
+	});
+
+	it("falls back to registration_id when no transaction identifier exists", () => {
+		const n = normalizeRunSignupRegistration({
+			registration_id: 99,
+			race_fee: "$10.00",
+			amount_paid: "$10.00",
+		});
+		expect(n!.identitySource).toBe("registration_id_fallback");
+		expect(n!.sourceTransactionId).toBe("registration:99");
+	});
+
+	it("returns null without a registration_id", () => {
+		expect(normalizeRunSignupRegistration({ race_fee: "$10.00" })).toBeNull();
+	});
+
+	it("event keys are stable for the same registration", () => {
+		const a = normalizeRunSignupRegistration({ registration_id: 7, amount_paid: "$5.00" });
+		const b = normalizeRunSignupRegistration({ registration_id: 7, amount_paid: "$5.00" });
+		expect(a!.eventKey).toBe(b!.eventKey);
+		expect(a!.snapshotHash).toBe(b!.snapshotHash);
 	});
 });

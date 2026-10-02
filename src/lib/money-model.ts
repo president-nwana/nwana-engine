@@ -173,6 +173,31 @@ export const RUNSIGNUP_SOURCE_SYSTEM = "runsignup";
 export const RUNSIGNUP_DONATION_RACE_ID = 212466;
 export const MONEY_SYNC_SOURCE_KEY = `runsignup:donations:race:${RUNSIGNUP_DONATION_RACE_ID}`;
 
+/**
+ * All 11 NWANA RunSignup race objects (verified live via /rest/races,
+ * 2026-09-30) with their event IDs (verified live via /rest/race/{id},
+ * 2026-10-01). Event IDs are required by Get Race Participants.
+ * Race 209477's detail read hit a transient 522 during discovery; its
+ * events are resolved at sync time when needed.
+ */
+export const NWANA_RACE_IDS = [
+	210018, 210016, 209980, 210020, 210000, 209477, 209464, 213546, 208087, 212466, 214054,
+] as const;
+
+export const RACE_EVENT_IDS: Record<number, number[]> = {
+	210018: [1177719],
+	210016: [1177703, 1177704, 1177705, 1177706, 1177707, 1177708],
+	209980: [1177447, 1178418, 1177448, 1178419, 1178420, 1177449, 1178421, 1177450, 1178422, 1177451, 1178423, 1178615, 1177452, 1178424],
+	210020: [1177724, 1177725, 1177726, 1177727, 1177728, 1177729],
+	210000: [1178564, 1177634, 1178565, 1178566, 1177635, 1178567, 1177636, 1178568, 1177637, 1178569, 1178570, 1178571, 1178572, 1177639],
+	209477: [1173953, 1173954, 1173955, 1173956, 1173957, 1173958, 1173959],
+	209464: [1173844],
+	213546: [1201344],
+	208087: [1163289],
+	212466: [1195161],
+	214054: [1204689],
+};
+
 export type DonationIdentitySource =
 	| "rsu_transaction_id"
 	| "transaction_id"
@@ -207,6 +232,18 @@ export interface NormalizedRunSignupDonation {
 	/** Normalized snapshot used for lifecycle change detection. */
 	snapshot: Record<string, unknown>;
 	snapshotHash: string;
+	// --- Generalized monetary record fields (multi-source coverage) --------
+	/** Stable record identifier across kinds (donation_id / registration_id). */
+	recordId: string;
+	/** Numeric record id for cursor tracking; 0 when non-numeric. */
+	numericId: number;
+	/** Record-kind based event identity (donation:{id} / registration:{id}). */
+	recordRef: string;
+	/** Receipt event type for this record kind. */
+	eventType: MoneyEventType;
+	/** Secondary receipt event (fundraiser_donation_received) or null. */
+	secondaryEventKey: string | null;
+	secondaryEventType: MoneyEventType | null;
 }
 
 function pickFirst(record: Record<string, unknown>, ...keys: string[]): unknown {
@@ -346,8 +383,168 @@ export function normalizeRunSignupDonation(
 		sourceRef: `race:${raceId}/donation:${donationId}`,
 		snapshot,
 		snapshotHash: snapshotHash(snapshot),
+		// Generalized record fields.
+		recordId: donationId,
+		numericId: /^\d+$/.test(donationId) ? Number(donationId) : 0,
+		recordRef: donationRef,
+		eventType: "donation_received",
+		secondaryEventKey:
+			fundraiserId === null
+				? null
+				: receiptEventKey(RUNSIGNUP_SOURCE_SYSTEM, "fundraiser_donation_received", donationRef),
+		secondaryEventType: fundraiserId === null ? null : "fundraiser_donation_received",
 	};
 }
+
+/**
+ * Normalize one RunSignup participant (registration) record into canonical form.
+ * Returns null when the record carries no stable registration identifier.
+ *
+ * Verified production field names (race 210016, live 2026-10-01):
+ * registration_id, event_id, rsu_transaction_id, transaction_id,
+ * race_fee, offline_payment_amount, processing_fee,
+ * processing_fee_paid_by_user, processing_fee_paid_by_race, partner_fee,
+ * affiliate_profit, extra_fees, amount_paid, usatf_discount_amount_in_cents,
+ * registration_date, status, last_modified, imported.
+ * Amounts arrive as "$55.00" strings (handled by toCents). The record's
+ * `user` object (PII) is never read.
+ *
+ * Only PAID registrations are monetary: records with amount_paid = 0 carry
+ * no money movement and are skipped (counted, not ingested).
+ */
+export type RegistrationIdentitySource =
+	| "rsu_transaction_id"
+	| "transaction_id"
+	| "registration_id_fallback";
+
+export interface NormalizedRunSignupRegistration {
+	sourceSystem: typeof RUNSIGNUP_SOURCE_SYSTEM;
+	registrationId: string;
+	eventId: string | null;
+	sourceTransactionId: string;
+	identitySource: RegistrationIdentitySource;
+	transactionKey: string;
+	registrationRef: string;
+	eventKey: string;
+	occurredAt: string | null;
+	currency: string;
+	amounts: MoneyAmounts;
+	status: string | null;
+	sourceRef: string;
+	snapshot: Record<string, unknown>;
+	snapshotHash: string;
+	// Generalized record fields.
+	recordId: string;
+	numericId: number;
+	recordRef: string;
+	eventType: MoneyEventType;
+	secondaryEventKey: null;
+	secondaryEventType: null;
+}
+
+export function normalizeRunSignupRegistration(
+	record: Record<string, unknown>,
+	raceId: number = 0,
+): NormalizedRunSignupRegistration | null {
+	const regIdRaw = pickFirst(record, "registration_id", "registrationId");
+	if (regIdRaw === null || regIdRaw === undefined) return null;
+	const registrationId = String(regIdRaw);
+	const registrationRef = `registration:${registrationId}`;
+
+	const rsuTxnRaw = pickFirst(record, "rsu_transaction_id", "rsuTransactionId");
+	const txnRaw = pickFirst(record, "transaction_id", "transactionId");
+	// Transaction identity is ITEM-specific: a single RunSignup checkout
+	// (rsu_transaction_id) can contain multiple items (e.g. a donation and
+	// a registration, or several registrations). Qualifying by the
+	// registration ID keeps every monetary item's canonical transaction
+	// distinct and the key deterministic. (2026-10-01: unqualified keys
+	// caused two registrations to overwrite donation transactions.)
+	let sourceTransactionId: string;
+	let identitySource: RegistrationIdentitySource;
+	if (rsuTxnRaw !== null && rsuTxnRaw !== undefined && String(rsuTxnRaw) !== "") {
+		sourceTransactionId = `rsu_transaction:${String(rsuTxnRaw)}:registration:${registrationId}`;
+		identitySource = "rsu_transaction_id";
+	} else if (txnRaw !== null && txnRaw !== undefined && String(txnRaw) !== "") {
+		sourceTransactionId = `transaction:${String(txnRaw)}:registration:${registrationId}`;
+		identitySource = "transaction_id";
+	} else {
+		sourceTransactionId = registrationRef;
+		identitySource = "registration_id_fallback";
+	}
+
+	const occurredAt = normalizeOccurredAt(
+		pickFirst(record, "registration_date", "registrationDate"),
+	);
+	// race_fee is the price of the registration (gross); amount_paid is the
+	// total actually charged. A paid registration has amount_paid > 0.
+	const gross = normalizeAmount(pickFirst(record, "race_fee", "raceFee"));
+	const fee = normalizeAmount(pickFirst(record, "processing_fee", "processingFee"));
+	const amountPaid = normalizeAmount(pickFirst(record, "amount_paid", "amountPaid"));
+	const net = { cents: null as number | null, status: AMOUNT_UNKNOWN };
+	const refund = normalizeAmount(
+		pickFirst(record, "refund_amount", "refundAmount", "refunded_amount", "refundedAmount"),
+	);
+	const currency = "USD";
+	const eventIdRaw = pickFirst(record, "event_id", "eventId");
+	const statusRaw = pickFirst(record, "status");
+
+	const snapshot: Record<string, unknown> = {
+		registration_id: registrationId,
+		identity_source: identitySource,
+		occurred_at: occurredAt,
+		currency,
+		gross_cents: gross.cents,
+		gross_status: gross.status,
+		fee_cents: fee.cents,
+		fee_status: fee.status,
+		amount_paid_cents: amountPaid.cents,
+		amount_paid_status: amountPaid.status,
+		refund_cents: refund.cents,
+		refund_status: refund.status,
+		status: statusRaw === null ? null : String(statusRaw),
+		event_id: eventIdRaw === null ? null : String(eventIdRaw),
+	};
+
+	return {
+		sourceSystem: RUNSIGNUP_SOURCE_SYSTEM,
+		registrationId,
+		eventId: eventIdRaw === null ? null : String(eventIdRaw),
+		sourceTransactionId,
+		identitySource,
+		transactionKey: transactionKey(RUNSIGNUP_SOURCE_SYSTEM, sourceTransactionId),
+		registrationRef,
+		eventKey: receiptEventKey(RUNSIGNUP_SOURCE_SYSTEM, "registration_paid", registrationRef),
+		occurredAt,
+		currency,
+		amounts: {
+			grossCents: gross.cents,
+			grossStatus: gross.status,
+			feeCents: fee.cents,
+			feeStatus: fee.status,
+			amountPaidCents: amountPaid.cents,
+			amountPaidStatus: amountPaid.status,
+			netCents: net.cents,
+			netStatus: net.status,
+			refundCents: refund.cents,
+			refundStatus: refund.status,
+		},
+		status: statusRaw === null ? null : String(statusRaw),
+		sourceRef: `race:${raceId}/registration:${registrationId}`,
+		snapshot,
+		snapshotHash: snapshotHash(snapshot),
+		recordId: registrationId,
+		numericId: /^\d+$/.test(registrationId) ? Number(registrationId) : 0,
+		recordRef: registrationRef,
+		eventType: "registration_paid",
+		secondaryEventKey: null,
+		secondaryEventType: null,
+	};
+}
+
+/** A normalized monetary record of any kind the canonical store ingests. */
+export type NormalizedMoneyRecord =
+	| NormalizedRunSignupDonation
+	| NormalizedRunSignupRegistration;
 
 /**
  * Derive the lifecycle event for a changed monetary snapshot, or null when
@@ -357,7 +554,7 @@ export function normalizeRunSignupDonation(
  */
 export function deriveLifecycleEvent(
 	oldSnapshot: Record<string, unknown>,
-	next: NormalizedRunSignupDonation,
+	next: NormalizedMoneyRecord,
 ): { eventType: MoneyEventType; lifecycleState: MoneyLifecycleState; refundCents: number | null } | null {
 	const oldRefund = typeof oldSnapshot["refund_cents"] === "number" ? oldSnapshot["refund_cents"] : 0;
 	const newRefund = next.amounts.refundCents ?? 0;

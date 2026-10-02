@@ -33,6 +33,9 @@ vi.mock("../src/runsignup-client", async (importOriginal) => {
 // Import after the mock is registered.
 const {
 	syncRunSignupDonations,
+	syncRunSignupRegistrations,
+	backfillRunSignupDonations,
+	backfillRunSignupRegistrations,
 	reconcileRunSignupDonations,
 	inspectDonationRecordShape,
 	getMoneySyncState,
@@ -791,5 +794,139 @@ describe("Phase 4 fund attribution (owner decision 2026-09-30)", () => {
 		expect(result.transactionsNew).toBe(2);
 		expect(result.fundRaised).toBe(20);
 		expect(funds.get("fund-50k-bridge-sprint")?.["raised_amount"]).toBe(20);
+	});
+});
+
+describe("syncRunSignupRegistrations", () => {
+	const participantPage = (participants: unknown[]) => ({
+		ok: true as const,
+		data: [{ event: { event_id: 1, participants } }],
+		http_status: 200,
+	});
+
+	it("ingests paid registrations and skips free ones", async () => {
+		const { db, events, transactions, sync } = makeMoneyDb();
+		mocks.responses.push(
+			participantPage([
+				{ registration_id: 501, race_fee: "$55.00", processing_fee: "$2.75", amount_paid: "$57.75", registration_date: "2026-09-20 10:00:00" },
+				{ registration_id: 502, race_fee: "$0.00", amount_paid: "$0.00" },
+			]),
+		);
+
+		const r = await syncRunSignupRegistrations(db, "token", { raceId: 210016, eventIds: [1] });
+		expect(r.ok).toBe(true);
+		expect(r.sourceKey).toBe("runsignup:registrations:race:210016");
+		expect(r.fetched).toBe(2);
+		expect(r.transactionsNew).toBe(1); // free registration skipped
+		expect(r.eventsIngested).toBe(1);
+		expect(r.cursor).toBe("501");
+
+		expect(events.has("runsignup:evt:registration_paid:registration:501")).toBe(true);
+		const e = events.get("runsignup:evt:registration_paid:registration:501")!;
+		expect(e["event_type"]).toBe("registration_paid");
+		expect(e["gross_cents"]).toBe(5500);
+		expect(e["amount_paid_cents"]).toBe(5775);
+		const t = transactions.get("runsignup:registration:501")!;
+		expect(t["lifecycle_state"]).toBe("ACTIVE");
+
+		const checkpoint = sync.get("runsignup:registrations:race:210016")!;
+		expect(checkpoint["cursor"]).toBe("501");
+	});
+
+	it("second sync is incremental via after_registration_id and idempotent", async () => {
+		const { db } = makeMoneyDb();
+		mocks.responses.push(
+			participantPage([
+				{ registration_id: 501, race_fee: "$55.00", amount_paid: "$57.75" },
+			]),
+		);
+		const first = await syncRunSignupRegistrations(db, "token", { raceId: 210016, eventIds: [1] });
+		expect(first.eventsIngested).toBe(1);
+		expect(first.incremental).toBe(false);
+
+		mocks.responses.push(participantPage([]));
+		const second = await syncRunSignupRegistrations(db, "token", { raceId: 210016, eventIds: [1] });
+		expect(second.ok).toBe(true);
+		expect(second.incremental).toBe(true);
+		expect(mocks.urls[1]).toContain("after_registration_id=501");
+		expect(second.eventsIngested).toBe(0);
+		expect(second.eventsDuplicate).toBe(0);
+	});
+
+	it("requires event IDs", async () => {
+		const { db } = makeMoneyDb();
+		const r = await syncRunSignupRegistrations(db, "token", { raceId: 209477, eventIds: [] });
+		expect(r.ok).toBe(false);
+		expect(r.error).toContain("no event IDs");
+	});
+});
+
+describe("historical backfill", () => {
+	it("backfill tracks progress separately and never writes the incremental cursor", async () => {
+		const { db, events, sync } = makeMoneyDb();
+		mocks.responses.push(
+			donationPage([
+				{ donation_id: 201, donation_amount: 10, donation_date: "2026-08-01 10:00:00" },
+			]),
+		);
+
+		const r = await backfillRunSignupDonations(db, "token", { raceId: 210018 });
+		expect(r.ok).toBe(true);
+		expect(r.kind).toBe("donations");
+		expect(r.complete).toBe(true);
+		expect(r.sourceCount).toBe(1);
+		expect(r.sourceGrossCents).toBe(1000);
+		expect(r.transactionsNew).toBe(1);
+		expect(events.has("runsignup:evt:donation_received:donation:201")).toBe(true);
+
+		// Backfill state is separate...
+		const bf = sync.get("runsignup:donations:race:210018:backfill")!;
+		expect(bf).toBeDefined();
+		expect(JSON.parse(String(bf["last_sync_result"]))["status"]).toBe("complete");
+		// ...and the incremental cursor was NOT written by the backfill.
+		expect(sync.get("runsignup:donations:race:210018")).toBeUndefined();
+	});
+
+	it("incremental sync seeds its cursor from a completed backfill", async () => {
+		const { db, sync } = makeMoneyDb();
+		mocks.responses.push(
+			donationPage([
+				{ donation_id: 201, donation_amount: 10 },
+			]),
+		);
+		await backfillRunSignupDonations(db, "token", { raceId: 210018 });
+
+		// New donation arrives after the backfill.
+		mocks.responses.push(
+			donationPage([
+				{ donation_id: 202, donation_amount: 20 },
+			]),
+		);
+		const r = await syncRunSignupDonations(db, "token", { raceId: 210018 });
+		expect(r.ok).toBe(true);
+		expect(r.incremental).toBe(true); // seeded from backfill
+		expect(mocks.urls[1]).toContain("after_donation_id=201");
+		expect(r.transactionsNew).toBe(1);
+		const checkpoint = sync.get("runsignup:donations:race:210018")!;
+		expect(checkpoint["cursor"]).toBe("202");
+	});
+
+	it("backfill is idempotent: a completed backfill does no work on repeat", async () => {
+		const { db } = makeMoneyDb();
+		mocks.responses.push(
+			donationPage([
+				{ donation_id: 201, donation_amount: 10 },
+			]),
+		);
+		const first = await backfillRunSignupDonations(db, "token", { raceId: 210018 });
+		expect(first.complete).toBe(true);
+
+		const second = await backfillRunSignupDonations(db, "token", { raceId: 210018 });
+		expect(second.ok).toBe(true);
+		expect(second.complete).toBe(true);
+		expect(second.transactionsNew).toBe(0);
+		expect(second.eventsIngested).toBe(0);
+		// No source call on repeat.
+		expect(mocks.urls.length).toBe(1);
 	});
 });
