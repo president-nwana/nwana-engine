@@ -74,10 +74,11 @@ const submit = document.getElementById('submit');
 
 function routeFor(session) {
 	const role = session.user.role;
-	const tid = session.user.tenant_id;
 	if (role === 'platform_admin') return '/admin';
 	if (role === 'demo_user') return '/portal';
-	if (tid === 'nwana') return '/operating-center';
+	// Tenant owners/admins get the full workspace, whatever the tenant.
+	// (2026-10-02: removed nwana hardcode — any tenant works the same way.)
+	if (role === 'tenant_owner' || role === 'tenant_admin') return '/operating-center';
 	return '/portal';
 }
 
