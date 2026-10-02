@@ -7121,6 +7121,32 @@ export default {
 				body.image_slug ?? "",
 			);
 		}
+		// Photo approval: list pending images.
+		if (url.pathname === "/api/operating-center/news/photo-queue" && request.method === "GET") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const rows = await env.nwana_engine_db
+				.prepare(`SELECT slug, approved, created_at FROM social_images WHERE approved = 0 ORDER BY created_at DESC LIMIT 50`)
+				.all<{ slug: string; approved: number; created_at: string }>();
+			return json({ ok: true, photos: (rows.results ?? []).map((r) => ({
+				slug: r.slug,
+				url: `https://nwana-engine.nwana-engine.workers.dev/api/public/social-image/${r.slug}`,
+				created_at: r.created_at,
+			})) });
+		}
+		// Photo approval: approve or reject.
+		if (url.pathname === "/api/operating-center/news/photo-approve" && request.method === "POST") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const body = (await request.json().catch(() => ({}))) as { slug?: string; approve?: boolean };
+			const slug = (body.slug ?? "").trim();
+			if (!slug) return json({ ok: false, error: "slug is required" }, 400);
+			await env.nwana_engine_db
+				.prepare(`UPDATE social_images SET approved = ? WHERE slug = ?`)
+				.bind(body.approve ? 1 : -1, slug)
+				.run();
+			return json({ ok: true, slug, approved: !!body.approve });
+		}
 		// Delete a social post (emergency removal).
 		if (url.pathname === "/api/operating-center/news/delete-post" && request.method === "POST") {
 			const operatorGate = await requirePlatformOperator(request, env);

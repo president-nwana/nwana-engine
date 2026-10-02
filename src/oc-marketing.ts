@@ -680,6 +680,11 @@ const NEWS_ACTIONS_HTML = NEWS_STYLE + `
 		<h2>Drafts waiting for review</h2>
 		<div id="news-queue"><div class="meta">Loading…</div></div>
 	</section>
+	<section class="panel">
+		<h2>Photo approval</h2>
+		<div class="meta"><strong>No photo goes live without your approval.</strong> Every image the Machine generates waits here. Approve it — or reject it — before it can be posted anywhere.</div>
+		<div id="photo-queue"><div class="meta">Loading…</div></div>
+	</section>
 	<section class="panel news-composer">
 		<h2>Write news manually</h2>
 		<div class="meta">Write once, send everywhere. Tick the destinations and press Publish.</div>
@@ -765,8 +770,31 @@ const NEWS_SCRIPT = `
 			else { if(ts)ts.textContent='(not connected)'; var ct2=document.querySelector('#connect-threads'); if(ct2)ct2.hidden=false; }
 		}catch(e){}
 	}
+	async function news_loadPhotos(){
+		var box=document.querySelector('#photo-queue'); if(!box)return;
+		try{
+			var r=await api('/api/operating-center/news/photo-queue');
+			var photos=r.photos||[];
+			if(!photos.length){box.innerHTML='<div class="meta">No photos waiting for approval.</div>';return;}
+			box.innerHTML=photos.map(function(p){
+				return '<div class="item" style="border:1px solid #dce4df;border-radius:9px;padding:12px;margin:8px 0"><img src="'+esc(p.url)+'" style="max-width:100%;border-radius:8px"><div class="meta">'+esc(p.slug)+'</div><div class="mrow"><button type="button" data-photo-approve="'+esc(p.slug)+'">Approve</button><button type="button" class="secondary" data-photo-reject="'+esc(p.slug)+'">Reject</button></div></div>';
+			}).join('');
+			box.querySelectorAll('[data-photo-approve]').forEach(function(b){
+				b.addEventListener('click',async function(){
+					try{await api('/api/operating-center/news/photo-approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({slug:b.getAttribute('data-photo-approve'),approve:true})});await news_loadPhotos();}
+					catch(e){alert(e.message);}
+				});
+			});
+			box.querySelectorAll('[data-photo-reject]').forEach(function(b){
+				b.addEventListener('click',async function(){
+					try{await api('/api/operating-center/news/photo-approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({slug:b.getAttribute('data-photo-reject'),approve:false})});await news_loadPhotos();}
+					catch(e){alert(e.message);}
+				});
+			});
+		}catch(e){box.innerHTML='<div class="unavailable">'+esc(e.message)+'</div>';}
+	}
 	function news_boot(){
-		news_loadSummary(); news_loadQueue(); news_loadSettings(); news_checkSocial();
+		news_loadSummary(); news_loadQueue(); news_loadSettings(); news_checkSocial(); news_loadPhotos();
 		var recent=document.querySelector('#news-recent');
 		if(recent)recent.innerHTML='<div class="meta">Latest site news appears on nwaofna.org/news.</div>';
 		var check=document.querySelector('#news-check');

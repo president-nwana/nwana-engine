@@ -360,6 +360,17 @@ export async function publishNewsToFacebook(
 			continue;
 		}
 		try {
+			// HARD RULE (2026-10-02): no photo goes live without the president's approval.
+			if (imageUrl) {
+				const slug = imageUrl.split("/").pop() ?? "";
+				const imgCheck = await db
+					.prepare(`SELECT approved FROM social_images WHERE slug = ? LIMIT 1`)
+					.bind(decodeURIComponent(slug))
+					.first<{ approved: number }>();
+				if (!imgCheck || imgCheck.approved !== 1) {
+					throw new Error(`Image "${slug}" is not approved by the president. Photos never publish without explicit approval.`);
+				}
+			}
 			const pageToken = await getFacebookPageToken(metaToken, target.pageId);
 			// Photo post when we have an image; text-only feed post otherwise.
 			const endpoint = imageUrl
@@ -443,10 +454,14 @@ export async function publishNewsToInstagram(
 	if (!metaToken) return jsonResponse({ ok: false, error: "NWANA_META_TOKEN is not configured" }, 503);
 
 	const imgRow = await db
-		.prepare(`SELECT slug FROM social_images WHERE slug = ? LIMIT 1`)
+		.prepare(`SELECT slug, approved FROM social_images WHERE slug = ? LIMIT 1`)
 		.bind(slug)
-		.first<{ slug: string }>();
+		.first<{ slug: string; approved: number }>();
 	if (!imgRow) return jsonResponse({ ok: false, error: `Social image not found: ${slug}` }, 404);
+	// HARD RULE (2026-10-02): no photo goes live without the president's approval.
+	if (imgRow.approved !== 1) {
+		return jsonResponse({ ok: false, error: `Image "${slug}" is not approved by the president. Photos never publish without explicit approval.` }, 403);
+	}
 	const imageUrl = `https://nwana-engine.nwana-engine.workers.dev/api/public/social-image/${slug}`;
 
 	const targets = [
