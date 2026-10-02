@@ -195,6 +195,7 @@ import {
 	renderOrganizationsSectionHtml,
 	renderTenantSectionHtml,
 } from "./oc-organizations";
+import { renderMyProjectsSectionHtml } from "./oc-my-projects";
 import {
 	getAthleteProfile,
 	listAthleteProfiles,
@@ -6014,7 +6015,24 @@ export default {
 					"cache-control": "no-store",
 				},
 			});
-		if (request.method === "GET" && url.pathname === "/operating-center") return htmlPage(renderOverviewSectionHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center") {
+			// Platform admin can preview a tenant workspace via ?tenant= (2026-10-02).
+			const previewTenant = url.searchParams.get("tenant");
+			if (previewTenant && (identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" && identity.role === "platform_admin"))) {
+				// Validate tenant exists
+			const t = await env.nwana_engine_db
+				.prepare(`SELECT tenant_id FROM tenants WHERE tenant_id = ?`)
+				.bind(previewTenant)
+				.first();
+				if (t) {
+					// Render with tenant override via a preview token in URL
+				// For now, redirect to a preview URL that the frontend handles
+				return Response.redirect(url.origin + "/operating-center?preview_tenant=" + encodeURIComponent(previewTenant), 302);
+				}
+			}
+			return htmlPage(renderOverviewSectionHtml);
+		}
 		// Operating Center app icon + favicon (static, public, cacheable).
 		if (request.method === "GET" && url.pathname === "/operating-center/icon-1024.png")
 			return pngFromBase64(OC_ICON_1024_BASE64);
@@ -6079,6 +6097,12 @@ export default {
 		}
 		if (request.method === "GET" && url.pathname === "/admin/organizations") {
 			return htmlPage(renderOrganizationsSectionHtml);
+		}
+		// My Projects — founder's personal dashboard (2026-10-02)
+		if (request.method === "GET" && url.pathname === "/my-projects") {
+			return new Response(renderMyProjectsSectionHtml(), {
+				headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+			});
 		}
 		if (request.method === "GET" && url.pathname === "/admin/ventures") {
 			return htmlPage(renderVenturesSectionHtml);
@@ -6690,6 +6714,25 @@ export default {
 		if (request.method === "GET" && url.pathname === "/api/operating-center/money/overview") {
 			const tid = identity?.kind === "session" ? identity.tenant_id : "nwana";
 			return json(await getExecutiveMoneyView(env.nwana_engine_db, tid));
+		}
+		// My Projects: tenants accessible to the current user (2026-10-02).
+		if (url.pathname === "/api/my/tenants" && request.method === "GET") {
+			const isPlatform = identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" && identity.role === "platform_admin");
+			let rows;
+			if (isPlatform) {
+				rows = await env.nwana_engine_db
+					.prepare(`SELECT tenant_id, display_name, status FROM tenants ORDER BY display_name`)
+					.all();
+			} else if (identity?.kind === "session") {
+				rows = await env.nwana_engine_db
+					.prepare(`SELECT tenant_id, display_name, status FROM tenants WHERE tenant_id = ?`)
+					.bind(identity.tenant_id)
+					.all();
+			} else {
+				return json({ ok: false, error: "Unauthorized" }, 401);
+			}
+			return json({ ok: true, tenants: rows.results ?? [] });
 		}
 		// Venture info for the workspace (2026-10-02): the idea behind this tenant.
 		if (url.pathname === "/api/operating-center/venture" && request.method === "GET") {
