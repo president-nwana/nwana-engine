@@ -149,7 +149,15 @@ import {
 	listTenants,
 } from "./lib/tenants";
 import {
+	bootstrapClosed,
+	bootstrapFirstAdmin,
 	createLoginUser,
+	listAllUsers,
+	mintBootstrapGrant,
+	reactivateLoginUser,
+	revokeLoginUser,
+	setUserPassword,
+	timingSafeEqual,
 	createPreviewToken,
 	createSessionToken,
 	createTenantUser,
@@ -180,7 +188,7 @@ import { renderSportSectionHtml } from "./oc-sport";
 import { renderAcademySectionHtml } from "./oc-academy";
 import { renderBoardSectionHtml } from "./oc-board";
 import { renderOperationsSectionHtml } from "./oc-operations";
-import { renderAdminLandingHtml } from "./oc-admin";
+import { renderAdminLandingHtml, renderUsersSectionHtml } from "./oc-admin";
 import {
 	renderBusinessUnitSectionHtml,
 	renderOrganizationsSectionHtml,
@@ -5826,32 +5834,63 @@ export default {
 			}, 503);
 		}
 
-		// Public page shells: every GET under /operating-center* renders the
-		// key-entry gate client-side; all /api/operating-center/* and
-		// /api/board/* data routes stay owner-key gated. (Rebuild 2026-09-28:
-		// replaces the old per-page exemption list with one prefix check.
-		// Safe: no /api/* path starts with "/operating-center".)
-		const operatingCenterApiRoute =
-			operatingCenterRoute &&
-			!(request.method === "GET" && url.pathname.startsWith("/operating-center"));
+		// Public page shells: every GET page under /operating-center* and
+		// /admin* renders its shell (session-gated client-side); data routes
+		// (/api/operating-center/*, /api/board/*) stay server-gated.
+		// (Rebuild 2026-09-28; /admin shells added 2026-10-02.)
+		const isPageShell =
+			request.method === "GET" &&
+			!url.pathname.startsWith("/api/") &&
+			(url.pathname.startsWith("/operating-center") || url.pathname.startsWith("/admin"));
+		const operatingCenterApiRoute = operatingCenterRoute && !isPageShell;
 
 		// ADR-0047 role-based navigation: every /api/portal/* data route is
 		// tenant-user only. The tenant comes from the token, never the URL.
 		const portalApiRoute = url.pathname.startsWith("/api/portal/");
 
+		// Platform admin API (2026-10-02): /api/admin/* user/tenant
+		// management. Identity must resolve here too (not OC-gated).
+		const adminApiRoute = url.pathname.startsWith("/api/admin/");
+
 		// Resolve the request identity once. Owner key -> platform_admin
 		// (no DB lookup); anything else -> scoped tenant_users lookup.
 		const presentedKey =
-			operatingCenterApiRoute || portalApiRoute ? extractOperatingCenterKey(request) : "";
+			operatingCenterApiRoute || portalApiRoute || adminApiRoute
+				? extractOperatingCenterKey(request)
+				: "";
 		const identity = presentedKey
 			? await resolveIdentity(env.nwana_engine_db, presentedKey, env.OPERATING_CENTER_KEY)
 			: null;
 
-		if (operatingCenterApiRoute && identity?.kind !== "platform_admin") {
-			return json({
-				ok: false,
-				error: "Operating center access requires the owner key",
-			}, 401);
+		// Operating Center API access (2026-10-02): the NWANA Workspace is
+		// the NWANA tenant's operations environment. Access is granted to:
+		//   - the owner key (platform_admin, emergency recovery/bootstrap);
+		//   - a platform_admin session (platform operator);
+		//   - NWANA tenant sessions (tenant_owner, tenant_admin,
+		//     business_unit_user) — the /api/operating-center/* routes are
+		//     inherently NWANA-scoped by their data model.
+		// demo_user and other-tenant sessions are portal-only (403 here).
+		// demo_user sessions are read-only everywhere (403 on non-GET).
+		if (operatingCenterApiRoute) {
+			const ocAllowed =
+				identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" &&
+					(identity.role === "platform_admin" ||
+						(identity.tenant_id === "nwana" &&
+							(identity.role === "tenant_owner" ||
+								identity.role === "tenant_admin" ||
+								identity.role === "business_unit_user"))));
+			if (!ocAllowed) {
+				return json({
+					ok: false,
+					error: "Operating center access requires sign-in",
+				}, 401);
+			}
+			const ocReadOnly =
+				identity?.kind === "session" && identity.role === "demo_user";
+			if (ocReadOnly && request.method !== "GET") {
+				return json({ ok: false, error: "Demo sessions are read-only" }, 403);
+			}
 		}
 		if (portalApiRoute) {
 			if (!identity) {
@@ -5943,6 +5982,99 @@ export default {
 		if (request.method === "GET" && url.pathname === "/admin/organizations") {
 			return htmlPage(renderOrganizationsSectionHtml);
 		}
+		if (request.method === "GET" && url.pathname === "/admin/users") {
+			return htmlPage(renderUsersSectionHtml);
+		}
+
+		// Platform admin user management (2026-10-02): UI-driven, no curl.
+		// All routes require platform_admin (session or owner-key bootstrap).
+		if (url.pathname === "/api/admin/users" && request.method === "GET") {
+			if (identity?.kind !== "platform_admin") {
+				// Session-based platform admin also qualifies.
+				const sess = identity?.kind === "session" && identity.role === "platform_admin" ? identity : null;
+				if (!sess) return json({ ok: false, error: "Platform admin required" }, 403);
+			}
+			const users = await listAllUsers(env.nwana_engine_db);
+			// Never expose password hashes or token hashes.
+			const safe = users.map((u) => ({
+				user_id: u.user_id, tenant_id: u.tenant_id, display_name: u.display_name,
+				email: u.email, role: u.role, unit_ids: u.unit_ids,
+				status: u.status, created_at: u.created_at, note: u.note,
+				has_password: undefined, // not exposed; client infers from email presence
+			}));
+			return json({ ok: true, users: safe });
+		}
+		if (url.pathname === "/api/admin/users" && request.method === "POST") {
+			const isAdmin = identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" && identity.role === "platform_admin");
+			if (!isAdmin) return json({ ok: false, error: "Platform admin required" }, 403);
+			let body: Record<string, unknown> = {};
+			try { body = await request.json() as Record<string, unknown>; } catch { body = {}; }
+			try {
+				const created = await createLoginUser(env.nwana_engine_db, String(body.tenant_id ?? ""), {
+					email: String(body.email ?? ""),
+					password: String(body.password ?? ""),
+					display_name: String(body.display_name ?? ""),
+					role: String(body.role ?? "business_unit_user") as import("./lib/tenant-access").UserRole,
+					unit_ids: Array.isArray(body.unit_ids) ? body.unit_ids.filter((x): x is string => typeof x === "string") : [],
+					note: typeof body.note === "string" ? body.note : null,
+				});
+				return json({ ok: true, user: {
+					user_id: created.user_id, tenant_id: created.tenant_id,
+					display_name: created.display_name, email: created.email,
+					role: created.role, status: created.status,
+				}});
+			} catch (e) {
+				return json({ ok: false, error: e instanceof Error ? e.message : "invalid input" }, 400);
+			}
+		}
+		// Platform admin: revoke / reactivate / set-password for a user.
+		if (url.pathname.startsWith("/api/admin/users/") && request.method === "POST") {
+			const isAdmin = identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" && identity.role === "platform_admin");
+			if (!isAdmin) return json({ ok: false, error: "Platform admin required" }, 403);
+			const rest = url.pathname.slice("/api/admin/users/".length).split("/").filter(Boolean);
+			if (rest.length === 2) {
+				const [userId, action] = rest;
+				let body: Record<string, unknown> = {};
+				try { body = await request.json() as Record<string, unknown>; } catch { body = {}; }
+				try {
+					if (action === "revoke") {
+						await revokeLoginUser(env.nwana_engine_db, userId);
+						return json({ ok: true });
+					}
+					if (action === "reactivate") {
+						await reactivateLoginUser(env.nwana_engine_db, userId);
+						return json({ ok: true });
+					}
+					if (action === "password") {
+						// Password arrives in the POST body, is hashed
+						// server-side, and is never logged or returned.
+						await setUserPassword(env.nwana_engine_db, userId, String(body.password ?? ""));
+						return json({ ok: true });
+					}
+				} catch (e) {
+					return json({ ok: false, error: e instanceof Error ? e.message : "invalid input" }, 400);
+				}
+			}
+			return json({ ok: false, error: "unknown action" }, 404);
+		}
+		// Platform admin: tenant list for the user-management UI
+		// (tenant selector on the create-user form).
+		if (url.pathname === "/api/admin/tenants" && request.method === "GET") {
+			const isAdmin = identity?.kind === "platform_admin" ||
+				(identity?.kind === "session" && identity.role === "platform_admin");
+			if (!isAdmin) return json({ ok: false, error: "Platform admin required" }, 403);
+			const tenants = await listTenants(env.nwana_engine_db);
+			return json({
+				ok: true,
+				tenants: tenants.map((t) => ({
+					tenant_id: t.tenant_id,
+					display_name: t.display_name,
+					status: t.status,
+				})),
+			});
+		}
 		if (
 			request.method === "GET" &&
 			url.pathname.startsWith("/admin/organizations/")
@@ -5958,6 +6090,68 @@ export default {
 				const tenantId = parts[0];
 				const unitId = parts[1];
 				return htmlPage(() => renderBusinessUnitSectionHtml(tenantId, unitId));
+			}
+		}
+
+		// One-time bootstrap (2026-10-02): if no platform_admin login user
+		// exists, /login offers a protected bootstrap path. Availability is
+		// server-side. The owner key is NEVER typed into a browser: an
+		// authorized internal process mints a single-use, short-lived grant
+		// via /api/auth/bootstrap/begin (owner-key gated, internal use).
+		// The grant token is entered in the /login bootstrap form with
+		// email/password/display name. After first admin creation, bootstrap
+		// closes permanently — every attempt re-checks server-side.
+		if (request.method === "GET" && url.pathname === "/api/auth/bootstrap-status") {
+			const closed = await bootstrapClosed(env.nwana_engine_db);
+			return json({ ok: true, available: !closed });
+		}
+		// Internal: mint a single-use bootstrap grant. Owner-key gated.
+		// Called by authorized tooling only — never from normal UX.
+		if (request.method === "POST" && url.pathname === "/api/auth/bootstrap/begin") {
+			const presented = extractOperatingCenterKey(request);
+			if (!presented || !env.OPERATING_CENTER_KEY || !timingSafeEqual(presented, env.OPERATING_CENTER_KEY)) {
+				return json({ ok: false, error: "unauthorized" }, 401);
+			}
+			try {
+				const grant = await mintBootstrapGrant(env.nwana_engine_db);
+				// The plaintext token is returned ONCE. Never log it.
+				return json({ ok: true, grant_token: grant.grant_token, expires_at: grant.expires_at });
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : "grant failed";
+				const status = msg.includes("already exists") ? 403 : 400;
+				return json({ ok: false, error: msg }, status);
+			}
+		}
+		if (request.method === "POST" && url.pathname === "/api/auth/bootstrap") {
+			let body: { email?: string; password?: string; display_name?: string; grant_token?: string };
+			try {
+				body = await request.json();
+			} catch {
+				return json({ ok: false, error: "Invalid request body" }, 400);
+			}
+			try {
+				const created = await bootstrapFirstAdmin(
+					env.nwana_engine_db,
+					String(body.grant_token ?? ""),
+					{
+						email: String(body.email ?? ""),
+						password: String(body.password ?? ""),
+						display_name: String(body.display_name ?? ""),
+					},
+				);
+				// Never return the password. Never log it.
+				return json({
+					ok: true,
+					user: {
+						email: created.email,
+						display_name: created.display_name,
+						role: created.role,
+					},
+				});
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : "bootstrap failed";
+				const status = msg.includes("already exists") ? 403 : 400;
+				return json({ ok: false, error: msg }, status);
 			}
 		}
 

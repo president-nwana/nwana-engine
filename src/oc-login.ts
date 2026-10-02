@@ -47,6 +47,24 @@ button:disabled{opacity:.6;cursor:wait}
 <div class="message" id="message" role="alert"></div>
 </form>
 <div class="hint">Your workspace opens automatically after sign-in based on your role.</div>
+<div id="bootstrap-section" hidden style="margin-top:24px;padding-top:20px;border-top:1px solid var(--line)">
+<h2 style="font-size:18px;margin:0 0 8px">First administrator setup</h2>
+<p class="sub" style="margin:0 0 16px">No administrator exists yet. Create the first platform administrator. Enter the one-time setup code provided by your administrator.</p>
+<form id="bootstrap-form">
+<label for="bs-name">Display name</label>
+<input id="bs-name" type="text" autocomplete="name" required>
+<label for="bs-email">Email</label>
+<input id="bs-email" type="email" autocomplete="username" required>
+<label for="bs-password">Password</label>
+<input id="bs-password" type="password" autocomplete="new-password" required minlength="12">
+<p class="sub" style="font-size:12px;margin:8px 0 0">Minimum 12 characters. The password is hashed server-side and never displayed.</p>
+<label for="bs-grant">One-time setup code</label>
+<input id="bs-grant" type="password" autocomplete="off" required>
+<p class="sub" style="font-size:12px;margin:8px 0 0">Single-use code. It expires 30 minutes after it is issued.</p>
+<button type="submit" id="bs-submit">Create administrator</button>
+<div class="message" id="bs-message" role="alert"></div>
+</form>
+</div>
 </main>
 <script>
 const SESSION_KEY = 'nwana_engine_session';
@@ -62,6 +80,54 @@ function routeFor(session) {
 	if (tid === 'nwana') return '/operating-center';
 	return '/portal';
 }
+
+// One-time bootstrap: show the setup section only if the server says it's available.
+// Authorization uses a single-use setup code (minted internally with the
+// owner key); the owner key itself is never entered in any browser.
+(async function(){
+	try {
+		const r = await fetch('/api/auth/bootstrap-status');
+		const d = await r.json();
+		if (d.ok && d.available) {
+			document.getElementById('bootstrap-section').hidden = false;
+		}
+	} catch(e){}
+})();
+
+document.getElementById('bootstrap-form').addEventListener('submit', async (e) => {
+	e.preventDefault();
+	const bsMsg = document.getElementById('bs-message');
+	const bsSubmit = document.getElementById('bs-submit');
+	bsMsg.textContent = '';
+	bsSubmit.disabled = true;
+	try {
+		const res = await fetch('/api/auth/bootstrap', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				display_name: document.getElementById('bs-name').value,
+				email: document.getElementById('bs-email').value,
+				password: document.getElementById('bs-password').value,
+				grant_token: document.getElementById('bs-grant').value,
+			}),
+		});
+		const data = await res.json();
+		if (!data.ok) {
+			bsMsg.textContent = data.error || 'Setup failed.';
+			bsSubmit.disabled = false;
+			return;
+		}
+		// Clear sensitive fields immediately; never retain them.
+		document.getElementById('bs-grant').value = '';
+		document.getElementById('bs-password').value = '';
+		bsMsg.style.color = 'green';
+		bsMsg.textContent = 'Administrator created. You can now sign in above.';
+		document.getElementById('bootstrap-section').hidden = true;
+	} catch(err) {
+		bsMsg.textContent = 'Network error. Please try again.';
+		bsSubmit.disabled = false;
+	}
+});
 
 form.addEventListener('submit', async (e) => {
 	e.preventDefault();

@@ -3,7 +3,7 @@
  *
  * Replaces the owner-key gate in normal UX. Pages check for a session
  * token (from /login) in sessionStorage. If absent, redirect to /login.
- * The owner key remains only as bootstrap on /admin (not in normal UX).
+ * The owner key never appears in normal UX (no prompt, no storage).
  *
  * Usage in page scripts:
  *   const key = getSessionKey();  // '' if not signed in
@@ -12,19 +12,14 @@
  */
 
 export const SESSION_STORAGE_KEY = "nwana_engine_session";
-export const LEGACY_KEY_STORAGE = "nwana_operating_center_key";
 
 export const SESSION_AUTH_SCRIPT = `
 (function(){
 	window.__sessionAuth = {
 		getKey: function(){
 			try {
-				var s = sessionStorage.getItem('${SESSION_STORAGE_KEY}');
-				if (s) return s;
-			} catch(e){}
-			// Bootstrap fallback: owner key (platform admin recovery only).
-			// Normal users never see this path; they go through /login.
-			try { return localStorage.getItem('${LEGACY_KEY_STORAGE}') || ''; } catch(e){ return ''; }
+				return sessionStorage.getItem('${SESSION_STORAGE_KEY}') || '';
+			} catch(e){ return ''; }
 		},
 		requireSession: function(){
 			var k = this.getKey();

@@ -57,6 +57,7 @@ export interface TenantUserPublic {
 	status: string;
 	created_at: string;
 	note: string | null;
+	email: string | null;
 }
 
 export interface PortalSession {
@@ -74,7 +75,7 @@ export interface PortalSession {
 
 type Db = D1Database;
 
-function timingSafeEqual(a: string, b: string): boolean {
+export function timingSafeEqual(a: string, b: string): boolean {
 	if (a.length !== b.length) return false;
 	let out = 0;
 	for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -246,6 +247,7 @@ function rowToPublic(row: Record<string, unknown>): TenantUserPublic {
 		status: String(row.status ?? "active"),
 		created_at: String(row.created_at ?? ""),
 		note: typeof row.note === "string" ? row.note : null,
+		email: typeof row.email === "string" ? row.email : null,
 	};
 }
 
@@ -647,5 +649,195 @@ export async function createLoginUser(
 		status: "active",
 		created_at: new Date().toISOString(),
 		note: input.note ?? null,
+		email,
 	};
+}
+
+/* ------------------------------------------------------------------ */
+/* One-time bootstrap (2026-10-02).                                     */
+/*                                                                     */
+/* If no platform_admin login user exists, /login offers a protected   */
+/* one-time bootstrap. The owner key is NEVER typed into a browser:    */
+/* an authorized internal process (holding the owner key server-side)  */
+/* mints a single-use, short-lived grant via /api/auth/bootstrap/begin */
+/* (owner-key gated). The grant token travels over an authenticated    */
+/* channel to the person doing setup; they enter it in the /login      */
+/* bootstrap form with email/password/display name. After the first    */
+/* platform_admin is created, bootstrap closes permanently — the       */
+/* server re-checks on every attempt, even direct endpoint calls.      */
+/* ------------------------------------------------------------------ */
+
+/** True if a platform_admin with email/password login exists. */
+export async function bootstrapClosed(db: Db): Promise<boolean> {
+	const row = await db
+		.prepare(
+			`SELECT COUNT(*) as c FROM tenant_users
+			 WHERE role = 'platform_admin' AND password_hash IS NOT NULL AND status = 'active'`,
+		)
+		.first<{ c: number }>();
+	return Number(row?.c ?? 0) > 0;
+}
+
+/** Grant lifetime: 30 minutes. Single use. */
+export const BOOTSTRAP_GRANT_TTL_MS = 30 * 60 * 1000;
+
+async function sha256Hex(text: string): Promise<string> {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+	return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Mint a single-use bootstrap grant. Caller must have verified the owner
+ * key already (the /api/auth/bootstrap/begin route is owner-key gated).
+ * Refuses when bootstrap is closed.
+ */
+export async function mintBootstrapGrant(
+	db: Db,
+): Promise<{ grant_token: string; expires_at: string }> {
+	if (await bootstrapClosed(db)) {
+		throw new Error("bootstrap is closed: a platform administrator already exists");
+	}
+	const tokenBytes = new Uint8Array(32);
+	crypto.getRandomValues(tokenBytes);
+	const grantToken = [...tokenBytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+	const grantId = `bsg_${grantToken.slice(0, 16)}`;
+	const expiresAt = new Date(Date.now() + BOOTSTRAP_GRANT_TTL_MS).toISOString();
+	await db
+		.prepare(
+			`INSERT INTO bootstrap_grants (grant_id, token_hash, expires_at)
+			 VALUES (?, ?, ?)`,
+		)
+		.bind(grantId, await sha256Hex(grantToken), expiresAt)
+		.run();
+	// The plaintext token is returned ONCE to the authorized minter.
+	// Only its hash is stored. Never log it.
+	return { grant_token: grantToken, expires_at: expiresAt };
+}
+
+/**
+ * Consume a bootstrap grant (single-use, expiry-checked). Returns true
+ * when the grant was valid and is now consumed.
+ */
+export async function consumeBootstrapGrant(db: Db, grantToken: string): Promise<boolean> {
+	if (!grantToken || typeof grantToken !== "string") return false;
+	const tokenHash = await sha256Hex(grantToken);
+	const now = new Date().toISOString();
+	const res = await db
+		.prepare(
+			`UPDATE bootstrap_grants
+			 SET used_at = ?
+			 WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?`,
+		)
+		.bind(now, tokenHash, now)
+		.run();
+	return (res.meta?.changes ?? 0) > 0;
+}
+
+/**
+ * Create the first platform_admin via bootstrap. Requires a valid,
+ * unconsumed grant token (single-use). Refuses if bootstrap is closed.
+ * The caller must have validated input; the password is hashed here.
+ */
+export async function bootstrapFirstAdmin(
+	db: Db,
+	grantToken: string,
+	input: { email: string; password: string; display_name: string },
+): Promise<TenantUserPublic> {
+	if (await bootstrapClosed(db)) {
+		throw new Error("bootstrap is closed: a platform administrator already exists");
+	}
+	const consumed = await consumeBootstrapGrant(db, grantToken);
+	if (!consumed) {
+		throw new Error("invalid, expired, or already-used setup code");
+	}
+	// Re-check after consuming: a concurrent bootstrap must not create a
+	// second first-admin. (The loser gets a clear error, not a duplicate.)
+	if (await bootstrapClosed(db)) {
+		throw new Error("bootstrap is closed: a platform administrator already exists");
+	}
+	// The first admin belongs to the nwana tenant (platform operator).
+	// They administer all tenants from /admin.
+	return createLoginUser(db, "nwana", {
+		email: input.email,
+		password: input.password,
+		display_name: input.display_name,
+		role: "platform_admin",
+		unit_ids: [],
+		note: "First platform administrator (bootstrap)",
+	});
+}
+
+/** List all users across tenants (platform admin only). */
+export async function listAllUsers(db: Db): Promise<TenantUserPublic[]> {
+	const rows = await db
+		.prepare("SELECT * FROM tenant_users ORDER BY tenant_id, email")
+		.all<Record<string, unknown>>();
+	return (rows.results ?? []).map(rowToPublic);
+}
+
+/**
+ * Revoke a user (set status='revoked'). Cannot revoke the last active
+ * platform_admin — the platform must always have an administrator.
+ */
+export async function revokeLoginUser(db: Db, userId: string): Promise<void> {
+	const row = await db
+		.prepare("SELECT user_id, role FROM tenant_users WHERE user_id = ?")
+		.bind(userId)
+		.first<{ user_id: string; role: string }>();
+	if (!row) throw new Error("user not found");
+	if (row.role === "platform_admin") {
+		const others = await db
+			.prepare(
+				`SELECT COUNT(*) as c FROM tenant_users
+				 WHERE role = 'platform_admin' AND status = 'active' AND user_id != ?`,
+			)
+			.bind(userId)
+			.first<{ c: number }>();
+		if (Number(others?.c ?? 0) === 0) {
+			throw new Error("cannot revoke the last active platform administrator");
+		}
+	}
+	await db
+		.prepare("UPDATE tenant_users SET status = 'revoked' WHERE user_id = ?")
+		.bind(userId)
+		.run();
+}
+
+/**
+ * Reactivate a revoked user (set status='active').
+ */
+export async function reactivateLoginUser(db: Db, userId: string): Promise<void> {
+	const row = await db
+		.prepare("SELECT user_id FROM tenant_users WHERE user_id = ?")
+		.bind(userId)
+		.first<{ user_id: string }>();
+	if (!row) throw new Error("user not found");
+	await db
+		.prepare("UPDATE tenant_users SET status = 'active' WHERE user_id = ?")
+		.bind(userId)
+		.run();
+}
+
+/**
+ * Set a new password for a user (hash server-side, never store/log plaintext).
+ * Password must be at least 12 characters.
+ */
+export async function setUserPassword(
+	db: Db,
+	userId: string,
+	newPassword: string,
+): Promise<void> {
+	if (typeof newPassword !== "string" || newPassword.length < 12) {
+		throw new Error("password must be at least 12 characters");
+	}
+	const row = await db
+		.prepare("SELECT user_id FROM tenant_users WHERE user_id = ?")
+		.bind(userId)
+		.first<{ user_id: string }>();
+	if (!row) throw new Error("user not found");
+	const stored = await hashPassword(newPassword);
+	await db
+		.prepare("UPDATE tenant_users SET password_hash = ? WHERE user_id = ?")
+		.bind(stored, userId)
+		.run();
 }

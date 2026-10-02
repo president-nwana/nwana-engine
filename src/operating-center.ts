@@ -622,14 +622,9 @@ export function renderOperatingCenterHtml(): string {
 	${nwanaWorkspaceMenu("overview")}
 	<main>
 		<section class="panel" id="gate" hidden>
-			<h2>Owner access</h2>
-			<p class="unavailable">This page is private. Enter the operating center key to continue.</p>
-			<form id="key-form">
-				<label for="owner-key">Operating center key</label>
-				<input id="owner-key" name="owner_key" type="password" autocomplete="current-password" required>
-				<button type="submit">Open operating center</button>
-				<div class="message" id="key-message" aria-live="polite"></div>
-			</form>
+			<h2>Sign-in required</h2>
+			<p class="unavailable">Your session has expired or you are not signed in.</p>
+			<p><a class="oc-menu-btn" href="/login">Sign in</a></p>
 		</section>
 		<div id="app" hidden>
 		<section class="stats" id="stats"><div class="stat"><strong>…</strong><span>Loading verified state</span></div></section>
@@ -732,15 +727,14 @@ export function renderOperatingCenterHtml(): string {
 	</main>
 	<script>
 		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-		const KEY_STORAGE='nwana_operating_center_key';
+		const SESSION_KEY='nwana_engine_session';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
-		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
-		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
-		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
+		function getKey(){try{return sessionStorage.getItem(SESSION_KEY)||''}catch(e){return ''}}
+		function signOut(){try{sessionStorage.removeItem(SESSION_KEY)}catch(e){}window.location.href='/login'}
+		function showGate(message){signOut()}
 		function showApp(){gate.hidden=true;app.hidden=false}
-		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
+		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){signOut();throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
 		function formJson(form){return Object.fromEntries([...new FormData(form)].map(([k,v])=>[k,String(v)]))}
 		let pendingSubmissionsCache=[];
 		async function load(){
@@ -991,8 +985,7 @@ export function renderOperatingCenterHtml(): string {
 			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		function renderLoadError(err){document.querySelector('#stats').innerHTML='<div class="stat"><strong>Unavailable</strong><span>'+esc(err.message)+'</span></div>'}
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();load().catch(renderLoadError)});
-		if(getKey()){showApp();load().catch(renderLoadError)}else{showGate('')}
+		if(!getKey()){window.location.href='/login'}else{showApp();load().catch(renderLoadError)}
 	</script>
 </body></html>`;
 }
@@ -1029,14 +1022,9 @@ export function renderRaceResultsHtml(): string {
 	${nwanaWorkspaceMenu("results")}
 	<main>
 		<section class="panel" id="gate" hidden>
-			<h2>Owner access</h2>
-			<p class="unavailable">This page is private. Enter the operating center key to continue.</p>
-			<form id="key-form">
-				<label for="owner-key">Operating center key</label>
-				<input id="owner-key" name="owner_key" type="password" autocomplete="current-password" required>
-				<button type="submit">Open results</button>
-				<div class="message" id="key-message" aria-live="polite"></div>
-			</form>
+			<h2>Sign-in required</h2>
+			<p class="unavailable">Your session has expired or you are not signed in.</p>
+			<p><a class="oc-menu-btn" href="/login">Sign in</a></p>
 		</section>
 		<div id="app" hidden>
 			<section class="panel">
@@ -1060,16 +1048,15 @@ export function renderRaceResultsHtml(): string {
 	</main>
 	<script>
 		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-		const KEY_STORAGE='nwana_operating_center_key';
+		const SESSION_KEY='nwana_engine_session';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
 		const DISTANCES=['1K','3K','5K','10K','15K','20K'];
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
-		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
-		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
-		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
+		function getKey(){try{return sessionStorage.getItem(SESSION_KEY)||''}catch(e){return ''}}
+		function signOut(){try{sessionStorage.removeItem(SESSION_KEY)}catch(e){}window.location.href='/login'}
+		function showGate(message){signOut()}
 		function showApp(){gate.hidden=true;app.hidden=false}
-		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
+		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){signOut();throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
 		function publicationLabel(s){return s==='PUBLISHED'?'Published':s==='BASELINE'?'Historical baseline':'Not published yet'}
 		function renderSyncStatus(statuses){
 			document.querySelector('#sync-status').innerHTML=statuses.map(s=>
@@ -1165,8 +1152,7 @@ export function renderRaceResultsHtml(): string {
 			try{renderResults(await api('/api/operating-center/race-results'))}
 			catch(err){document.querySelector('#results').innerHTML='<div class="panel"><div class="unavailable">'+esc(err.message)+'</div></div>'}
 		}
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();refresh();loadLifecycle();loadPubDrafts()});
-		if(getKey()){showApp();refresh();loadLifecycle();loadPubDrafts()}else{showGate('')}
+		if(!getKey()){window.location.href='/login'}else{showApp();refresh();loadLifecycle();loadPubDrafts()}
 	</script>
 </body></html>`;
 }

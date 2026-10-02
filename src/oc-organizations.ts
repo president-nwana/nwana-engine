@@ -47,11 +47,13 @@ const ORG_SCRIPT = `
 	var tenantId=app.getAttribute('data-tenant')||'';
 	var unitId=app.getAttribute('data-unit')||'';
 	var booted=false;
-	function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem('nwana_operating_center_key')||''}catch(e){return ''}}
+	function getKey(){try{return sessionStorage.getItem('nwana_engine_session')||''}catch(e){return ''}}
+	function signOut(){try{sessionStorage.removeItem('nwana_engine_session')}catch(e){}window.location.href='/login'}
 	async function api(path){
+		if(!getKey())signOut();
 		var r=await fetch(path,{headers:{authorization:'Bearer '+getKey()}});
 		var d=null;try{d=await r.json()}catch(e){}
-		if(r.status===401)throw new Error('Unauthorized — enter the owner key.');
+		if(r.status===401){signOut();throw new Error('Unauthorized — signed out.')}
 		if(!r.ok)throw new Error((d&&d.error)||('Request failed: '+r.status));
 		return d;
 	}

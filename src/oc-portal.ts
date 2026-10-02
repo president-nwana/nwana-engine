@@ -39,8 +39,9 @@ const PORTAL_SCRIPT = `
 	}catch(e){}
 	function getPreviewKey(){try{return sessionStorage.getItem('${PORTAL_PREVIEW_KEY}')||''}catch(e){return ''}}
 	function isPreview(){return !!getPreviewKey()}
-	function getKey(){var p=getPreviewKey();if(p)return p;try{return localStorage.getItem('nwana_portal_key')||''}catch(e){return ''}}
-	function clearKey(){try{localStorage.removeItem('nwana_portal_key')}catch(e){}}
+	function getSessionKey(){try{return sessionStorage.getItem('nwana_engine_session')||''}catch(e){return ''}}
+	function getKey(){var s=getSessionKey();if(s)return s;var p=getPreviewKey();if(p)return p;try{return localStorage.getItem('nwana_portal_key')||''}catch(e){return ''}}
+	function clearKey(){try{localStorage.removeItem('nwana_portal_key')}catch(e){}try{sessionStorage.removeItem('nwana_engine_session')}catch(e){}}
 	function clearPreview(){try{sessionStorage.removeItem('${PORTAL_PREVIEW_KEY}')}catch(e){}}
 	async function papi(path){
 		var r=await fetch(path,{headers:{authorization:'Bearer '+getKey()}});
@@ -78,7 +79,7 @@ const PORTAL_SCRIPT = `
 			document.querySelector('#portal-sub').textContent='Signed in as '+(sess.display_name||'tenant user');
 			var so=document.querySelector('#portal-signout');
 			so.hidden=false;
-			so.onclick=function(){clearKey();location.href='/portal'};
+			so.onclick=function(){clearKey();location.href='/login'};
 		}
 		var pw=document.querySelector('#portal-powered');
 		if(pw&&sess.white_label)pw.hidden=true;
@@ -154,6 +155,10 @@ function portalShell(opts: {
 		// ADR-0048: a preview token in sessionStorage satisfies the gate,
 		// so a platform-admin preview opens the portal directly.
 		previewStorageKey: PORTAL_PREVIEW_KEY,
+		// Unified login (2026-10-02): a session token from /login also
+		// satisfies the gate (demo/external users). Access-key holders
+		// keep the key-entry form below.
+		sessionKey: 'nwana_engine_session',
 		gate: {
 			storageKey: "nwana_portal_key",
 			heading: "Tenant access",

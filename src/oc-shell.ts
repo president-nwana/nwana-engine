@@ -94,6 +94,17 @@ export interface BareShellOpts {
 	 * localStorage — closing the tab ends the preview.
 	 */
 	previewStorageKey?: string;
+	/**
+	 * Unified login (2026-10-02): sessionStorage key holding the session
+	 * token from /login. When set, the session satisfies the gate.
+	 */
+	sessionKey?: string;
+	/**
+	 * When true, the key-entry form is not rendered at all: without a
+	 * session the page redirects to /login, and a 401 clears the session
+	 * and redirects to /login. Normal UX never prompts for the owner key.
+	 */
+	sessionOnly?: boolean;
 	/** Rendered at the top of #app, after the gate unlocks. */
 	appTopHtml?: string;
 	/** Panels / single body rendered inside #app. */
@@ -126,6 +137,12 @@ export function ocBareShell(opts: BareShellOpts): string {
 <body>
 	${opts.headerHtml}
 	<main>
+		${opts.sessionOnly ? `
+		<section class="panel" id="gate" hidden>
+			<h2>Sign-in required</h2>
+			<p class="unavailable">Your session has expired or you are not signed in.</p>
+			<p><a class="oc-menu-btn" href="/login">Sign in</a></p>
+		</section>` : `
 		<section class="panel" id="gate" hidden>
 			<h2>${escHtml(g.heading)}</h2>
 			<p class="unavailable">${escHtml(g.intro)}</p>
@@ -135,7 +152,7 @@ export function ocBareShell(opts: BareShellOpts): string {
 				<button type="submit">${escHtml(g.buttonLabel)}</button>
 				<div class="message" id="key-message" aria-live="polite"></div>
 			</form>
-		</section>
+		</section>`}
 		<div id="app" hidden>
 			${opts.appTopHtml ? `<div class="oc-quick">${opts.appTopHtml}</div>` : ""}
 			${opts.bodyHtml}
@@ -145,20 +162,26 @@ export function ocBareShell(opts: BareShellOpts): string {
 		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 		const KEY_STORAGE='${g.storageKey}';
 		const PREVIEW_STORAGE='${opts.previewStorageKey ?? ""}';
+		const SESSION_KEY='${opts.sessionKey ?? ""}';
+		const SESSION_ONLY=${opts.sessionOnly ? "true" : "false"};
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
+		function getSessionKey(){if(!SESSION_KEY)return '';try{return sessionStorage.getItem(SESSION_KEY)||''}catch(e){return ''}}
+		function clearSessionKey(){if(!SESSION_KEY)return;try{sessionStorage.removeItem(SESSION_KEY)}catch(e){}}
+		function signedOut(){clearSessionKey();window.location.href='/login'}
 		function getPreviewKey(){if(!PREVIEW_STORAGE)return '';try{return sessionStorage.getItem(PREVIEW_STORAGE)||''}catch(e){return ''}}
-		function getKey(){var p=getPreviewKey();if(p)return p;try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){var s=getSessionKey();if(s)return s;var p=getPreviewKey();if(p)return p;if(SESSION_ONLY)return '';try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
-		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}try{if(PREVIEW_STORAGE)sessionStorage.removeItem(PREVIEW_STORAGE)}catch(e){}}
-		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
+		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}try{if(PREVIEW_STORAGE)sessionStorage.removeItem(PREVIEW_STORAGE)}catch(e){}clearSessionKey()}
+		function showGate(message){if(SESSION_ONLY){signedOut();return}app.hidden=true;gate.hidden=false;if(message){var m=document.querySelector('#key-message');if(m)m.textContent=message}}
 		function showApp(){gate.hidden=true;app.hidden=false}
-		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('${g.rejectedMessage}');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
+		function unauthorized(){if(SESSION_ONLY){signedOut()}else{clearKey();showGate('${g.rejectedMessage}')}}
+		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){unauthorized();throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
 		function downloadReport(screen,filename,msgEl){
 			if(msgEl)msgEl.textContent='Preparing report…';
-			fetch('/api/operating-center/report/'+screen,{headers:{authorization:'Bearer '+getKey()}}).then(r=>{if(r.status===401){clearKey();showGate('${g.rejectedMessage}');throw new Error('Unauthorized')}if(!r.ok)throw new Error('Report request failed');return r.text()}).then(html=>{const blob=new Blob([html],{type:'text/html'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename+'.html';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);if(msgEl)msgEl.textContent='Report downloaded.'}).catch(err=>{if(msgEl)msgEl.textContent=err.message});
+			fetch('/api/operating-center/report/'+screen,{headers:{authorization:'Bearer '+getKey()}}).then(r=>{if(r.status===401){unauthorized();throw new Error('Unauthorized')}if(!r.ok)throw new Error('Report request failed');return r.text()}).then(html=>{const blob=new Blob([html],{type:'text/html'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename+'.html';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);if(msgEl)msgEl.textContent='Report downloaded.'}).catch(err=>{if(msgEl)msgEl.textContent=err.message});
 		}
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('${g.keyName}')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();__activateInitialTab()});
+		${opts.sessionOnly ? "" : `document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('${g.keyName}')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();__activateInitialTab()});`}
 		document.querySelector('#app').addEventListener('click',e=>{const b=e.target.closest('.oc-report-btn');if(!b)return;const panel=b.closest('.oc-tabpanel')||document;const m=panel.querySelector('.oc-report-message');downloadReport(b.dataset.screen,b.dataset.filename,m)});
 		${opts.script}
 		if(getKey()){showApp();__activateInitialTab()}else{showGate('')}
@@ -394,15 +417,19 @@ export function ocSectionShell(opts: {
 	return ocBareShell({
 		title: opts.title,
 		headerHtml,
+		// Unified login (2026-10-02): session-only. No owner-key gate in
+		// normal UX — without a session the page redirects to /login.
+		sessionKey: "nwana_engine_session",
+		sessionOnly: true,
 		gate: {
 			storageKey: "nwana_operating_center_key",
-			heading: "Owner access",
-			intro: "This page is private. Enter the operating center key to continue.",
+			heading: "Sign-in required",
+			intro: "Your session has expired or you are not signed in.",
 			keyLabel: "Operating center key",
 			keyId: "owner-key",
 			keyName: "owner_key",
 			buttonLabel: `Open ${opts.title.toLowerCase()}`,
-			rejectedMessage: "The key was rejected. Enter the owner key again.",
+			rejectedMessage: "Signed out. Please sign in again.",
 		},
 		appTopHtml: opts.appTopHtml,
 		bodyHtml: panels,

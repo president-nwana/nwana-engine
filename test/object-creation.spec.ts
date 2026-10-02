@@ -738,9 +738,11 @@ describe("manual steps and field edits", () => {
 // ---------------------------------------------------------------------------
 
 describe("creation page UI", () => {
-	it("renders the owner-key gate and the creation workflow endpoints", () => {
+	it("renders the session gate (no owner-key gate) and the creation workflow endpoints", () => {
 		const html = renderCreationHtml();
-		expect(html).toContain("nwana_operating_center_key");
+		expect(html).toContain("nwana_engine_session");
+		expect(html).not.toContain("nwana_operating_center_key");
+		expect(html).not.toContain('id="key-form"');
 		expect(html).toContain("/api/operating-center/object-creation/packets");
 		expect(html).toContain("New object packet");
 		expect(html).toContain("Create objects");
@@ -748,7 +750,8 @@ describe("creation page UI", () => {
 
 	it("renders the packet page with the explicit confirmation flow", () => {
 		const html = renderCreationPacketHtml();
-		expect(html).toContain("nwana_operating_center_key");
+		expect(html).toContain("nwana_engine_session");
+		expect(html).not.toContain("nwana_operating_center_key");
 		expect(html).toContain("APPLY_STEP");
 		expect(html).toContain("/api/operating-center/object-creation/apply");
 		expect(html).toContain("/api/operating-center/object-creation/link");

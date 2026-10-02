@@ -8,7 +8,8 @@ describe("funds dedicated page (ADR-0022)", () => {
 		const html = renderFundsHtml();
 		expect(html).toContain("<title>Funds — NWANA Operating Center</title>");
 		expect(html).toContain('id="funds"');
-		expect(html).toContain('id="key-form"');
+		expect(html).not.toContain('id="key-form"');
+		expect(html).toContain('href="/login"');
 		expect(html).toContain('href="/operating-center"');
 		expect(html).toContain("Move to ");
 		expect(html).toContain("/api/operating-center/fund/prospect/advance");
@@ -16,11 +17,13 @@ describe("funds dedicated page (ADR-0022)", () => {
 		expect(html).not.toContain("Открыть");
 	});
 
-	it("carries the same owner-key storage as the main operating center", () => {
+	it("carries the same session storage as the main operating center (no owner-key gate)", () => {
 		const funds = renderFundsHtml();
 		const main = renderOperatingCenterHtml();
-		expect(funds).toContain("nwana_operating_center_key");
-		expect(main).toContain("nwana_operating_center_key");
+		expect(funds).toContain("nwana_engine_session");
+		expect(main).toContain("nwana_engine_session");
+		expect(funds).not.toContain("nwana_operating_center_key");
+		expect(main).not.toContain("nwana_operating_center_key");
 	});
 });
 

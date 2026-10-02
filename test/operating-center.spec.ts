@@ -185,10 +185,13 @@ describe("operating center access protection", () => {
 		expect(isOperatingCenterAuthorized(missing, undefined)).toBe(false);
 	});
 
-	it("serves a key entry gate on the page", () => {
+	it("serves a session gate (no owner-key entry) on the page", () => {
 		const html = renderOperatingCenterHtml();
-		expect(html).toContain("Operating center key");
-		expect(html).toContain("nwana_operating_center_key");
+		expect(html).toContain("nwana_engine_session");
+		expect(html).toContain("/login");
+		expect(html).not.toContain("nwana_operating_center_key");
+		expect(html).not.toContain('id="key-form"');
+		expect(html).not.toContain("Operating center key");
 	});
 });
 

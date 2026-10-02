@@ -35,14 +35,9 @@ export function renderMediaHtml(): string {
 	<main>
 		<div class="nav"><a href="/operating-center">← Back to Operating Center</a></div>
 		<section class="panel" id="gate" hidden>
-			<h2>Owner access</h2>
-			<p class="unavailable">This page is private. Enter the operating center key to continue.</p>
-			<form id="key-form">
-				<label for="owner-key">Operating center key</label>
-				<input id="owner-key" name="owner_key" type="password" autocomplete="current-password" required>
-				<button type="submit">Open media plan</button>
-				<div class="message" id="key-message" aria-live="polite"></div>
-			</form>
+			<h2>Sign-in required</h2>
+			<p class="unavailable">Your session has expired or you are not signed in.</p>
+			<p><a class="oc-menu-btn" href="/login">Sign in</a></p>
 		</section>
 		<div id="app" hidden>
 			<section class="panel">
@@ -79,15 +74,14 @@ export function renderMediaHtml(): string {
 	</main>
 	<script>
 		const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-		const KEY_STORAGE='nwana_operating_center_key';
+		const SESSION_KEY='nwana_engine_session';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
-		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
-		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
-		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
+		function getKey(){try{return sessionStorage.getItem(SESSION_KEY)||''}catch(e){return ''}}
+		function signOut(){try{sessionStorage.removeItem(SESSION_KEY)}catch(e){}window.location.href='/login'}
+		function showGate(message){signOut()}
 		function showApp(){gate.hidden=true;app.hidden=false}
-		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){clearKey();showGate('The key was rejected. Enter the owner key again.');throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
+		async function api(path,options){const r=await fetch(path,Object.assign({},options||{},{headers:Object.assign({},(options&&options.headers)||{},{authorization:'Bearer '+getKey()})}));let d=null;try{d=await r.json()}catch(e){}if(r.status===401){signOut();throw new Error('Unauthorized')}if(!r.ok)throw new Error((d&&d.error)||'Request failed');return d}
 		let selectedPlan=null;
 		const PLAN_LABEL={DRAFT:'Draft',APPROVED:'Approved',IN_PROGRESS:'In progress',DONE:'Done'};
 		const ART_LABEL={DRAFT:'Draft',READY:'Ready for review',APPROVED:'Approved',PUBLISHED:'Published'};
@@ -214,8 +208,7 @@ export function renderMediaHtml(): string {
 				e.target.reset();m.textContent='Added.';await loadPlans();await openPlan(selectedPlan);
 			}catch(err){m.textContent=err.message}
 		});
-		document.querySelector('#key-form').addEventListener('submit',e=>{e.preventDefault();const k=String(new FormData(e.currentTarget).get('owner_key')||'').trim();const m=document.querySelector('#key-message');if(!k){m.textContent='Enter the key.';return}m.textContent='';setKey(k);showApp();loadPlans()});
-		if(getKey()){showApp();loadPlans()}else{showGate('')}
+		if(!getKey()){window.location.href='/login'}else{showApp();loadPlans()}
 	</script>
 </body></html>`;
 }
