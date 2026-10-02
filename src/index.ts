@@ -6117,6 +6117,32 @@ export default {
 					.run();
 				return json({ ok: true, venture_id: vid, deleted: true });
 			}
+			if (vid && (body as Record<string, unknown>).action === "create-tenant") {
+				// Idea becomes a company: create an isolated tenant and link it.
+				const v = await env.nwana_engine_db
+					.prepare(`SELECT venture_id, name, kind, tenant_id FROM ventures WHERE venture_id = ?`)
+					.bind(vid)
+					.first<{ venture_id: string; name: string; kind: string; tenant_id: string | null }>();
+				if (!v) return json({ ok: false, error: "Venture not found" }, 404);
+				if (v.tenant_id) return json({ ok: false, error: "Tenant already linked: " + v.tenant_id }, 400);
+				const slug = v.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || ("v" + Date.now().toString(36));
+				try {
+					await createTenant(env.nwana_engine_db, {
+						tenant_id: slug,
+						legal_name: v.name,
+						display_name: v.name,
+						organization_type: "commercial",
+						sport_domain: "nordic-walking",
+					});
+				} catch (e) {
+					return json({ ok: false, error: e instanceof Error ? e.message : "tenant creation failed" }, 400);
+				}
+				await env.nwana_engine_db
+					.prepare(`UPDATE ventures SET tenant_id = ?, stage = 'active', updated_at = ? WHERE venture_id = ?`)
+					.bind(slug, new Date().toISOString(), vid)
+					.run();
+				return json({ ok: true, venture_id: vid, tenant_id: slug });
+			}
 			if (vid) {
 				// Update existing venture.
 				const allowed = ["name", "kind", "stage", "summary"] as const;

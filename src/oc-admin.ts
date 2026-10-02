@@ -391,6 +391,7 @@ async function load(){
 					return '<option value="' + st + '"' + (v.stage===st?' selected':'') + '>' + st + '</option>';
 				}).join('') + '</select></label>' +
 				'<div class="mrow" style="margin-top:8px"><button type="button" data-vedit="' + esc(v.venture_id) + '">Edit</button>' +
+				(v.tenant_id ? '' : '<button type="button" data-vtenant="' + esc(v.venture_id) + '" title="Create an isolated tenant for this venture">Make it a tenant</button>') +
 				'<button type="button" class="secondary" data-vdel="' + esc(v.venture_id) + '">Delete</button></div></div>';
 		}).join('') + '</div>';
 		// Edit: turn card into a form.
@@ -425,6 +426,20 @@ async function load(){
 						body: JSON.stringify({venture_id: b.getAttribute('data-vdel'), action: 'delete'})});
 					await load();
 				} catch(e){ alert(e.message); }
+			});
+		});
+		// Make it a tenant: idea becomes a company with isolated space.
+		box.querySelectorAll('[data-vtenant]').forEach(function(b){
+			b.addEventListener('click', async function(){
+				var vid = b.getAttribute('data-vtenant');
+				if(!confirm('Create an isolated tenant for this venture? It will get its own empty data space, separate from NWANA.')) return;
+				b.disabled = true;
+				try {
+					var r = await api('/api/admin/ventures', {method:'POST', headers:{'content-type':'application/json'},
+						body: JSON.stringify({venture_id: vid, action: 'create-tenant'})});
+					alert('Tenant created: ' + r.tenant_id);
+					await load();
+				} catch(e){ b.disabled = false; alert(e.message); }
 			});
 		});
 		box.querySelectorAll('[data-vstage]').forEach(function(sel){
