@@ -117,7 +117,7 @@ import {
 import { renderFundsHtml } from "./operating-center-funds";
 import { renderMediaHtml } from "./operating-center-media";
 import { renderNewsReviewHtml } from "./operating-center-news-review";
-import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFacebook } from "./news-review";
+import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFacebook, publishNewsToInstagram } from "./news-review";
 import { getExecutiveMoneyView } from "./operating-center-money";
 import {
 	getMoneySyncState,
@@ -7100,6 +7100,17 @@ export default {
 		if (url.pathname === "/api/operating-center/news/publish-facebook" && request.method === "POST") {
 			const body = (await request.json().catch(() => ({}))) as { article_id?: string };
 			return publishNewsToFacebook(env.nwana_engine_db, env.NWANA_META_TOKEN, body.article_id ?? "");
+		}
+		if (url.pathname === "/api/operating-center/news/publish-instagram" && request.method === "POST") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const body = (await request.json().catch(() => ({}))) as { article_id?: string; image_slug?: string };
+			return publishNewsToInstagram(
+				env.nwana_engine_db,
+				env.NWANA_META_TOKEN,
+				body.article_id ?? "",
+				body.image_slug ?? "",
+			);
 		}
 		if (url.pathname === "/api/operating-center/media/plans" && request.method === "GET") {
 			return listMediaPlans(env.nwana_engine_db);

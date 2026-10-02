@@ -392,3 +392,88 @@ export async function publishNewsToFacebook(
 
 	return jsonResponse({ ok: true, article_id: id, results });
 }
+
+// Instagram publishing (2026-10-02): posts an article's image + caption to
+// the NWANA Instagram business accounts via the Meta Graph API. Requires a
+// public HTTPS image URL (use /api/public/social-image/<slug>).
+export async function publishNewsToInstagram(
+	db: D1Database,
+	metaToken: string,
+	articleId: string,
+	imageSlug: string,
+): Promise<Response> {
+	const id = (articleId ?? "").trim();
+	const slug = (imageSlug ?? "").trim();
+	if (!id) return jsonResponse({ ok: false, error: "article_id is required" }, 400);
+	if (!slug) return jsonResponse({ ok: false, error: "image_slug is required" }, 400);
+
+	const articleRow = await db
+		.prepare(`SELECT article_id, title FROM media_articles WHERE article_id = ?`)
+		.bind(id)
+		.first<{ article_id: string; title: string }>();
+	if (!articleRow) return jsonResponse({ ok: false, error: `News article not found: ${id}` }, 404);
+
+	const packData = NEWS_PACK_DATA[id];
+	if (!packData) return jsonResponse({ ok: false, error: `No verified pack data for article: ${id}` }, 409);
+	const pack = buildPack("news_item", packData, "generic");
+	if (pack.missingFields.length > 0) {
+		return jsonResponse({ ok: false, error: `Pack missing fields: ${pack.missingFields.join(", ")}` }, 409);
+	}
+
+	if (!metaToken) return jsonResponse({ ok: false, error: "NWANA_META_TOKEN is not configured" }, 503);
+
+	const imgRow = await db
+		.prepare(`SELECT slug FROM social_images WHERE slug = ? LIMIT 1`)
+		.bind(slug)
+		.first<{ slug: string }>();
+	if (!imgRow) return jsonResponse({ ok: false, error: `Social image not found: ${slug}` }, 404);
+	const imageUrl = `https://nwana-engine.nwana-engine.workers.dev/api/public/social-image/${slug}`;
+
+	const targets = [
+		{ pageId: "595301193675669", igAccountId: "17841474409019986", name: "nwana.official" },
+		{ pageId: "103190499173992", igAccountId: "17841455094791338", name: "n_w_sport" },
+	] as const;
+
+	const caption = pack.text.length > 2200 ? pack.text.slice(0, 2197) + "…" : pack.text;
+	const results: Record<string, unknown> = {};
+	for (const target of targets) {
+		try {
+			const pageToken = await getFacebookPageToken(metaToken, target.pageId);
+			// Step 1: create the media container.
+			const createParams = new URLSearchParams({
+				image_url: imageUrl,
+				caption,
+				access_token: pageToken,
+			});
+			const createResp = await fetch(`https://graph.facebook.com/v23.0/${target.igAccountId}/media`, {
+				method: "POST",
+				body: createParams,
+			});
+			const createData = (await createResp.json()) as Record<string, unknown>;
+			const creationId = createData.id;
+			if (!createResp.ok || typeof creationId !== "string") {
+				throw new Error(`IG container failed (${createResp.status}): ${JSON.stringify(createData).slice(0, 200)}`);
+			}
+			// Step 2: publish the container.
+			const pubParams = new URLSearchParams({ creation_id: creationId, access_token: pageToken });
+			const pubResp = await fetch(`https://graph.facebook.com/v23.0/${target.igAccountId}/media_publish`, {
+				method: "POST",
+				body: pubParams,
+			});
+			const pubData = (await pubResp.json()) as Record<string, unknown>;
+			if (!pubResp.ok || typeof pubData.id !== "string") {
+				throw new Error(`IG publish failed (${pubResp.status}): ${JSON.stringify(pubData).slice(0, 200)}`);
+			}
+			await audit(db, id, "NEWS_INSTAGRAM_PUBLISHED", {
+				article_id: id,
+				account: target.name,
+				external_id: pubData.id,
+				published_by: "machine",
+			});
+			results[target.name] = { ok: true, external_id: pubData.id };
+		} catch (error) {
+			results[target.name] = { ok: false, error: error instanceof Error ? error.message : String(error) };
+		}
+	}
+	return jsonResponse({ ok: true, article_id: id, results });
+}
