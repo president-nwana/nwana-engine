@@ -119,6 +119,7 @@ import { renderMediaHtml } from "./operating-center-media";
 import { renderNewsReviewHtml } from "./operating-center-news-review";
 import { approveNewsReview, getNewsReview, markDistributionSent, publishNewsToFacebook, publishNewsToInstagram, registerManualPack } from "./news-review";
 import { generateAutoNews, listAutoNewsQueue, autoNewsTypeLabel, AUTO_NEWS_TYPES } from "./auto-news";
+import { linkedInConnectUrl, threadsConnectUrl, handleLinkedInCallback, handleThreadsCallback, isSocialConnected, postToLinkedIn, postToThreads } from "./social-oauth";
 import { getExecutiveMoneyView } from "./operating-center-money";
 import {
 	getMoneySyncState,
@@ -282,6 +283,10 @@ interface Env {
 	GOOGLE_YOUTUBE_CLIENT_SECRET?: string;
 	GOOGLE_YOUTUBE_TOKEN_KEY?: string;
 	GOOGLE_YOUTUBE_REDIRECT_URI?: string;
+	LINKEDIN_CLIENT_ID?: string;
+	LINKEDIN_CLIENT_SECRET?: string;
+	THREADS_CLIENT_ID?: string;
+	THREADS_CLIENT_SECRET?: string;
 	OPERATING_CENTER_ENABLED?: string;
 	OPERATING_CENTER_KEY?: string;
 	PUBLIC_BASE_URL?: string;
@@ -7156,7 +7161,7 @@ export default {
 			};
 			const title = (body.title ?? "").trim();
 			const text = (body.body ?? "").trim();
-			const dests = (body.destinations ?? []).filter((d) => ["site", "facebook", "instagram"].includes(d));
+			const dests = (body.destinations ?? []).filter((d) => ["site", "facebook", "instagram", "linkedin", "threads"].includes(d));
 			if (!title || !text) return json({ ok: false, error: "Title and body are required" }, 400);
 			if (dests.length === 0) return json({ ok: false, error: "Choose at least one destination" }, 400);
 			const now = new Date().toISOString();
@@ -7200,6 +7205,24 @@ export default {
 			}
 			if (dests.includes("instagram")) {
 				published.push("instagram (needs a picture — upload one, then post from the article)");
+			}
+			if (dests.includes("linkedin")) {
+				try {
+					const postText = `${title}\n\n${text}`;
+					await postToLinkedIn(env.nwana_engine_db, postText.length > 2900 ? postText.slice(0, 2897) + "…" : postText);
+					published.push("linkedin");
+				} catch (error) {
+					published.push(`linkedin failed: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			}
+			if (dests.includes("threads")) {
+				try {
+					const postText = `${title}\n\n${text}`;
+					await postToThreads(env.nwana_engine_db, postText.length > 495 ? postText.slice(0, 492) + "…" : postText);
+					published.push("threads");
+				} catch (error) {
+					published.push(`threads failed: ${error instanceof Error ? error.message : String(error)}`);
+				}
 			}
 			return json({ ok: true, article_id: aid, published });
 		}
@@ -8318,6 +8341,54 @@ export default {
 			return json(status, status.ok ? 200 : status.configured ? 502 : 503);
 		}
 
+		// LinkedIn OAuth.
+		if (request.method === "GET" && url.pathname === "/integrations/linkedin/connect") {
+			try {
+				return Response.redirect(linkedInConnectUrl(env), 302);
+			} catch (error) {
+				return json({ ok: false, connected: false, error: error instanceof Error ? error.message : "LinkedIn connection could not start" }, 503);
+			}
+		}
+		if (request.method === "GET" && url.pathname === "/integrations/linkedin/callback") {
+			try {
+				const label = await handleLinkedInCallback(url, env.nwana_engine_db, env);
+				return new Response(
+					`<!doctype html><html lang="en"><meta charset="utf-8"><title>LinkedIn connected</title><body style="font:20px system-ui;max-width:720px;margin:80px auto;padding:24px"><h1>LinkedIn connected</h1><p>NWANA Engine can post as: ${label}.</p><p>Nothing is posted without your explicit action. You may close this tab.</p></body></html>`,
+					{ headers: { "content-type": "text/html; charset=utf-8" } },
+				);
+			} catch (error) {
+				return json({ ok: false, connected: false, error: error instanceof Error ? error.message : "LinkedIn authorization failed" }, 400);
+			}
+		}
+		// Threads OAuth.
+		if (request.method === "GET" && url.pathname === "/integrations/threads/connect") {
+			try {
+				return Response.redirect(threadsConnectUrl(env), 302);
+			} catch (error) {
+				return json({ ok: false, connected: false, error: error instanceof Error ? error.message : "Threads connection could not start" }, 503);
+			}
+		}
+		if (request.method === "GET" && url.pathname === "/integrations/threads/callback") {
+			try {
+				await handleThreadsCallback(url, env.nwana_engine_db, env);
+				return new Response(
+					`<!doctype html><html lang="en"><meta charset="utf-8"><title>Threads connected</title><body style="font:20px system-ui;max-width:720px;margin:80px auto;padding:24px"><h1>Threads connected</h1><p>NWANA Engine can post to Threads.</p><p>Nothing is posted without your explicit action. You may close this tab.</p></body></html>`,
+					{ headers: { "content-type": "text/html; charset=utf-8" } },
+				);
+			} catch (error) {
+				return json({ ok: false, connected: false, error: error instanceof Error ? error.message : "Threads authorization failed" }, 400);
+			}
+		}
+		// Connection status for the News Center checkboxes.
+		if (url.pathname === "/api/operating-center/news/social-status" && request.method === "GET") {
+			const operatorGate = await requirePlatformOperator(request, env);
+			if (operatorGate) return operatorGate;
+			const [linkedin, threads] = await Promise.all([
+				isSocialConnected(env.nwana_engine_db, "linkedin"),
+				isSocialConnected(env.nwana_engine_db, "threads"),
+			]);
+			return json({ ok: true, linkedin, threads });
+		}
 		if (request.method === "GET" && url.pathname === "/integrations/youtube/connect") {
 			try {
 				return Response.redirect(await youTubeAuthorizationUrl(env), 302);

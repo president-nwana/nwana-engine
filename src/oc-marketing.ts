@@ -689,8 +689,12 @@ const NEWS_ACTIONS_HTML = NEWS_STYLE + `
 			<label><input type="checkbox" value="site" checked> Website</label>
 			<label><input type="checkbox" value="facebook" checked> Facebook</label>
 			<label><input type="checkbox" value="instagram" checked> Instagram</label>
-			<label class="disabled" title="Not connected yet"><input type="checkbox" value="linkedin" disabled> LinkedIn (not connected)</label>
-			<label class="disabled" title="Not connected yet"><input type="checkbox" value="threads" disabled> Threads (not connected)</label>
+			<label id="dest-linkedin"><input type="checkbox" value="linkedin" disabled> LinkedIn <span class="meta" id="linkedin-status">(checking…)</span></label>
+			<label id="dest-threads"><input type="checkbox" value="threads" disabled> Threads <span class="meta" id="threads-status">(checking…)</span></label>
+		</div>
+		<div class="mrow" id="social-connect-row" style="margin-bottom:10px">
+			<a class="oc-menu-btn" href="/integrations/linkedin/connect" target="_blank" rel="noopener" id="connect-linkedin" hidden>Connect LinkedIn</a>
+			<a class="oc-menu-btn" href="/integrations/threads/connect" target="_blank" rel="noopener" id="connect-threads" hidden>Connect Threads</a>
 		</div>
 		<div class="mrow"><button type="button" id="news-publish">Publish</button><span class="meta" id="news-pub-msg"></span></div>
 	</section>
@@ -748,8 +752,21 @@ const NEWS_SCRIPT = `
 			});
 		}catch(e){box.innerHTML='<div class="unavailable">'+esc(e.message)+'</div>';}
 	}
+	async function news_checkSocial(){
+		try{
+			var r=await api('/api/operating-center/news/social-status');
+			var li=document.querySelector('#dest-linkedin input');
+			var th=document.querySelector('#dest-threads input');
+			var ls=document.querySelector('#linkedin-status');
+			var ts=document.querySelector('#threads-status');
+			if(r.linkedin){ if(li){li.disabled=false;li.checked=true;} if(ls)ls.textContent='(connected)'; var cl=document.querySelector('#connect-linkedin'); if(cl)cl.hidden=true; }
+			else { if(ls)ls.textContent='(not connected)'; var cl2=document.querySelector('#connect-linkedin'); if(cl2)cl2.hidden=false; }
+			if(r.threads){ if(th){th.disabled=false;th.checked=true;} if(ts)ts.textContent='(connected)'; var ct=document.querySelector('#connect-threads'); if(ct)ct.hidden=true; }
+			else { if(ts)ts.textContent='(not connected)'; var ct2=document.querySelector('#connect-threads'); if(ct2)ct2.hidden=false; }
+		}catch(e){}
+	}
 	function news_boot(){
-		news_loadSummary(); news_loadQueue(); news_loadSettings();
+		news_loadSummary(); news_loadQueue(); news_loadSettings(); news_checkSocial();
 		var recent=document.querySelector('#news-recent');
 		if(recent)recent.innerHTML='<div class="meta">Latest site news appears on nwaofna.org/news.</div>';
 		var check=document.querySelector('#news-check');
