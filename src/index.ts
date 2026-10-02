@@ -196,6 +196,7 @@ import {
 	renderTenantSectionHtml,
 } from "./oc-organizations";
 import { renderMyProjectsSectionHtml } from "./oc-my-projects";
+import { renderWorkspaceSectionHtml } from "./oc-workspace";
 import {
 	getAthleteProfile,
 	listAthleteProfiles,
@@ -6066,6 +6067,7 @@ export default {
 		if (request.method === "GET" && url.pathname === "/operating-center/academy") return htmlPage(renderAcademySectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/board") return htmlPage(renderBoardSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/operations") return htmlPage(renderOperationsSectionHtml);
+		if (request.method === "GET" && url.pathname === "/operating-center/workspace") return htmlPage(renderWorkspaceSectionHtml);
 		// Multi-tenant Organizations (ADR-0046): tenant list -> tenant ->
 		// business unit. Exact path first, then the two parameterized levels.
 		if (request.method === "GET" && url.pathname === "/operating-center/organizations") {

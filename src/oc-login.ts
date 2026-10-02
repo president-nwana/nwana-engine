@@ -78,7 +78,7 @@ function routeFor(session) {
 	if (role === 'demo_user') return '/portal';
 	// Tenant owners/admins go to their personal workspace first (2026-10-02):
 	// My Ideas + My Projects. From there they open each tenant's workspace.
-	if (role === 'tenant_owner' || role === 'tenant_admin') return '/my-projects';
+	if (role === 'tenant_owner' || role === 'tenant_admin') return '/operating-center/workspace';
 	return '/portal';
 }
 
