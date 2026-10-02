@@ -131,7 +131,7 @@ export function renderAdminLandingHtml(): string {
 ${ADMIN_STYLE}
 </head>
 <body>
-<header><h1>Platform Admin</h1><p>Platform / SaaS administration for NWANA Engine. Not the NWANA operations workspace.</p></header>
+<header><h1>Platform Admin</h1><p>Platform / SaaS administration for NWANA Engine. Not the NWANA operations workspace.</p><div style="margin-left:auto;text-align:right"><a href="/login" onclick="try{sessionStorage.removeItem('nwana_engine_session')}catch(e){}try{localStorage.removeItem('nwana_operating_center_key')}catch(e){}" style="font-size:13px;color:#fff;text-decoration:underline">Sign out</a></div></header>
 ${platformAdminMenu("")}
 <main>
 <section class="panel"><h2>Administration areas</h2>
