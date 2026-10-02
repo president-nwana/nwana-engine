@@ -117,6 +117,8 @@ export interface BusinessUnitDetail extends BusinessUnit {
 	money: RevenueMoneyRollup | null;
 	/** Honest audience signal where a canonical source exists; else null. */
 	audience: { label: string; value: string; source: string } | null;
+	/** Demo dataset (SAMPLE DATA). Non-null only for the demo tenant. */
+	demo: DemoUnitData | null;
 }
 
 export interface TenantWithUnits extends Tenant {
@@ -343,6 +345,8 @@ export async function getBusinessUnitDetail(
 		assets,
 		money,
 		audience: await deriveAudience(db, unit),
+		// Demo dataset: only for the demo tenant. NWANA units get null.
+		demo: await getDemoUnitData(db, tenantId, unitId),
 	};
 }
 
@@ -494,4 +498,175 @@ export async function createBusinessUnit(
 	const created = await getBusinessUnit(db, tenantId, input.business_unit_id);
 	if (!created) throw new Error("business unit creation failed unexpectedly");
 	return created;
+}
+
+/* ------------------------------------------------------------------ */
+/* Demo dataset loader (2026-10-02).                                   */
+/*                                                                     */
+/* SAMPLE DATA for investor presentations. Only loaded when           */
+/* tenantId === 'demo-running-org'. NEVER touches money_events or any */
+/* NWANA canonical table. Read-only: no write functions exist.         */
+/* ------------------------------------------------------------------ */
+
+export interface DemoUnitData {
+	is_demo: true;
+	banner: string;
+	events: Array<{
+		event_id: string; name: string; event_type: string; event_date: string | null;
+		location: string | null; distance: string | null; status: string;
+		participants_count: number; revenue_cents: number | null;
+	}>;
+	memberships: Array<{
+		membership_id: string; member_name: string; level_name: string; level_type: string | null;
+		amount_paid_cents: number; is_paid: boolean; start_date: string | null;
+		end_date: string | null; status: string;
+	}>;
+	membership_summary: { total: number; paid: number; free: number; revenue_cents: number };
+	courses: Array<{
+		course_id: string; title: string; level: string | null; duration_weeks: number | null;
+		price_cents: number; enrolled_count: number; instructor: string | null; status: string;
+	}>;
+	participants: Array<{
+		participant_id: string; display_name: string; role: string | null; registered_at: string | null;
+	}>;
+	revenue: Array<{
+		revenue_id: string; category: string; label: string; amount_cents: number; occurred_at: string | null;
+	}>;
+	revenue_total_cents: number;
+	actions: Array<{
+		action_id: string; title: string; action_type: string | null;
+		due_date: string | null; status: string; assignee: string | null;
+	}>;
+}
+
+const DEMO_TENANT_ID = "demo-running-org";
+const DEMO_BANNER = "SAMPLE DATA — for demonstration only. Not real revenue, members, or events.";
+
+/**
+ * Load demo dataset for a business unit. Returns null unless the tenant
+ * is the demo tenant — NWANA units never receive demo data.
+ */
+export async function getDemoUnitData(
+	db: D1Database,
+	tenantId: string,
+	unitId: string,
+): Promise<DemoUnitData | null> {
+	if (tenantId !== DEMO_TENANT_ID) return null;
+
+	try {
+		return await loadDemoUnitData(db, unitId);
+	} catch {
+		// Demo tables may not exist (e.g., test stubs, pre-migration).
+		// Return null rather than breaking the unit detail.
+		return null;
+	}
+}
+
+async function loadDemoUnitData(
+	db: D1Database,
+	unitId: string,
+): Promise<DemoUnitData> {
+	const events = await db
+		.prepare("SELECT * FROM demo_events WHERE business_unit_id = ? ORDER BY event_date")
+		.bind(unitId)
+		.all();
+	const memberships = await db
+		.prepare("SELECT * FROM demo_memberships WHERE business_unit_id = ? ORDER BY membership_id")
+		.bind(unitId)
+		.all();
+	const courses = await db
+		.prepare("SELECT * FROM demo_academy_courses WHERE business_unit_id = ? ORDER BY course_id")
+		.bind(unitId)
+		.all();
+	const participants = await db
+		.prepare(
+			`SELECT p.* FROM demo_participants p
+			 LEFT JOIN demo_events e ON p.event_id = e.event_id
+			 LEFT JOIN demo_academy_courses c ON p.course_id = c.course_id
+			 LEFT JOIN demo_memberships m ON p.membership_id = m.membership_id
+			 WHERE e.business_unit_id = ? OR c.business_unit_id = ? OR m.business_unit_id = ?
+			 ORDER BY p.participant_id`,
+		)
+		.bind(unitId, unitId, unitId)
+		.all();
+	const revenue = await db
+		.prepare("SELECT * FROM demo_revenue WHERE business_unit_id = ? ORDER BY occurred_at")
+		.bind(unitId)
+		.all();
+	const actions = await db
+		.prepare("SELECT * FROM demo_actions WHERE business_unit_id = ? ORDER BY due_date")
+		.bind(unitId)
+		.all();
+
+	const memRows = (memberships.results ?? []) as Record<string, unknown>[];
+	const paid = memRows.filter((m) => Number(m.is_paid) === 1).length;
+	const revRows = (revenue.results ?? []) as Record<string, unknown>[];
+	const revenueTotal = revRows.reduce((sum, r) => sum + Number(r.amount_cents ?? 0), 0);
+	const memRevenue = memRows.filter((m) => Number(m.is_paid) === 1)
+		.reduce((sum, m) => sum + Number(m.amount_paid_cents ?? 0), 0);
+
+	return {
+		is_demo: true,
+		banner: DEMO_BANNER,
+		events: ((events.results ?? []) as Record<string, unknown>[]).map((e) => ({
+			event_id: String(e.event_id),
+			name: String(e.name),
+			event_type: String(e.event_type),
+			event_date: e.event_date as string | null,
+			location: e.location as string | null,
+			distance: e.distance as string | null,
+			status: String(e.status),
+			participants_count: Number(e.participants_count ?? 0),
+			revenue_cents: e.revenue_cents as number | null,
+		})),
+		memberships: memRows.map((m) => ({
+			membership_id: String(m.membership_id),
+			member_name: String(m.member_name),
+			level_name: String(m.level_name),
+			level_type: m.level_type as string | null,
+			amount_paid_cents: Number(m.amount_paid_cents ?? 0),
+			is_paid: Number(m.is_paid) === 1,
+			start_date: m.start_date as string | null,
+			end_date: m.end_date as string | null,
+			status: String(m.status),
+		})),
+		membership_summary: {
+			total: memRows.length,
+			paid,
+			free: memRows.length - paid,
+			revenue_cents: memRevenue,
+		},
+		courses: ((courses.results ?? []) as Record<string, unknown>[]).map((c) => ({
+			course_id: String(c.course_id),
+			title: String(c.title),
+			level: c.level as string | null,
+			duration_weeks: c.duration_weeks as number | null,
+			price_cents: Number(c.price_cents ?? 0),
+			enrolled_count: Number(c.enrolled_count ?? 0),
+			instructor: c.instructor as string | null,
+			status: String(c.status),
+		})),
+		participants: ((participants.results ?? []) as Record<string, unknown>[]).map((p) => ({
+			participant_id: String(p.participant_id),
+			display_name: String(p.display_name),
+			role: p.role as string | null,
+			registered_at: p.registered_at as string | null,
+		})),
+		revenue: revRows.map((r) => ({
+			revenue_id: String(r.revenue_id),
+			category: String(r.category),
+			label: String(r.label),
+			amount_cents: Number(r.amount_cents ?? 0),
+			occurred_at: r.occurred_at as string | null,
+		})),
+		revenue_total_cents: revenueTotal,
+		actions: ((actions.results ?? []) as Record<string, unknown>[]).map((a) => ({
+			action_id: String(a.action_id),
+			title: String(a.title),
+			action_type: a.action_type as string | null,
+			due_date: a.due_date as string | null,
+			status: String(a.status),
+			assignee: a.assignee as string | null,
+		})),
+	};
 }

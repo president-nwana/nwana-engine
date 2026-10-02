@@ -149,15 +149,21 @@ import {
 	listTenants,
 } from "./lib/tenants";
 import {
+	createLoginUser,
 	createPreviewToken,
+	createSessionToken,
 	createTenantUser,
+	findUserByEmail,
 	getPortalSession,
 	getPortalUnit,
+	hashPassword,
 	listTenantUsers,
 	resolveIdentity,
 	revokeTenantUser,
+	verifyPassword,
 } from "./lib/tenant-access";
 import { renderPortalLandingHtml, renderPortalUnitHtml } from "./oc-portal";
+import { renderLoginHtml } from "./oc-login";
 import { renderSponsorshipHtml } from "./operating-center-sponsorship";
 import { renderActivityHtml } from "./operating-center-activity";
 import { renderBoardHtml } from "./operating-center-board";
@@ -174,6 +180,7 @@ import { renderSportSectionHtml } from "./oc-sport";
 import { renderAcademySectionHtml } from "./oc-academy";
 import { renderBoardSectionHtml } from "./oc-board";
 import { renderOperationsSectionHtml } from "./oc-operations";
+import { renderAdminLandingHtml } from "./oc-admin";
 import {
 	renderBusinessUnitSectionHtml,
 	renderOrganizationsSectionHtml,
@@ -5805,6 +5812,8 @@ export default {
 		const operatingCenterRoute =
 			url.pathname === "/operating-center" ||
 			url.pathname.startsWith("/operating-center/") ||
+			url.pathname === "/admin" ||
+			url.pathname.startsWith("/admin/") ||
 			url.pathname.startsWith("/api/operating-center/") ||
 			url.pathname === "/api/initiatives" ||
 			url.pathname === "/api/initiatives/advance" ||
@@ -5851,7 +5860,7 @@ export default {
 					error: "Portal access requires a tenant access key",
 				}, 401);
 			}
-			if (identity.kind !== "tenant_user" && identity.kind !== "preview") {
+			if (identity.kind !== "tenant_user" && identity.kind !== "preview" && identity.kind !== "session") {
 				return json({
 					ok: false,
 					error: "The tenant portal is for tenant access keys; platform admins use the Operating Center",
@@ -5860,17 +5869,20 @@ export default {
 			// ADR-0048: preview sessions are strictly read-only. Admin mode
 			// is the Operating Center itself (Exit Preview); there is no
 			// in-preview privilege switch.
-			if (identity.kind === "preview" && request.method !== "GET") {
+			// demo_user sessions are likewise read-only (2026-10-02).
+			const readOnlyKind = identity.kind === "preview" ||
+				(identity.kind === "session" && identity.role === "demo_user");
+			if (readOnlyKind && request.method !== "GET") {
 				return json({
 					ok: false,
-					error: "Preview sessions are read-only",
+					error: identity.kind === "preview" ? "Preview sessions are read-only" : "Demo sessions are read-only",
 				}, 403);
 			}
 		}
 		// Narrowed portal identity for the handlers below: tenant users and
 		// ADR-0048 previews share the same tenant-scoped code paths.
 		const tenantIdentity =
-			portalApiRoute && (identity?.kind === "tenant_user" || identity?.kind === "preview")
+			portalApiRoute && (identity?.kind === "tenant_user" || identity?.kind === "preview" || identity?.kind === "session")
 				? identity
 				: null;
 
@@ -5920,6 +5932,107 @@ export default {
 				const unitId = parts[1];
 				return htmlPage(() => renderBusinessUnitSectionHtml(tenantId, unitId));
 			}
+		}
+
+		// Platform Admin (2026-10-02): platform/SaaS administration workspace.
+		// Split from the NWANA Operating Center per owner decision. The
+		// Organizations renderer moved here from /operating-center/organizations.
+		if (request.method === "GET" && url.pathname === "/admin") {
+			return htmlPage(renderAdminLandingHtml);
+		}
+		if (request.method === "GET" && url.pathname === "/admin/organizations") {
+			return htmlPage(renderOrganizationsSectionHtml);
+		}
+		if (
+			request.method === "GET" &&
+			url.pathname.startsWith("/admin/organizations/")
+		) {
+			const rest = url.pathname.slice("/admin/organizations/".length);
+			const parts = rest.split("/").filter((p) => p.length > 0);
+			const validId = (p: string) => /^[a-z0-9][a-z0-9-]{1,60}$/.test(p);
+			if (parts.length === 1 && validId(parts[0])) {
+				const tenantId = parts[0];
+				return htmlPage(() => renderTenantSectionHtml(tenantId));
+			}
+			if (parts.length === 2 && parts.every(validId)) {
+				const tenantId = parts[0];
+				const unitId = parts[1];
+				return htmlPage(() => renderBusinessUnitSectionHtml(tenantId, unitId));
+			}
+		}
+
+		// Unified login page (2026-10-02): one public Engine entry.
+		if (request.method === "GET" && url.pathname === "/login") {
+			return htmlPage(renderLoginHtml);
+		}
+
+		// Unified login (2026-10-02): email + password for all normal users.
+		// POST /api/auth/login — verify credentials, mint HMAC session token.
+		if (request.method === "POST" && url.pathname === "/api/auth/login") {
+			let body: { email?: string; password?: string };
+			try {
+				body = await request.json();
+			} catch {
+				return json({ ok: false, error: "Invalid request body" }, 400);
+			}
+			const email = String(body.email ?? "").toLowerCase().trim();
+			const password = String(body.password ?? "");
+			if (!email || !password) {
+				return json({ ok: false, error: "Email and password are required" }, 400);
+			}
+			const user = await findUserByEmail(env.nwana_engine_db, email);
+			// Timing-safe-ish: always run verifyPassword to avoid user enumeration
+			// via timing (verify against a dummy hash when user not found).
+			const hashToCheck = user?.password_hash ?? "pbkdf2$210000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+			const valid = await verifyPassword(password, hashToCheck);
+			if (!user || !valid) {
+				return json({ ok: false, error: "Invalid email or password" }, 401);
+			}
+			const hmacSecret = env.OPERATING_CENTER_KEY;
+			if (!hmacSecret) {
+				return json({ ok: false, error: "Authentication not configured" }, 500);
+			}
+			const { token, expires_at } = await createSessionToken(env.nwana_engine_db, hmacSecret, {
+				user_id: user.user_id,
+				email: user.email,
+				role: user.role,
+				tenant_id: user.tenant_id,
+				display_name: user.display_name,
+				unit_ids: user.unit_ids,
+			});
+			return json({
+				ok: true,
+				token,
+				expires_at,
+				user: {
+					email: user.email,
+					display_name: user.display_name,
+					role: user.role,
+					tenant_id: user.tenant_id,
+				},
+			});
+		}
+
+		// GET /api/auth/session — resolve the current session token.
+		if (request.method === "GET" && url.pathname === "/api/auth/session") {
+			const auth = request.headers.get("Authorization") ?? "";
+			const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+			const hmacSecret = env.OPERATING_CENTER_KEY;
+			if (!token || !hmacSecret) return json({ ok: false }, 401);
+			const { verifySessionToken } = await import("./lib/tenant-access");
+			const session = await verifySessionToken(env.nwana_engine_db, hmacSecret, token);
+			if (!session) return json({ ok: false }, 401);
+			return json({
+				ok: true,
+				user: {
+					email: session.email,
+					display_name: session.display_name,
+					role: session.role,
+					tenant_id: session.tenant_id,
+					unit_ids: session.unit_ids,
+				},
+				expires_at: session.expires_at,
+			});
 		}
 
 		// ADR-0047 tenant portal pages: public shells (the access-key gate
@@ -6506,6 +6619,32 @@ export default {
 						note: typeof body.note === "string" ? body.note : null,
 					});
 					return json({ ok: true, user: created.user, token: created.token });
+				} catch (e) {
+					return json({ ok: false, error: e instanceof Error ? e.message : "invalid input" }, 400);
+				}
+			}
+			// POST /tenants/:id/users/login — create a user with email/password
+			// (unified auth). Platform-admin only. Password is hashed; the
+			// plaintext is never stored or returned.
+			if (request.method === "POST" && parts.length === 3 && parts[1] === "users" && parts[2] === "login") {
+				let body: Record<string, unknown> = {};
+				try {
+					body = (await request.json()) as Record<string, unknown>;
+				} catch {
+					body = {};
+				}
+				try {
+					const created = await createLoginUser(env.nwana_engine_db, tenantId, {
+						email: String(body.email ?? ""),
+						password: String(body.password ?? ""),
+						display_name: String(body.display_name ?? ""),
+						role: String(body.role ?? "business_unit_user") as import("./lib/tenant-access").UserRole,
+						unit_ids: Array.isArray(body.unit_ids)
+							? body.unit_ids.filter((x): x is string => typeof x === "string")
+							: [],
+						note: typeof body.note === "string" ? body.note : null,
+					});
+					return json({ ok: true, user: created });
 				} catch (e) {
 					return json({ ok: false, error: e instanceof Error ? e.message : "invalid input" }, 400);
 				}

@@ -287,16 +287,17 @@ describe("preview client markup", () => {
 		expect(html).toContain("Business portal");
 	});
 
-	it("organizations tenant page has Preview Portal; unit cards and unit page have Preview as client", () => {
+	it("organizations pages no longer carry Preview Portal / Preview as client controls (2026-10-02: demos live in the demo workspace)", () => {
 		const tenantHtml = renderTenantSectionHtml("nwana");
-		expect(tenantHtml).toContain("Preview Portal");
-		expect(tenantHtml).toContain("data-preview-tenant");
-		expect(tenantHtml).toContain("Preview as client");
-		expect(tenantHtml).toContain("data-preview-unit");
-		expect(tenantHtml).toContain("/preview");
+		expect(tenantHtml).not.toContain("Preview Portal");
+		expect(tenantHtml).not.toContain("data-preview-tenant");
+		expect(tenantHtml).not.toContain("Preview as client");
+		expect(tenantHtml).not.toContain("data-preview-unit");
 		const unitHtml = renderBusinessUnitSectionHtml("nwana", "nwana-governing");
-		expect(unitHtml).toContain("Preview as client");
-		expect(unitHtml).toContain("/units/");
-		expect(unitHtml).toContain("/preview");
+		expect(unitHtml).not.toContain("Preview as client");
+		expect(unitHtml).not.toContain("data-preview-unit");
+		// Organizations pages now render the Platform Admin menu.
+		expect(tenantHtml).toContain('aria-label="Platform administration"');
+		expect(tenantHtml).toContain("/admin/organizations");
 	});
 });

@@ -3,7 +3,7 @@
 // actions with the exact text for each channel, media targets, per-action
 // status, owner approval, and manual-last-mile "mark as sent" controls.
 
-import { operatingCenterMenu } from "./operating-center";
+import { nwanaWorkspaceMenu } from "./operating-center";
 
 export function renderNewsReviewHtml(): string {
 	return `<!doctype html>
@@ -39,7 +39,7 @@ export function renderNewsReviewHtml(): string {
 </head>
 <body>
 	<header><h1>News distribution review</h1><p>The prepared news item, its content variants, and every distribution action with the exact text for each channel. Nothing is sent automatically — every channel stays manual last mile.</p></header>
-	${operatingCenterMenu("media")}
+	${nwanaWorkspaceMenu("media")}
 	<main>
 		<div class="nav"><a href="/operating-center/media">← Back to Media</a></div>
 		<section class="panel" id="gate" hidden>
@@ -75,7 +75,7 @@ export function renderNewsReviewHtml(): string {
 		const params=new URLSearchParams(location.search);
 		const ARTICLE_ID=params.get('article_id')||'';
 		function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
 		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}

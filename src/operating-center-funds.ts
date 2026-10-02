@@ -3,7 +3,7 @@
 // screen stays informational instead of becoming a warehouse of lists.
 
 // ADR-0023: shared button menu under the header.
-import { operatingCenterMenu } from "./operating-center";
+import { nwanaWorkspaceMenu } from "./operating-center";
 
 export function renderFundsHtml(): string {
 	return `<!doctype html>
@@ -30,7 +30,7 @@ export function renderFundsHtml(): string {
 </head>
 <body>
 	<header><h1>Funds</h1><p>Fund objects and their prospect pipelines. Stages: prospect → verified → drafted → sent → follow-up → committed → stewardship → public recognition. The owner still presses Send and signs; the machine tracks state and routes what comes next.</p></header>
-	${operatingCenterMenu("funds")}
+	${nwanaWorkspaceMenu("funds")}
 	<main>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>
@@ -54,7 +54,7 @@ export function renderFundsHtml(): string {
 		const KEY_STORAGE='nwana_operating_center_key';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
 		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}

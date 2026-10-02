@@ -8,7 +8,7 @@
 // connected or has no data, the screen shows an honest "not connected /
 // no data yet" state. No placeholder numbers, ever.
 
-import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
+import { nwanaWorkspaceMenu, type OperatingCenterPageId } from "./operating-center";
 import { getFundView } from "./fund";
 import { validateCampaignSpec, type CampaignSpec, type DesiredState, type DistributionLink, type ProposalOrigin, type SourceObjectLink } from "./google-ads-state";
 import { buildDesiredState } from "./google-ads-current";
@@ -126,7 +126,7 @@ function ocScreenShell(opts: {
 </head>
 <body>
 	<header><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></header>
-	${operatingCenterMenu(opts.page)}
+	${nwanaWorkspaceMenu(opts.page)}
 	<main>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>
@@ -153,7 +153,7 @@ function ocScreenShell(opts: {
 		const KEY_STORAGE='nwana_operating_center_key';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
 		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}

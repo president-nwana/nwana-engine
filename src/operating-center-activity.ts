@@ -3,7 +3,7 @@
 // what is happening (audit events), what is new, what requires
 // reading, and owner-wide read acknowledgment.
 
-import { operatingCenterMenu } from "./operating-center";
+import { nwanaWorkspaceMenu } from "./operating-center";
 
 export function renderActivityHtml(): string {
 	return `<!doctype html>
@@ -29,7 +29,7 @@ export function renderActivityHtml(): string {
 </head>
 <body>
 	<header><h1>Activity</h1><p>What is happening, what is new, and what requires the owner's eyes. Newest first.</p></header>
-	${operatingCenterMenu("activity")}
+	${nwanaWorkspaceMenu("activity")}
 	<main>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>
@@ -57,7 +57,7 @@ export function renderActivityHtml(): string {
 		const KEY_STORAGE='nwana_operating_center_key';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
 		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}

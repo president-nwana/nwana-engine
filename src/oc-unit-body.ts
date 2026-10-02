@@ -78,13 +78,55 @@ export const UNIT_BODY_SCRIPT = `
 			linksHtml='<section class="panel"><h2>Engine functions</h2><p class="unavailable">No Engine functions linked yet — this unit is not operating.</p></section>';
 		}
 
+		// Demo dataset panel (2026-10-02): SAMPLE DATA for investor demos.
+		// Rendered ONLY when u.demo.is_demo (demo tenant). NWANA units
+		// receive demo:null and never render this panel.
+		var demoHtml='';
+		if(u.demo&&u.demo.is_demo){
+			var d=u.demo;
+			var banner='<section class="panel" style="border:2px solid #e6a817;background:#fff8e1"><h2>⚠ SAMPLE DATA</h2><p><strong>'+esc(d.banner)+'</strong></p><p class="meta">Demonstration only. Not real revenue, members, or events. Never enters NWANA production data.</p></section>';
+			var evtHtml=(d.events||[]).map(function(e){
+				return '<div class="item"><strong>'+esc(e.name)+'</strong> '+badge(e.status.toUpperCase(), e.status==='completed'?'ok':'warn')+
+				'<div class="detail">'+esc(e.event_type)+' · '+esc(e.event_date||'?')+' · '+esc(e.location||'')+(e.distance?' · '+esc(e.distance):'')+'</div>'+
+				'<div class="detail">'+e.participants_count+' participants · sample revenue '+moneyCents(e.revenue_cents)+'</div></div>';
+			}).join('');
+			var ms=d.membership_summary||{total:0,paid:0,free:0,revenue_cents:0};
+			var memHtml='<p><strong>'+ms.total+' membership records · '+ms.paid+' paid · '+ms.free+' free · '+moneyCents(ms.revenue_cents)+' sample revenue</strong></p>'+
+				(d.memberships||[]).map(function(m){
+					return '<div class="item"><strong>'+esc(m.member_name)+'</strong><div class="detail">'+esc(m.level_name)+' · '+(m.is_paid?moneyCents(m.amount_paid_cents)+' paid':'free / complimentary')+' · '+esc(m.start_date||'?')+' → '+esc(m.end_date||'?')+' · '+esc(m.status)+'</div></div>';
+				}).join('');
+			var courseHtml=(d.courses||[]).map(function(c){
+				return '<div class="item"><strong>'+esc(c.title)+'</strong> '+badge(c.status.replace('_',' ').toUpperCase(), c.status==='in_progress'?'ok':'')+
+				'<div class="detail">'+esc(c.level||'')+' · '+c.duration_weeks+' weeks · '+moneyCents(c.price_cents)+' · '+c.enrolled_count+' enrolled</div>'+
+				(c.instructor?'<div class="detail">Instructor: '+esc(c.instructor)+'</div>':'')+'</div>';
+			}).join('');
+			var partHtml=(d.participants||[]).map(function(pp){
+				return '<div class="item">'+esc(pp.display_name)+(pp.role?' <span class="badge">'+esc(pp.role)+'</span>':'')+'</div>';
+			}).join('');
+			var revTotal=moneyCents(d.revenue_total_cents);
+			var revHtml='<p><strong>Total sample revenue: '+revTotal+'</strong> <span class="badge">SAMPLE — not verified, not canonical</span></p>'+
+				(d.revenue||[]).map(function(r){
+					return '<div class="item"><strong>'+esc(r.label)+'</strong><div class="detail">'+esc(r.category)+' · '+moneyCents(r.amount_cents)+' · '+esc(r.occurred_at||'?')+'</div></div>';
+				}).join('');
+			var actHtml=(d.actions||[]).map(function(a){
+				return '<div class="item"><strong>'+esc(a.title)+'</strong> '+badge(a.status.replace('_',' ').toUpperCase(), a.status==='done'?'ok':(a.status==='in_progress'?'warn':''))+
+				'<div class="detail">'+esc(a.action_type||'')+(a.due_date?' · due '+esc(a.due_date):'')+(a.assignee?' · '+esc(a.assignee):'')+'</div></div>';
+			}).join('');
+			demoHtml=banner+
+				'<section class="panel"><h2>Events (sample)</h2>'+(evtHtml||'<p class="unavailable">No sample events.</p>')+'</section>'+
+				'<section class="panel"><h2>Memberships (sample)</h2>'+memHtml+'</section>'+
+				'<section class="panel"><h2>Academy courses (sample)</h2>'+(courseHtml||'<p class="unavailable">No sample courses.</p>')+'</section>'+
+				'<section class="panel"><h2>Participants (sample)</h2>'+(partHtml||'<p class="unavailable">No sample participants.</p>')+'</section>'+
+				'<section class="panel"><h2>Revenue (sample)</h2>'+revHtml+'</section>'+
+				'<section class="panel"><h2>Actions (sample)</h2>'+(actHtml||'<p class="unavailable">No sample actions.</p>')+'</section>';
+		}
 		return '<section class="panel">'+(o.backHtml||'')+
 			'<h2>'+esc(u.name)+'</h2>'+
 			'<p>'+statusBadge(u.operating_status)+' <span class="badge">'+esc(u.unit_type)+'</span> <span class="badge">'+esc(u.legal_entity_status)+'</span></p>'+
 			(o.tenantLine||'')+
 			'<p class="detail"><b>Revenue model:</b> '+esc(u.revenue_model||'UNKNOWN')+'</p>'+
 			(u.owner_legal_ref?'<p class="detail"><b>Legal entity:</b> '+esc(u.owner_legal_ref)+'</p>':'')+
-			'</section>'+
+			'</section>'+demoHtml+
 			'<section class="panel"><h2>Assets</h2>'+((u.assets||[]).map(assetRow).join('')||'<p class="unavailable">No connected assets — nothing linked to this unit yet.</p>')+'</section>'+
 			moneyHtml+audienceHtml+integHtml+actionsHtml+linksHtml;
 	}

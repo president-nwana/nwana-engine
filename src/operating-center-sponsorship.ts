@@ -4,7 +4,7 @@
 // Full functionality: generate form, asset list, and stage advancement
 // against /api/operating-center/sponsorship-assets/advance.
 
-import { operatingCenterMenu } from "./operating-center";
+import { nwanaWorkspaceMenu } from "./operating-center";
 
 export function renderSponsorshipHtml(): string {
 	return `<!doctype html>
@@ -33,7 +33,7 @@ export function renderSponsorshipHtml(): string {
 </head>
 <body>
 	<header><h1>Sponsorship assets</h1><p>Machine-generated seller packages, one per object. Stages: draft → packaged → offered → negotiating → committed → fulfilled → renewal. The machine generates and tracks; seller conversations stay human.</p></header>
-	${operatingCenterMenu("sponsorship")}
+	${nwanaWorkspaceMenu("sponsorship")}
 	<main>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>
@@ -71,7 +71,7 @@ export function renderSponsorshipHtml(): string {
 		const app=document.querySelector('#app');
 		const LABEL={draft:'Draft',packaged:'Packaged',offered:'Offered',negotiating:'Negotiating',committed:'Committed',fulfilled:'Fulfilled',renewal:'Renewal'};
 		const TRANSITIONS={draft:['packaged'],packaged:['draft','offered'],offered:['packaged','negotiating'],negotiating:['offered','committed'],committed:['negotiating','fulfilled'],fulfilled:['committed','renewal'],renewal:[]};
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
 		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}

@@ -1,7 +1,7 @@
 // Board workspace page: intake, meetings, work items. The main overview
 // shows only a compact summary; the full workspace lives here.
 
-import { operatingCenterMenu } from "./operating-center";
+import { nwanaWorkspaceMenu } from "./operating-center";
 
 export function renderBoardHtml(): string {
 	return `<!doctype html>
@@ -30,7 +30,7 @@ export function renderBoardHtml(): string {
 </head>
 <body>
 	<header><h1>Board workspace</h1><p>Submissions, the weekly Sunday protocol, meeting minutes, decisions, and tracked work. The machine forms the protocol from submissions; the board decides; confirmed decisions become tracked work.</p></header>
-	${operatingCenterMenu("board")}
+	${nwanaWorkspaceMenu("board")}
 	<main>
 		<div class="nav"><a href="/operating-center">← Back to Operating Center</a></div>
 		<section class="panel" id="gate" hidden>
@@ -85,7 +85,7 @@ export function renderBoardHtml(): string {
 		const KEY_STORAGE='nwana_operating_center_key';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
 		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}

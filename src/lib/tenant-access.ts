@@ -17,6 +17,8 @@ import {
 	type BusinessUnitDetail,
 } from "./tenants";
 
+export type UserRole = "platform_admin" | "tenant_owner" | "tenant_admin" | "business_unit_user" | "demo_user";
+
 export type Identity =
 	| { kind: "platform_admin" }
 	| {
@@ -25,6 +27,17 @@ export type Identity =
 			tenant_id: string;
 			display_name: string;
 			unit_ids: string[];
+	  }
+	| {
+		/** Unified login session (email+password). Stateless HMAC token. */
+		kind: "session";
+		user_id: string;
+		email: string;
+		role: UserRole;
+		tenant_id: string;
+		display_name: string;
+		unit_ids: string[];
+		expires_at: number;
 	  }
 	| {
 			/** ADR-0048: platform-admin preview of a tenant. Stateless,
@@ -197,6 +210,7 @@ export async function verifyPreviewToken(
 	if (
 		!payload ||
 		payload.v !== 1 ||
+		(payload as { typ?: string }).typ === "session" ||
 		typeof payload.tid !== "string" ||
 		!Array.isArray(payload.units) ||
 		typeof payload.exp !== "number" ||
@@ -251,6 +265,8 @@ export async function resolveIdentity(
 		return { kind: "platform_admin" };
 	}
 	if (ownerKey && isPreviewTokenFormat(presentedKey)) {
+		const session = await verifySessionToken(db, ownerKey, presentedKey);
+		if (session) return session;
 		const preview = await verifyPreviewToken(db, ownerKey, presentedKey);
 		if (preview) return preview;
 		return null;
@@ -357,7 +373,7 @@ export async function revokeTenantUser(
  */
 export async function getPortalSession(
 	db: Db,
-	identity: Extract<Identity, { kind: "tenant_user" | "preview" }>,
+	identity: Extract<Identity, { kind: "tenant_user" | "preview" | "session" }>,
 ): Promise<PortalSession> {
 	const tenant = await getTenant(db, identity.tenant_id);
 	if (!tenant) throw new Error("unknown tenant");
@@ -385,9 +401,251 @@ export async function getPortalSession(
  */
 export async function getPortalUnit(
 	db: Db,
-	identity: Extract<Identity, { kind: "tenant_user" | "preview" }>,
+	identity: Extract<Identity, { kind: "tenant_user" | "preview" | "session" }>,
 	unitId: string,
 ): Promise<BusinessUnitDetail | null> {
 	if (!identity.unit_ids.includes(unitId)) return null;
 	return getBusinessUnitDetail(db, identity.tenant_id, unitId);
+}
+
+/* ------------------------------------------------------------------ */
+/* Unified login: email + password → HMAC session token (2026-10-02).  */
+/* ------------------------------------------------------------------ */
+
+/** Session TTL: 12 hours. */
+export const SESSION_TOKEN_TTL_SEC = 12 * 3600;
+
+const PBKDF2_ITERATIONS = 210000;
+
+/**
+ * Password hashing: PBKDF2-HMAC-SHA-256, 210k iterations, 16-byte salt.
+ * Stored format: `pbkdf2$210000$<salt-b64url>$<hash-b64url>`.
+ * Plaintext passwords are never stored or logged.
+ */
+export async function hashPassword(password: string): Promise<string> {
+	const salt = new Uint8Array(16);
+	crypto.getRandomValues(salt);
+	const key = await crypto.subtle.importKey(
+		"raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"],
+	);
+	const bits = await crypto.subtle.deriveBits(
+		{ name: "PBKDF2", salt: salt as BufferSource, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+		key, 256,
+	);
+	return `pbkdf2$${PBKDF2_ITERATIONS}$${b64urlEncode(salt)}$${b64urlEncode(new Uint8Array(bits))}`;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+	const parts = stored.split("$");
+	if (parts.length !== 4 || parts[0] !== "pbkdf2") return false;
+	const iterations = parseInt(parts[1], 10);
+	if (!Number.isFinite(iterations) || iterations < 100000) return false;
+	let salt: Uint8Array;
+	let expected: Uint8Array;
+	try {
+		salt = b64urlDecode(parts[2]);
+		expected = b64urlDecode(parts[3]);
+	} catch {
+		return false;
+	}
+	const key = await crypto.subtle.importKey(
+		"raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"],
+	);
+	const bits = await crypto.subtle.deriveBits(
+		{ name: "PBKDF2", salt: salt as BufferSource, iterations, hash: "SHA-256" },
+		key, expected.length * 8,
+	);
+	const actual = new Uint8Array(bits);
+	if (actual.length !== expected.length) return false;
+	let diff = 0;
+	for (let i = 0; i < actual.length; i++) diff |= actual[i] ^ expected[i];
+	return diff === 0;
+}
+
+interface SessionPayload {
+	v: number;
+	typ: "session";
+	uid: string;
+	email: string;
+	role: UserRole;
+	tid: string;
+	units: string[];
+	exp: number;
+	n: string;
+}
+
+/**
+ * Mint a stateless session token after successful email/password login.
+ * Signed with the server HMAC secret (owner key). The session carries
+ * user id, email, role, tenant, and unit allowlist — post-login routing
+ * is derived from it, never from client input.
+ */
+export async function createSessionToken(
+	db: Db,
+	hmacSecret: string,
+	user: { user_id: string; email: string; role: string; tenant_id: string; display_name: string; unit_ids: string[] },
+): Promise<{ token: string; expires_at: number }> {
+	const role = user.role as UserRole;
+	const payload: SessionPayload = {
+		v: 1,
+		typ: "session",
+		uid: user.user_id,
+		email: user.email,
+		role,
+		tid: user.tenant_id,
+		units: user.unit_ids,
+		exp: Math.floor(Date.now() / 1000) + SESSION_TOKEN_TTL_SEC,
+		n: randomNonce(),
+	};
+	const payloadB64 = b64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+	const sig = await hmacSign(hmacSecret, payloadB64);
+	return {
+		token: `${payloadB64}.${sig}`,
+		expires_at: payload.exp,
+	};
+}
+
+/**
+ * Verify a session token. Returns the session identity or null.
+ * Re-validates the user row (revoked users lose their sessions) and the
+ * tenant/unit set (defense in depth).
+ */
+export async function verifySessionToken(
+	db: Db,
+	hmacSecret: string,
+	token: string,
+): Promise<Extract<Identity, { kind: "session" }> | null> {
+	if (!isPreviewTokenFormat(token)) return null;
+	const [payloadB64, sigB64] = token.split(".");
+	const expectedSig = await hmacSign(hmacSecret, payloadB64);
+	if (!timingSafeEqual(sigB64, expectedSig)) return null;
+	let payload: SessionPayload;
+	try {
+		payload = JSON.parse(new TextDecoder().decode(b64urlDecode(payloadB64))) as SessionPayload;
+	} catch {
+		return null;
+	}
+	if (
+		!payload || payload.v !== 1 || payload.typ !== "session" ||
+		typeof payload.uid !== "string" || typeof payload.email !== "string" ||
+		typeof payload.role !== "string" || typeof payload.tid !== "string" ||
+		!Array.isArray(payload.units) || typeof payload.exp !== "number" ||
+		payload.exp * 1000 <= Date.now()
+	) {
+		return null;
+	}
+	// Re-validate the user row: revoked or deleted users lose sessions.
+	const row = await db
+		.prepare("SELECT user_id, email, role, tenant_id, display_name, unit_ids, status FROM tenant_users WHERE user_id = ?")
+		.bind(payload.uid)
+		.first<{
+			user_id: string; email: string | null; role: string; tenant_id: string;
+			display_name: string; unit_ids: string; status: string;
+		}>();
+	if (!row || row.status !== "active") return null;
+	if (row.tenant_id !== payload.tid || row.role !== payload.role) return null;
+	const tenantUnits = new Set((await listBusinessUnits(db, payload.tid)).map((u) => u.business_unit_id));
+	const units = payload.units.filter((u) => typeof u === "string" && tenantUnits.has(u));
+	return {
+		kind: "session",
+		user_id: row.user_id,
+		email: row.email ?? payload.email,
+		role: row.role as UserRole,
+		tenant_id: row.tenant_id,
+		display_name: row.display_name,
+		unit_ids: units,
+		expires_at: payload.exp,
+	};
+}
+
+/** Look up an active user by email for login. */
+export async function findUserByEmail(
+	db: Db,
+	email: string,
+): Promise<{
+	user_id: string; email: string; role: string; tenant_id: string;
+	display_name: string; unit_ids: string[]; password_hash: string | null; status: string;
+} | null> {
+	const row = await db
+		.prepare("SELECT user_id, email, role, tenant_id, display_name, unit_ids, password_hash, status FROM tenant_users WHERE email = ?")
+		.bind(email.toLowerCase().trim())
+		.first<{
+			user_id: string; email: string; role: string; tenant_id: string;
+			display_name: string; unit_ids: string; password_hash: string | null; status: string;
+		}>();
+	if (!row || row.status !== "active" || !row.password_hash) return null;
+	return {
+		user_id: row.user_id,
+		email: row.email,
+		role: row.role,
+		tenant_id: row.tenant_id,
+		display_name: row.display_name,
+		unit_ids: parseUnitIds(row.unit_ids),
+		password_hash: row.password_hash,
+		status: row.status,
+	};
+}
+
+export interface CreateLoginUserInput {
+	email: string;
+	password: string;
+	display_name: string;
+	role: UserRole;
+	unit_ids?: string[];
+	note?: string | null;
+}
+
+/**
+ * Create a user with email/password login (unified auth).
+ * Platform-admin only (enforced at the route layer). The password is
+ * hashed with PBKDF2; plaintext is never stored.
+ */
+export async function createLoginUser(
+	db: Db,
+	tenantId: string,
+	input: CreateLoginUserInput,
+): Promise<TenantUserPublic> {
+	const email = input.email.toLowerCase().trim();
+	if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("invalid email");
+	if (!input.password || input.password.length < 12) throw new Error("password must be at least 12 characters");
+	if (!input.display_name.trim()) throw new Error("display_name is required");
+	const validRoles: UserRole[] = ["platform_admin", "tenant_owner", "tenant_admin", "business_unit_user", "demo_user"];
+	if (!validRoles.includes(input.role)) throw new Error("invalid role");
+	const tenant = await getTenant(db, tenantId);
+	if (!tenant) throw new Error("unknown tenant");
+	const tenantUnits = new Set((await listBusinessUnits(db, tenantId)).map((u) => u.business_unit_id));
+	const unitIds = Array.from(new Set(input.unit_ids ?? []));
+	for (const u of unitIds) {
+		if (!tenantUnits.has(u)) throw new Error(`unknown business unit for this tenant: ${u}`);
+	}
+	// demo_user must belong to the demo tenant; platform_admin has no tenant scope.
+	if (input.role === "demo_user" && tenant.status !== "demo") {
+		throw new Error("demo_user role requires a demo tenant");
+	}
+	const userId = `u_${randomNonce()}`;
+	const passwordHash = await hashPassword(input.password);
+	try {
+		await db
+			.prepare(
+				`INSERT INTO tenant_users (user_id, tenant_id, display_name, role, unit_ids, email, password_hash, note)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.bind(userId, tenantId, input.display_name.trim(), input.role, JSON.stringify(unitIds), email, passwordHash, input.note ?? null)
+			.run();
+	} catch (e) {
+		if (String(e).includes("UNIQUE") && String(e).includes("email")) {
+			throw new Error("email already registered");
+		}
+		throw e;
+	}
+	return {
+		user_id: userId,
+		tenant_id: tenantId,
+		display_name: input.display_name.trim(),
+		role: input.role,
+		unit_ids: unitIds,
+		status: "active",
+		created_at: new Date().toISOString(),
+		note: input.note ?? null,
+	};
 }

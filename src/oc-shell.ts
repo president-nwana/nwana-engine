@@ -12,7 +12,7 @@
 // The tenant portal (oc-portal.ts) reuses ocBareShell with its own slim
 // header (no OC menu) and its own access-key gate.
 
-import { operatingCenterMenu, type OperatingCenterPageId } from "./operating-center";
+import { nwanaWorkspaceMenu, type OperatingCenterPageId } from "./operating-center";
 
 function escHtml(v: unknown): string {
 	return String(v ?? "")
@@ -304,6 +304,11 @@ export function ocViewScript(prefix: string, tabIds: string[]): string {
 
 export function ocSectionShell(opts: {
 	section: OperatingCenterPageId;
+	/**
+	 * Optional menu override. When provided, rendered instead of the default
+	 * NWANA Workspace menu — used by Platform Admin pages (src/oc-admin.ts).
+	 */
+	menuHtml?: string;
 	title: string;
 	subtitle: string;
 	/** Tabs; empty array = single body view (Overview). */
@@ -352,7 +357,7 @@ export function ocSectionShell(opts: {
 
 	const headerHtml =
 		`<header><img src="/operating-center/icon-180.v2.png" alt="NWANA Operating Center icon" width="64" height="64"><div><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></div></header>` +
-		`\n\t${operatingCenterMenu(opts.section)}` +
+		`\n\t${opts.menuHtml ?? nwanaWorkspaceMenu(opts.section)}` +
 		`\n\t${opts.aboveTabsHtml ? `<div class="oc-quick">${opts.aboveTabsHtml}</div>` : ""}` +
 		`\n\t${tabBar}`;
 

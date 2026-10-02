@@ -509,9 +509,77 @@ export type OperatingCenterPageId =
 	| "organizations";
 
 /**
+ * NWANA Workspace page ids (2026-10-02): the 7 real NWANA operation
+ * sections. Organizations moved to Platform Admin (/admin).
+ */
+export type NwanaWorkspacePageId =
+	| "overview"
+	| "marketing"
+	| "growth"
+	| "sport"
+	| "academy"
+	| "board"
+	| "operations";
+
+/**
+ * Platform Admin page ids (2026-10-02): platform/SaaS administration only.
+ */
+export type PlatformAdminPageId =
+	| "organizations"
+	| "users"
+	| "modules"
+	| "licensing"
+	| "settings"
+	| "health";
+
+function renderMenu(
+	items: Array<{ id: string; label: string; href: string }>,
+	active: string,
+	ariaLabel: string,
+): string {
+	return (
+		'<nav class="oc-menu" aria-label="' + ariaLabel + '">' +
+		items
+			.map((i) =>
+				i.id === active
+					? '<a class="oc-menu-btn oc-menu-active" href="' + i.href + '" aria-current="page">' + i.label + "</a>"
+					: '<a class="oc-menu-btn" href="' + i.href + '">' + i.label + "</a>",
+			)
+			.join("") +
+		"</nav>"
+	);
+}
+
+/**
+ * NWANA Workspace menu (2026-10-02): the 7 real NWANA operation sections.
+ * No Organizations — platform administration lives under /admin.
+ *
+ * The parameter accepts legacy standalone-page ids as plain strings so the
+ * retired single-page renderers (kept for tests/reference) still compile;
+ * only the 7 canonical ids ever highlight.
+ */
+export function nwanaWorkspaceMenu(active: NwanaWorkspacePageId | string): string {
+	const items: Array<{ id: NwanaWorkspacePageId; label: string; href: string }> = [
+		{ id: "overview", label: "Overview", href: "/operating-center" },
+		{ id: "marketing", label: "Marketing", href: "/operating-center/marketing" },
+		{ id: "growth", label: "Growth", href: "/operating-center/growth" },
+		{ id: "sport", label: "Sport", href: "/operating-center/sport" },
+		{ id: "academy", label: "Academy", href: "/operating-center/academy" },
+		{ id: "board", label: "Board", href: "/operating-center/board" },
+		{ id: "operations", label: "Operations", href: "/operating-center/operations" },
+	];
+	return renderMenu(items, active, "NWANA workspace");
+}
+
+/**
  * Shared section button menu rendered directly under the header on every
  * operating-center section page. Same markup everywhere so the center
  * navigates as one workspace. (Replaces the old 18-button menu, 2026-09-28.)
+ *
+ * @deprecated (2026-10-02) Use nwanaWorkspaceMenu() for NWANA operational
+ * pages or platformAdminMenu() (src/oc-admin.ts) for platform admin pages.
+ * Kept for backward compatibility: still renders the legacy 8-item menu
+ * including Organizations.
  *
  * The parameter accepts legacy standalone-page ids as plain strings so the
  * retired single-page renderers (kept for tests/reference) still compile;
@@ -528,17 +596,7 @@ export function operatingCenterMenu(active: OperatingCenterPageId | string): str
 		{ id: "operations", label: "Operations", href: "/operating-center/operations" },
 		{ id: "organizations", label: "Organizations", href: "/operating-center/organizations" },
 	];
-	return (
-		'<nav class="oc-menu" aria-label="Operating center">' +
-		items
-			.map((i) =>
-				i.id === active
-					? '<a class="oc-menu-btn oc-menu-active" href="' + i.href + '" aria-current="page">' + i.label + "</a>"
-					: '<a class="oc-menu-btn" href="' + i.href + '">' + i.label + "</a>",
-			)
-			.join("") +
-		"</nav>"
-	);
+	return renderMenu(items, active, "Operating center");
 }
 
 export function renderOperatingCenterHtml(): string {
@@ -561,7 +619,7 @@ export function renderOperatingCenterHtml(): string {
 </head>
 <body>
 	<header><h1>NWANA Operating Center</h1><p>What is happening, what needs a decision, and what happens next.</p></header>
-	${operatingCenterMenu("overview")}
+	${nwanaWorkspaceMenu("overview")}
 	<main>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>
@@ -968,7 +1026,7 @@ export function renderRaceResultsHtml(): string {
 </head>
 <body>
 	<header><h1>Series 2026 race results</h1><p>Past races only, newest first. Results refresh automatically every time this page is opened or reloaded. No buttons, no timers.</p></header>
-	${operatingCenterMenu("results")}
+	${nwanaWorkspaceMenu("results")}
 	<main>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>

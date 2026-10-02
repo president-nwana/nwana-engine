@@ -941,3 +941,59 @@ describe("membershipStatus", () => {
 		expect(membershipStatus("2026-07-22", "2027-01-01", "2026-10-02T00:00:00Z")).toBe("ACTIVE");
 	});
 });
+
+describe("unified auth: password hashing", () => {
+	it("hashes and verifies passwords with PBKDF2", async () => {
+		const { hashPassword, verifyPassword } = await import("../src/lib/tenant-access");
+		const hash = await hashPassword("CorrectHorse123!");
+		expect(hash.startsWith("pbkdf2$210000$")).toBe(true);
+		expect(await verifyPassword("CorrectHorse123!", hash)).toBe(true);
+		expect(await verifyPassword("wrong password", hash)).toBe(false);
+		expect(await verifyPassword("CorrectHorse123!", "invalid-format")).toBe(false);
+	});
+
+	it("produces unique salts per hash", async () => {
+		const { hashPassword } = await import("../src/lib/tenant-access");
+		const h1 = await hashPassword("same-password-123");
+		const h2 = await hashPassword("same-password-123");
+		expect(h1).not.toBe(h2);
+	});
+});
+
+describe("unified auth: session tokens", () => {
+	it("mints and verifies session tokens with role/tenant", async () => {
+		const { createSessionToken, verifySessionToken } = await import("../src/lib/tenant-access");
+		// Mock DB with minimal user row
+		const db = {
+			prepare: (sql: string) => ({
+				bind: (...args: unknown[]) => ({
+					first: async () => {
+						if (sql.includes("tenant_users WHERE user_id")) {
+							return {
+								user_id: "u_test123", email: "test@example.com", role: "business_unit_user",
+								tenant_id: "nwana", display_name: "Test User", unit_ids: '["nwana-academy"]', status: "active",
+							};
+						}
+						return null;
+					},
+					all: async () => ({ results: [{ business_unit_id: "nwana-academy" }] }),
+				}),
+			}),
+		} as unknown as D1Database;
+		const secret = "test-hmac-secret-key-for-sessions";
+		const { token, expires_at } = await createSessionToken(db, secret, {
+			user_id: "u_test123", email: "test@example.com", role: "business_unit_user",
+			tenant_id: "nwana", display_name: "Test User", unit_ids: ["nwana-academy"],
+		});
+		expect(token).toContain(".");
+		expect(expires_at).toBeGreaterThan(Math.floor(Date.now() / 1000));
+		const session = await verifySessionToken(db, secret, token);
+		expect(session?.kind).toBe("session");
+		expect(session?.role).toBe("business_unit_user");
+		expect(session?.tenant_id).toBe("nwana");
+		// Wrong secret fails
+		expect(await verifySessionToken(db, "wrong-secret", token)).toBe(null);
+		// Tampered token fails
+		expect(await verifySessionToken(db, secret, token + "x")).toBe(null);
+	});
+});

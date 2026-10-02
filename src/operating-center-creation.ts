@@ -12,7 +12,7 @@
 // the official docs (verified 2026-09-26); where the exact API URL is not
 // yet verified, the step stays manual.
 
-import { operatingCenterMenu } from "./operating-center";
+import { nwanaWorkspaceMenu } from "./operating-center";
 import {
 	OBJECT_CREATION_KINDS,
 	OBJECT_FIELD_CAPABILITIES,
@@ -73,7 +73,7 @@ function creationShell(opts: {
 </head>
 <body>
 	<header><h1>${escHtml(opts.title)}</h1><p>${escHtml(opts.subtitle)}</p></header>
-	${operatingCenterMenu("creation")}
+	${nwanaWorkspaceMenu("creation")}
 	<main>
 		<section class="panel" id="gate" hidden>
 			<h2>Owner access</h2>
@@ -94,7 +94,7 @@ function creationShell(opts: {
 		const KEY_STORAGE='nwana_operating_center_key';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
 		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}

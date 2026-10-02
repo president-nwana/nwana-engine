@@ -2,7 +2,7 @@
 // staged contacts CSV download. The main overview shows only a compact
 // summary; the full workspace lives here.
 
-import { operatingCenterMenu } from "./operating-center";
+import { nwanaWorkspaceMenu } from "./operating-center";
 
 export function renderUploadsHtml(): string {
 	return `<!doctype html>
@@ -29,7 +29,7 @@ export function renderUploadsHtml(): string {
 </head>
 <body>
 	<header><h1>Board uploads</h1><p>Drop a file and the machine routes it: contacts to RunSignup staging, tasks to tracked work, discussion material to the meeting agenda, news material to media drafts. Accepted: CSV, TXT, MD, TSV, JSON. Max 512 KB.</p></header>
-	${operatingCenterMenu("uploads")}
+	${nwanaWorkspaceMenu("uploads")}
 	<main>
 		<div class="nav"><a href="/operating-center">← Back to Operating Center</a></div>
 		<section class="panel" id="gate" hidden>
@@ -65,7 +65,7 @@ export function renderUploadsHtml(): string {
 		const KEY_STORAGE='nwana_operating_center_key';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
 		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}

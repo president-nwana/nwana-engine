@@ -2,7 +2,7 @@
 // drafts the articles, and publishes them to site_news after owner
 // approval. RunSignup is not involved anywhere in this workflow.
 
-import { operatingCenterMenu } from "./operating-center";
+import { nwanaWorkspaceMenu } from "./operating-center";
 
 export function renderMediaHtml(): string {
 	return `<!doctype html>
@@ -31,7 +31,7 @@ export function renderMediaHtml(): string {
 </head>
 <body>
 	<header><h1>Media plan</h1><p>Nordic Walking articles beyond event news. The machine composes the plan from verified sources and drafts the articles; nothing publishes without owner approval. Publication goes to the site news feed; external press distribution is recorded separately.</p></header>
-	${operatingCenterMenu("media")}
+	${nwanaWorkspaceMenu("media")}
 	<main>
 		<div class="nav"><a href="/operating-center">← Back to Operating Center</a></div>
 		<section class="panel" id="gate" hidden>
@@ -82,7 +82,7 @@ export function renderMediaHtml(): string {
 		const KEY_STORAGE='nwana_operating_center_key';
 		const gate=document.querySelector('#gate');
 		const app=document.querySelector('#app');
-		function getKey(){try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
+		function getKey(){try{var s=sessionStorage.getItem('nwana_engine_session');if(s)return s}catch(e){}try{return localStorage.getItem(KEY_STORAGE)||''}catch(e){return ''}}
 		function setKey(k){try{localStorage.setItem(KEY_STORAGE,k)}catch(e){}}
 		function clearKey(){try{localStorage.removeItem(KEY_STORAGE)}catch(e){}}
 		function showGate(message){app.hidden=true;gate.hidden=false;if(message)document.querySelector('#key-message').textContent=message}
