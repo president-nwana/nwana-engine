@@ -84,6 +84,7 @@ function int(v: unknown): number | null {
 interface Env {
 	RUNSIGNUP_ACCESS_TOKEN?: string;
 	CHALLENGE_API_KEY?: string;
+	nwana_engine_db: D1Database;
 }
 
 /** Fetch participants for the challenge race (26 events + 4 bundles in one call).
@@ -216,9 +217,11 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	if (direct) {
 		registrationId = int(direct.registration_id);
 	} else {
-		// Check bundle coverage. For bundle registrations, submit the activity
-		// under the BUNDLE event_id (RunSignup requires the registration's event
-		// to be a configured virtual event).
+		// Check bundle coverage. CONFIRMED 2026-10-04: RunSignup API rejects writing
+		// directly to sub-event event_id with a bundle registration
+		// ("Registration is not in any configured virtual event"). Activities
+		// must be written under the BUNDLE event_id; the Engine stores the
+		// activity→sub-event mapping in D1 for aggregation.
 		for (const p of mine) {
 			const eid = int(p.event_id);
 			if (eid && BUNDLE_TO_EVENTS[eid] && BUNDLE_TO_EVENTS[eid].includes(eventId)) {
@@ -302,6 +305,22 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	if (readBack.ok && Array.isArray(readBack.data?.activities)) {
 		const found = (readBack.data!.activities as unknown[]).map(asRecord).find((a) => a && int(a.tally_split_num) === tallySplitNum);
 		if (found) confirmed = found;
+	}
+
+	// Store the activity→sub-event mapping in D1 for weekly aggregation.
+	// Only needed because RunSignup requires bundle-event submission.
+	try {
+		await env.nwana_engine_db.prepare(
+			`INSERT OR IGNORE INTO challenge_activities
+			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, activity_date, distance_m, time_s)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		).bind(
+			tallySplitNum, CHALLENGE_RACE_ID, submitEventId, eventId,
+			registrationId, rsuUserId, date, distanceM, timeS
+		).run();
+	} catch (e) {
+		// Mapping failure should not fail the submission; log and continue.
+		console.error("challenge_activities insert failed:", e);
 	}
 
 	return json({
