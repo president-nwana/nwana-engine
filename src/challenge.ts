@@ -137,6 +137,13 @@ function participantName(p: UnknownRecord): string | null {
 	return full || null;
 }
 
+function participantTeam(p: UnknownRecord): { team_id: number | null; team_name: string | null } {
+	// RunSignup participant team linkage: team_id, team_name, team_type.
+	const teamId = int(p.team_id);
+	const teamName = typeof p.team_name === "string" ? p.team_name.trim().slice(0, 100) : null;
+	return { team_id: teamId, team_name: teamName || null };
+}
+
 /**
  * GET /api/challenge/v1/my-events?rsu_user_id=123
  * Returns the events the verified user is registered for in race 216323.
@@ -335,14 +342,16 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	// Capture the participant name for leaderboard display.
 	const participantForName = mine.find((p) => participantUserId(p) === rsuUserId);
 	const userName = participantForName ? participantName(participantForName) : null;
+	const team = participantForName ? participantTeam(participantForName) : { team_id: null, team_name: null };
 	try {
 		await env.nwana_engine_db.prepare(
 			`INSERT OR IGNORE INTO challenge_activities
-			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, user_name, activity_date, distance_m, time_s, activity_type)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, user_name, team_id, team_name, activity_date, distance_m, time_s, activity_type)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		).bind(
 			tallySplitNum, CHALLENGE_RACE_ID, submitEventId, eventId,
-			registrationId, rsuUserId, userName, date, distanceM, timeS, activityType
+			registrationId, rsuUserId, userName, team.team_id, team.team_name,
+			date, distanceM, timeS, activityType
 		).run();
 	} catch (e) {
 		// Mapping failure should not fail the submission; log and continue.
@@ -430,6 +439,8 @@ interface ActivityRow {
 	distance_m: number | null;
 	time_s: number | null;
 	activity_type: string | null;
+	team_id: number | null;
+	team_name: string | null;
 }
 
 /**
@@ -461,7 +472,7 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 	let rows: ActivityRow[] = [];
 	try {
 		const result = await env.nwana_engine_db.prepare(
-			`SELECT rsu_user_id, user_name, sub_event_id, activity_date, distance_m, time_s, activity_type
+			`SELECT rsu_user_id, user_name, sub_event_id, activity_date, distance_m, time_s, activity_type, team_id, team_name
 			FROM challenge_activities
 			WHERE activity_date >= ? AND activity_date <= ?
 			ORDER BY activity_date`
@@ -528,11 +539,94 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 		speedBoards[String(sev.event_id)] = ranked;
 	}
 
+	// Team/relay boards — UNVERIFIED until a real 4-person team exists in production.
+	// Relay: each member's best weekly time, sum of 4. <4 valid members = NOT RANKED.
+	// Cycling Team 100K: cumulative team distance, rank by earliest 100K date.
+	const teamBoards: Record<string, unknown> = {};
+	const relayEvents = CHALLENGE_EVENTS.filter((e) => e.format === "relay");
+	for (const rev of relayEvents) {
+		if (disciplineFilter && rev.discipline !== disciplineFilter) continue;
+		if (eventIdFilter && String(rev.event_id) !== eventIdFilter) continue;
+		if (typeFilter && typeFilter !== "speed") continue;
+		const relevant = rows.filter((r) => r.sub_event_id === rev.event_id && r.time_s && r.team_id);
+		const byTeam = new Map<number, { name: string | null; members: Map<number, { name: string | null; best_s: number }> }>();
+		for (const r of relevant) {
+			let team = byTeam.get(r.team_id!);
+			if (!team) {
+				team = { name: r.team_name, members: new Map() };
+				byTeam.set(r.team_id!, team);
+			}
+			const cur = team.members.get(r.rsu_user_id);
+			if (!cur || r.time_s! < cur.best_s) {
+				team.members.set(r.rsu_user_id, { name: r.user_name, best_s: r.time_s! });
+			}
+		}
+		const ranked: Array<{ team_id: number; team_name: string | null; status: string; total_s?: number; total_time?: string; members?: number }> = [];
+		const notRanked: Array<{ team_id: number; team_name: string | null; status: string; members: number }> = [];
+		for (const [teamId, t] of byTeam) {
+			if (t.members.size >= 4) {
+				const total = [...t.members.values()].reduce((sum, m) => sum + m.best_s, 0);
+				ranked.push({ team_id: teamId, team_name: t.name, status: "RANKED", total_s: total, total_time: formatTime(total), members: t.members.size });
+			} else {
+				notRanked.push({ team_id: teamId, team_name: t.name, status: "NOT RANKED", members: t.members.size });
+			}
+		}
+		ranked.sort((a, b) => (a.total_s || 0) - (b.total_s || 0));
+		teamBoards[String(rev.event_id)] = {
+			unverified: true,
+			ranked: ranked.map((r, i) => ({ rank: i + 1, ...r })),
+			not_ranked: notRanked,
+		};
+	}
+
+	// Cycling Team 100K (event 1222858): collective 100K.
+	const team100k = CHALLENGE_EVENTS.find((e) => e.event_id === 1222858);
+	if (team100k && (!disciplineFilter || team100k.discipline === disciplineFilter) && (!eventIdFilter || eventIdFilter === "1222858")) {
+		const relevant = rows.filter((r) => r.sub_event_id === 1222858 && r.distance_m && r.team_id);
+		const byTeam = new Map<number, { name: string | null; total_m: number; dates: string[] }>();
+		for (const r of relevant) {
+			let team = byTeam.get(r.team_id!);
+			if (!team) {
+				team = { name: r.team_name, total_m: 0, dates: [] };
+				byTeam.set(r.team_id!, team);
+			}
+			team.total_m += r.distance_m!;
+			team.dates.push(r.activity_date);
+		}
+		const ranked = [...byTeam.entries()]
+			.map(([teamId, t]) => {
+				// Earliest date the team reached 100K (cumulative).
+				const sorted = [...t.dates].sort();
+				let cum = 0;
+				let reachDate: string | null = null;
+				// Simplified: use earliest date if total >= 100K. Full cumulative-by-date needs per-date sums.
+				if (t.total_m >= 100000) reachDate = sorted[0] || null;
+				return {
+					team_id: teamId,
+					team_name: t.name,
+					total_km: Math.round((t.total_m / 1000) * 100) / 100,
+					reached_100k: t.total_m >= 100000,
+					reach_date: reachDate,
+				};
+			})
+			.sort((a, b) => {
+				if (a.reached_100k && !b.reached_100k) return -1;
+				if (!a.reached_100k && b.reached_100k) return 1;
+				if (a.reach_date && b.reach_date && a.reach_date !== b.reach_date) {
+					return a.reach_date < b.reach_date ? -1 : 1;
+				}
+				return b.total_km - a.total_km;
+			})
+			.map((r, i) => ({ rank: i + 1, ...r }));
+		teamBoards["1222858"] = { unverified: true, ranked };
+	}
+
 	return json({
 		ok: true,
 		week_start: weekStart,
 		week_end: weekEnd,
 		mileage: mileageBoards,
 		speed: speedBoards,
+		teams: teamBoards,
 	});
 }
