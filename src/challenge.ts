@@ -55,6 +55,16 @@ export const CHALLENGE_EVENTS: ChallengeEventDef[] = [
 export const CHALLENGE_EVENT_IDS = CHALLENGE_EVENTS.map((e) => e.event_id);
 const EVENT_BY_ID = new Map(CHALLENGE_EVENTS.map((e) => [e.event_id, e]));
 
+// Super Event bundles → their sub-event IDs (production truth, race 216323).
+export const BUNDLE_TO_EVENTS: Record<number, number[]> = {
+	1222859: [1222833, 1222834, 1222835, 1222836, 1222837, 1222838, 1222839], // NW All Events
+	1222860: [1222840, 1222841, 1222842, 1222843, 1222844, 1222845], // RW All Events
+	1222861: [1222846, 1222847, 1222848, 1222849, 1222850, 1222851, 1222852], // Running All Events
+	1222862: [1222853, 1222854, 1222855, 1222856, 1222857, 1222858], // Cycling All Events
+};
+export const BUNDLE_EVENT_IDS = Object.keys(BUNDLE_TO_EVENTS).map(Number);
+const ALL_QUERY_EVENT_IDS = [...CHALLENGE_EVENT_IDS, ...BUNDLE_EVENT_IDS];
+
 function json(data: unknown, status = 200): Response {
 	return new Response(JSON.stringify(data), {
 		status,
@@ -76,12 +86,12 @@ interface Env {
 	CHALLENGE_API_KEY?: string;
 }
 
-/** Fetch participants for the challenge race (all 26 events in one call). */
+/** Fetch participants for the challenge race (26 events + 4 bundles in one call). */
 async function fetchParticipants(env: Env): Promise<{ ok: boolean; participants?: UnknownRecord[]; error?: string }> {
 	const token = env.RUNSIGNUP_ACCESS_TOKEN;
 	if (!token) return { ok: false, error: "RunSignup director grant not configured" };
 	const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/participants`);
-	url.searchParams.set("event_id", CHALLENGE_EVENT_IDS.join(","));
+	url.searchParams.set("event_id", ALL_QUERY_EVENT_IDS.join(","));
 	url.searchParams.set("results_per_page", "500");
 	url.searchParams.set("format", "json");
 	const res = await runSignupGetJson<{ participants?: unknown[] }>(url, token);
@@ -109,7 +119,18 @@ async function handleMyEvents(url: URL, env: Env): Promise<Response> {
 	for (const p of mine) {
 		const eid = int(p.event_id);
 		const rid = int(p.registration_id);
-		if (eid && rid && EVENT_BY_ID.has(eid) && !seen.has(eid)) seen.set(eid, rid);
+		if (!eid || !rid) continue;
+		if (EVENT_BY_ID.has(eid)) {
+			// Direct registration for an individual event.
+			if (!seen.has(eid)) seen.set(eid, rid);
+		} else if (BUNDLE_TO_EVENTS[eid]) {
+			// Bundle registration: expands to all sub-events of the discipline.
+			// The bundle's registration_id is used for activity writes until
+			// RunSignup proves sub-event registrations exist separately.
+			for (const subId of BUNDLE_TO_EVENTS[eid]) {
+				if (!seen.has(subId)) seen.set(subId, rid);
+			}
+		}
 	}
 	const events = [...seen.entries()].map(([event_id, registration_id]) => {
 		const def = EVENT_BY_ID.get(event_id)!;
@@ -169,12 +190,25 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	if (needsTime && timeS === null) return json({ ok: false, error: "time is required for this event" }, 400);
 	if (needsDistance && distanceM === null) return json({ ok: false, error: "distance is required for this event" }, 400);
 
-	// Verify ownership: the user must have a registration for this event.
+	// Verify ownership: the user must have a registration for this event,
+	// either directly or via a discipline bundle covering it.
 	const fetched = await fetchParticipants(env);
 	if (!fetched.ok) return json({ ok: false, error: fetched.error }, 502);
 	const mine = (fetched.participants || []).filter((p) => participantUserId(p) === rsuUserId);
-	const reg = mine.find((p) => int(p.event_id) === eventId);
-	const registrationId = reg ? int(reg.registration_id) : null;
+	let registrationId: number | null = null;
+	const direct = mine.find((p) => int(p.event_id) === eventId);
+	if (direct) {
+		registrationId = int(direct.registration_id);
+	} else {
+		// Check bundle coverage.
+		for (const p of mine) {
+			const eid = int(p.event_id);
+			if (eid && BUNDLE_TO_EVENTS[eid] && BUNDLE_TO_EVENTS[eid].includes(eventId)) {
+				registrationId = int(p.registration_id);
+				break;
+			}
+		}
+	}
 	if (!registrationId) {
 		return json({ ok: false, error: "not_registered", detail: "This RunSignup user has no registration for the event." }, 403);
 	}
