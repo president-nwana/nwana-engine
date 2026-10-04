@@ -277,18 +277,16 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	}
 	if (!postRes.ok || postData.error || !Array.isArray(postData.tally_split_nums) || postData.tally_split_nums.length === 0) {
 		const pd = postData as Record<string, unknown>;
-		// Extract just the first detail code/message (short).
-		let short = `HTTP ${postRes.status}`;
+		let detail = `HTTP ${postRes.status}`;
 		try {
 			const det = pd.details as Array<{ code?: string; message?: string }>;
-			if (Array.isArray(det) && det.length > 0) {
-				short = `${det[0].code}: ${det[0].message}`;
+			if (Array.isArray(det) && det.length > 0 && det[0].code) {
+				detail = `${det[0].code}: ${det[0].message || ""}`.trim();
+			} else if (postData.error?.error_msg) {
+				detail = postData.error.error_msg;
 			}
-		} catch { /* ignore */ }
-		return json(
-			{ ok: false, error: "runsignup_rejected", detail: short },
-			502
-		);
+		} catch { /* keep default */ }
+		return json({ ok: false, error: "runsignup_rejected", detail }, 502);
 	}
 	const tallySplitNum = postData.tally_split_nums[0];
 
