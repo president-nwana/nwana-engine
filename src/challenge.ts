@@ -269,10 +269,12 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	}
 	if (!postRes.ok || postData.error || !Array.isArray(postData.tally_split_nums) || postData.tally_split_nums.length === 0) {
 		const rawDetail = postData.error?.error_msg || `HTTP ${postRes.status}`;
-		// Include raw response keys for debugging (temporary).
-		const rawKeys = postData && typeof postData === "object" ? Object.keys(postData).join(",") : "n/a";
+		// Include exception/details values for debugging (temporary).
+		const pd = postData as Record<string, unknown>;
+		const exc = typeof pd.exception === "string" ? pd.exception.slice(0, 200) : JSON.stringify(pd.exception)?.slice(0, 200);
+		const det = typeof pd.details === "string" ? pd.details.slice(0, 200) : JSON.stringify(pd.details)?.slice(0, 200);
 		return json(
-			{ ok: false, error: "runsignup_rejected", detail: `${rawDetail} [keys:${rawKeys}]` },
+			{ ok: false, error: "runsignup_rejected", detail: `${rawDetail} | exception: ${exc} | details: ${det}` },
 			502
 		);
 	}
