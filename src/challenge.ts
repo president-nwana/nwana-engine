@@ -210,15 +210,21 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	if (!fetched.ok) return json({ ok: false, error: fetched.error }, 502);
 	const mine = (fetched.participants || []).filter((p) => participantUserId(p) === rsuUserId);
 	let registrationId: number | null = null;
+	let submitEventId = eventId; // Event ID to submit the activity under.
+	let viaBundle: number | null = null;
 	const direct = mine.find((p) => int(p.event_id) === eventId);
 	if (direct) {
 		registrationId = int(direct.registration_id);
 	} else {
-		// Check bundle coverage.
+		// Check bundle coverage. For bundle registrations, submit the activity
+		// under the BUNDLE event_id (RunSignup requires the registration's event
+		// to be a configured virtual event).
 		for (const p of mine) {
 			const eid = int(p.event_id);
 			if (eid && BUNDLE_TO_EVENTS[eid] && BUNDLE_TO_EVENTS[eid].includes(eventId)) {
 				registrationId = int(p.registration_id);
+				viaBundle = eid;
+				submitEventId = eid; // Submit under the bundle event.
 				break;
 			}
 		}
@@ -230,9 +236,11 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	// Build the vr-activities request. Distance unit: event distances are
 	// configured in kilometers; result_split_tally_value carries the value.
 	const token = env.RUNSIGNUP_ACCESS_TOKEN!;
+	const def = EVENT_DEFS[eventId];
+	const subEventLabel = viaBundle && def ? ` [${def.name}]` : "";
 	const activity: UnknownRecord = {
 		tally_split_date: date,
-		tally_split_comment: "Submitted via NWANA Charity Challenge Series",
+		tally_split_comment: `Submitted via NWANA Charity Challenge Series${subEventLabel}`,
 	};
 	if (distanceM !== null) {
 		// Fixed-distance events: submit the event distance; mileage: the logged distance.
@@ -244,7 +252,7 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	}
 	const postUrl = new URL("https://api.runsignup.com/rest/v2/vr-activities.json");
 	postUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
-	postUrl.searchParams.set("event_id", String(eventId));
+	postUrl.searchParams.set("event_id", String(submitEventId));
 	postUrl.searchParams.set("registration_id", String(registrationId));
 	const form = new URLSearchParams();
 	form.set("request", JSON.stringify({ activities: [activity] }));
@@ -268,13 +276,17 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 		return json({ ok: false, error: "invalid RunSignup response" }, 502);
 	}
 	if (!postRes.ok || postData.error || !Array.isArray(postData.tally_split_nums) || postData.tally_split_nums.length === 0) {
-		const rawDetail = postData.error?.error_msg || `HTTP ${postRes.status}`;
-		// Include exception/details values for debugging (temporary).
 		const pd = postData as Record<string, unknown>;
-		const exc = typeof pd.exception === "string" ? pd.exception.slice(0, 200) : JSON.stringify(pd.exception)?.slice(0, 200);
-		const det = typeof pd.details === "string" ? pd.details.slice(0, 200) : JSON.stringify(pd.details)?.slice(0, 200);
+		// Extract just the first detail code/message (short).
+		let short = `HTTP ${postRes.status}`;
+		try {
+			const det = pd.details as Array<{ code?: string; message?: string }>;
+			if (Array.isArray(det) && det.length > 0) {
+				short = `${det[0].code}: ${det[0].message}`;
+			}
+		} catch { /* ignore */ }
 		return json(
-			{ ok: false, error: "runsignup_rejected", detail: `${rawDetail} | exception: ${exc} | details: ${det}` },
+			{ ok: false, error: "runsignup_rejected", detail: short },
 			502
 		);
 	}
@@ -283,7 +295,7 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	// Read back to confirm the write landed.
 	const getUrl = new URL("https://api.runsignup.com/rest/v2/vr-activities.json");
 	getUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
-	getUrl.searchParams.set("event_id", String(eventId));
+	getUrl.searchParams.set("event_id", String(submitEventId));
 	getUrl.searchParams.set("registration_id", String(registrationId));
 	getUrl.searchParams.set("num", "100");
 	getUrl.searchParams.set("format", "json");
