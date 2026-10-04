@@ -461,13 +461,17 @@ async function handleFundraisingLeaderboard(url: URL, env: Env): Promise<Respons
 
 	// Query canonical money_events for race 216323 donations in the week.
 	// source_ref format: "race:216323/donation:XXXX"
+	// Use ONLY donation_received: for fundraiser donations, ingestion creates
+	// both donation_received and fundraiser_donation_received with the same
+	// amount — summing both would double-count. fundraiser_id is on the
+	// donation_received record.
 	let rows: DonationRow[] = [];
 	try {
 		const result = await env.nwana_engine_db.prepare(
 			`SELECT source_transaction_id, occurred_at, gross_cents, source_ref, fundraiser_id
 			FROM money_events
 			WHERE source_ref LIKE 'race:216323/%'
-			  AND event_type IN ('donation_received', 'fundraiser_donation_received')
+			  AND event_type = 'donation_received'
 			  AND gross_cents IS NOT NULL AND gross_cents > 0
 			  AND date(occurred_at) >= ? AND date(occurred_at) <= ?
 			ORDER BY occurred_at`
