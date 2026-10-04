@@ -271,6 +271,7 @@ import {
 	ensureUpcomingMeeting,
 	getBoardCadence,
 } from "./board-protocol";
+import { handleChallengeApi } from "./challenge";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -292,6 +293,7 @@ interface Env {
 	OPERATING_CENTER_ENABLED?: string;
 	OPERATING_CENTER_KEY?: string;
 	PUBLIC_BASE_URL?: string;
+	CHALLENGE_API_KEY?: string;
 }
 
 interface CreateObjectRequest {
@@ -5832,6 +5834,13 @@ export default {
 		}
 
 		const url = new URL(request.url);
+
+		// NWANA Charity Challenge Series API (2026-10-04): /api/challenge/v1/*
+		// Dedicated key auth (X-Challenge-Key), independent of the
+		// operating-center identity below. Served by src/challenge.ts.
+		if (url.pathname.startsWith("/api/challenge/v1/")) {
+			return handleChallengeApi(request, env, url);
+		}
 
 		// Legacy top-level shortcuts → their new section tabs (rebuild
 		// 2026-09-28). Public 301s; these paths never existed as routes in
