@@ -236,8 +236,8 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	// Build the vr-activities request. Distance unit: event distances are
 	// configured in kilometers; result_split_tally_value carries the value.
 	const token = env.RUNSIGNUP_ACCESS_TOKEN!;
-	const def = EVENT_DEFS[eventId];
-	const subEventLabel = viaBundle && def ? ` [${def.name}]` : "";
+	const subEventDef = EVENT_BY_ID.get(eventId);
+	const subEventLabel = viaBundle && subEventDef ? ` [${subEventDef.name}]` : "";
 	const activity: UnknownRecord = {
 		tally_split_date: date,
 		tally_split_comment: `Submitted via NWANA Charity Challenge Series${subEventLabel}`,
