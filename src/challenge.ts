@@ -268,8 +268,11 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 		return json({ ok: false, error: "invalid RunSignup response" }, 502);
 	}
 	if (!postRes.ok || postData.error || !Array.isArray(postData.tally_split_nums) || postData.tally_split_nums.length === 0) {
+		const rawDetail = postData.error?.error_msg || `HTTP ${postRes.status}`;
+		// Include raw response keys for debugging (temporary).
+		const rawKeys = postData && typeof postData === "object" ? Object.keys(postData).join(",") : "n/a";
 		return json(
-			{ ok: false, error: "runsignup_rejected", detail: postData.error?.error_msg || `HTTP ${postRes.status}` },
+			{ ok: false, error: "runsignup_rejected", detail: `${rawDetail} [keys:${rawKeys}]` },
 			502
 		);
 	}
