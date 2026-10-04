@@ -6,6 +6,7 @@
 // the OAuth-verified rsu_user_id supplied by the caller. Never trust email.
 
 import { runSignupGetJson } from "./runsignup-client";
+import { syncRunSignupDonations } from "./lib/money-ingestion";
 
 export const CHALLENGE_RACE_ID = 216323;
 
@@ -400,7 +401,108 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	if (path === "/api/challenge/v1/leaderboard" && request.method === "GET") {
 		return handleLeaderboard(url, env);
 	}
+	if (path === "/api/challenge/v1/sync-donations" && request.method === "POST") {
+		return handleSyncDonations(env);
+	}
+	if (path === "/api/challenge/v1/fundraising-leaderboard" && request.method === "GET") {
+		return handleFundraisingLeaderboard(url, env);
+	}
 	return json({ ok: false, error: "unknown challenge endpoint" }, 404);
+}
+
+/**
+ * POST /api/challenge/v1/sync-donations
+ * Owner-triggered sync of race 216323 donations into canonical money_events.
+ * Uses the existing money pipeline; 216323 is NOT in RACE_TO_FUND_ID so no
+ * 212466 fund attribution is applied. No polling — explicit trigger only.
+ */
+async function handleSyncDonations(env: Env): Promise<Response> {
+	if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+		return json({ ok: false, error: "missing RunSignup token" }, 500);
+	}
+	try {
+		const result = await syncRunSignupDonations(
+			env.nwana_engine_db,
+			env.RUNSIGNUP_ACCESS_TOKEN,
+			{ raceId: CHALLENGE_RACE_ID }
+		);
+		return json({ race_id: CHALLENGE_RACE_ID, ...result });
+	} catch (e) {
+		return json({ ok: false, error: "sync failed", detail: String(e).slice(0, 200) }, 500);
+	}
+}
+
+interface DonationRow {
+	source_transaction_id: string;
+	occurred_at: string | null;
+	gross_cents: number | null;
+	source_ref: string;
+}
+
+/**
+ * GET /api/challenge/v1/fundraising-leaderboard?week=YYYY-MM-DD
+ * Weekly fundraising leaderboard from canonical money_events.
+ * Race 216323 only. Week = Monday–Sunday.
+ * Groups by fundraiser (source_ref). No fake data — empty until real donations sync.
+ * Open Challenge participates (discipline does not affect donation ranking).
+ */
+async function handleFundraisingLeaderboard(url: URL, env: Env): Promise<Response> {
+	const weekParam = url.searchParams.get("week");
+	let weekStart: string;
+	if (weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam)) {
+		weekStart = mondayOfWeek(weekParam);
+	} else {
+		weekStart = mondayOfWeek(new Date().toISOString().slice(0, 10));
+	}
+	const weekEnd = addDays(weekStart, 6);
+
+	// Query canonical money_events for race 216323 donations in the week.
+	// source_ref format: "race:216323/donation:XXXX"
+	let rows: DonationRow[] = [];
+	try {
+		const result = await env.nwana_engine_db.prepare(
+			`SELECT source_transaction_id, occurred_at, gross_cents, source_ref
+			FROM money_events
+			WHERE source_ref LIKE 'race:216323/%'
+			  AND event_type IN ('donation_received', 'fundraiser_donation_received')
+			  AND gross_cents IS NOT NULL AND gross_cents > 0
+			  AND date(occurred_at) >= ? AND date(occurred_at) <= ?
+			ORDER BY occurred_at`
+		).bind(weekStart, weekEnd).all<DonationRow>();
+		rows = result.results || [];
+	} catch (e) {
+		return json({ ok: false, error: "d1 query failed" }, 500);
+	}
+
+	// Group by fundraiser. source_ref may contain fundraiser info;
+	// for v1, group by the donation's source identity.
+	// TODO: resolve fundraiser_id → display name via fundraiser mapping.
+	const byFundraiser = new Map<string, { total_cents: number; count: number }>();
+	for (const r of rows) {
+		const key = r.source_transaction_id;
+		const cur = byFundraiser.get(key) || { total_cents: 0, count: 0 };
+		cur.total_cents += r.gross_cents!;
+		cur.count += 1;
+		byFundraiser.set(key, cur);
+	}
+
+	const ranked = [...byFundraiser.entries()]
+		.map(([fundraiser_key, v]) => ({
+			fundraiser_key,
+			total_usd: Math.round((v.total_cents / 100) * 100) / 100,
+			donations: v.count,
+		}))
+		.sort((a, b) => b.total_usd - a.total_usd)
+		.map((r, i) => ({ rank: i + 1, ...r }));
+
+	return json({
+		ok: true,
+		week_start: weekStart,
+		week_end: weekEnd,
+		race_id: CHALLENGE_RACE_ID,
+		leaderboard: ranked,
+		note: ranked.length === 0 ? "No donations for race 216323 in this week yet. Sync donations to update." : undefined,
+	});
 }
 
 /**
