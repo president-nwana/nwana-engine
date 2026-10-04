@@ -237,7 +237,7 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	// configured in kilometers; result_split_tally_value carries the value.
 	const token = env.RUNSIGNUP_ACCESS_TOKEN!;
 	const subEventDef = EVENT_BY_ID.get(eventId);
-	const subEventLabel = viaBundle && subEventDef ? ` [${subEventDef.name}]` : "";
+	const subEventLabel = viaBundle && subEventDef ? ` [${subEventDef.event_name}]` : "";
 	const activity: UnknownRecord = {
 		tally_split_date: date,
 		tally_split_comment: `Submitted via NWANA Charity Challenge Series${subEventLabel}`,
