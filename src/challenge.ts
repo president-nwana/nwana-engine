@@ -580,40 +580,44 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 	}
 
 	// Cycling Team 100K (event 1222858): collective 100K.
+	// Rank by earliest date the cumulative team distance reaches 100K.
+	// Process dates chronologically, cumulative SUM across dates.
+	// Teams that never reach 100K are not ranked. Same-date tie → highest total.
 	const team100k = CHALLENGE_EVENTS.find((e) => e.event_id === 1222858);
 	if (team100k && (!disciplineFilter || team100k.discipline === disciplineFilter) && (!eventIdFilter || eventIdFilter === "1222858")) {
 		const relevant = rows.filter((r) => r.sub_event_id === 1222858 && r.distance_m && r.team_id);
-		const byTeam = new Map<number, { name: string | null; total_m: number; dates: string[] }>();
+		const byTeam = new Map<number, { name: string | null; byDate: Map<string, number> }>();
 		for (const r of relevant) {
 			let team = byTeam.get(r.team_id!);
 			if (!team) {
-				team = { name: r.team_name, total_m: 0, dates: [] };
+				team = { name: r.team_name, byDate: new Map() };
 				byTeam.set(r.team_id!, team);
 			}
-			team.total_m += r.distance_m!;
-			team.dates.push(r.activity_date);
+			team.byDate.set(r.activity_date, (team.byDate.get(r.activity_date) || 0) + r.distance_m!);
+			if (r.team_name && !team.name) team.name = r.team_name;
 		}
 		const ranked = [...byTeam.entries()]
 			.map(([teamId, t]) => {
-				// Earliest date the team reached 100K (cumulative).
-				const sorted = [...t.dates].sort();
+				const sortedDates = [...t.byDate.keys()].sort();
 				let cum = 0;
 				let reachDate: string | null = null;
-				// Simplified: use earliest date if total >= 100K. Full cumulative-by-date needs per-date sums.
-				if (t.total_m >= 100000) reachDate = sorted[0] || null;
+				for (const d of sortedDates) {
+					cum += t.byDate.get(d)!;
+					if (cum >= 100000) { reachDate = d; break; }
+				}
+				const total_m = [...t.byDate.values()].reduce((s, v) => s + v, 0);
 				return {
 					team_id: teamId,
 					team_name: t.name,
-					total_km: Math.round((t.total_m / 1000) * 100) / 100,
-					reached_100k: t.total_m >= 100000,
+					total_km: Math.round((total_m / 1000) * 100) / 100,
+					reached_100k: reachDate !== null,
 					reach_date: reachDate,
 				};
 			})
+			.filter((t) => t.reached_100k)
 			.sort((a, b) => {
-				if (a.reached_100k && !b.reached_100k) return -1;
-				if (!a.reached_100k && b.reached_100k) return 1;
-				if (a.reach_date && b.reach_date && a.reach_date !== b.reach_date) {
-					return a.reach_date < b.reach_date ? -1 : 1;
+				if (a.reach_date! !== b.reach_date!) {
+					return a.reach_date! < b.reach_date! ? -1 : 1;
 				}
 				return b.total_km - a.total_km;
 			})
