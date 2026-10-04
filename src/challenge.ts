@@ -314,6 +314,19 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	});
 }
 
+/** Series stats: total registration count for the homepage. */
+async function handleSeriesStats(env: Env): Promise<Response> {
+	const fetched = await fetchParticipants(env);
+	if (!fetched.ok) return json({ ok: false, error: fetched.error }, 502);
+	const parts = fetched.participants || [];
+	const regIds = new Set<number>();
+	for (const p of parts) {
+		const rid = int((p as UnknownRecord).registration_id);
+		if (rid) regIds.add(rid);
+	}
+	return json({ ok: true, total_registrations: regIds.size });
+}
+
 /** Main entry: auth check + routing. Called early from the worker fetch handler. */
 export async function handleChallengeApi(request: Request, env: Env, url: URL): Promise<Response> {
 	const presented = request.headers.get("X-Challenge-Key") || "";
@@ -321,6 +334,9 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 		return json({ ok: false, error: "unauthorized" }, 401);
 	}
 	const path = url.pathname;
+	if (path === "/api/challenge/v1/series-stats" && request.method === "GET") {
+		return handleSeriesStats(env);
+	}
 	if (path === "/api/challenge/v1/my-events" && request.method === "GET") {
 		return handleMyEvents(url, env);
 	}
