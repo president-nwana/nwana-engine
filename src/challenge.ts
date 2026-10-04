@@ -86,7 +86,9 @@ interface Env {
 	CHALLENGE_API_KEY?: string;
 }
 
-/** Fetch participants for the challenge race (26 events + 4 bundles in one call). */
+/** Fetch participants for the challenge race (26 events + 4 bundles in one call).
+ * NOTE: the API returns an ARRAY of per-event objects: [{event, participants[]}, ...]
+ * — one entry per queried event_id, NOT {participants: [...]} at the top level. */
 async function fetchParticipants(env: Env): Promise<{ ok: boolean; participants?: UnknownRecord[]; error?: string }> {
 	const token = env.RUNSIGNUP_ACCESS_TOKEN;
 	if (!token) return { ok: false, error: "RunSignup director grant not configured" };
@@ -94,10 +96,22 @@ async function fetchParticipants(env: Env): Promise<{ ok: boolean; participants?
 	url.searchParams.set("event_id", ALL_QUERY_EVENT_IDS.join(","));
 	url.searchParams.set("results_per_page", "500");
 	url.searchParams.set("format", "json");
-	const res = await runSignupGetJson<{ participants?: unknown[] }>(url, token);
+	const res = await runSignupGetJson<unknown>(url, token);
 	if (!res.ok) return { ok: false, error: res.api_error_msg || `RunSignup error (${res.http_status})` };
-	const list = Array.isArray(res.data?.participants) ? res.data!.participants! : [];
-	return { ok: true, participants: list.map(asRecord).filter((p): p is UnknownRecord => p !== null) };
+	const out: UnknownRecord[] = [];
+	const entries = Array.isArray(res.data) ? res.data : [];
+	for (const entry of entries) {
+		const rec = asRecord(entry);
+		if (!rec) continue;
+		const plist = rec.participants;
+		if (Array.isArray(plist)) {
+			for (const p of plist) {
+				const pr = asRecord(p);
+				if (pr) out.push(pr);
+			}
+		}
+	}
+	return { ok: true, participants: out };
 }
 
 function participantUserId(p: UnknownRecord): number | null {
