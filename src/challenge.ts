@@ -407,7 +407,81 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	if (path === "/api/challenge/v1/fundraising-leaderboard" && request.method === "GET") {
 		return handleFundraisingLeaderboard(url, env);
 	}
+	if (path.startsWith("/api/challenge/v1/forms/") && request.method === "POST") {
+		const formType = path.slice("/api/challenge/v1/forms/".length);
+		return handleFormSubmit(formType, request, env);
+	}
+	if (path === "/api/challenge/v1/form-submissions" && request.method === "GET") {
+		return handleFormList(url, env);
+	}
 	return json({ ok: false, error: "unknown challenge endpoint" }, 404);
+}
+
+const VALID_FORM_TYPES = ["contact", "organization", "sponsor", "partner"] as const;
+
+/**
+ * POST /api/challenge/v1/forms/<type>
+ * Durable form submission storage. Generates unique ID, stores payload as JSON,
+ * status NEW by default. No PII logging.
+ */
+async function handleFormSubmit(formType: string, request: Request, env: Env): Promise<Response> {
+	if (!(VALID_FORM_TYPES as readonly string[]).includes(formType)) {
+		return json({ ok: false, error: "unknown form type" }, 400);
+	}
+	let payload: Record<string, unknown>;
+	try {
+		payload = (await request.json()) as Record<string, unknown>;
+	} catch {
+		return json({ ok: false, error: "invalid JSON" }, 400);
+	}
+	// Basic spam guard: honeypot field must be empty.
+	if (payload._hp && String(payload._hp).trim() !== "") {
+		return json({ ok: true, message: "Thank you!" }); // Silently accept spam.
+	}
+	const id = `frm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+	// Strip honeypot and internal fields before storage.
+	const clean: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(payload)) {
+		if (k.startsWith("_")) continue;
+		if (typeof v === "string" && v.length > 5000) continue; // Truncate abuse.
+		clean[k] = typeof v === "string" ? v.slice(0, 5000) : v;
+	}
+	try {
+		await env.nwana_engine_db.prepare(
+			`INSERT INTO challenge_form_submissions (id, form_type, status, payload_json, source)
+			VALUES (?, ?, 'NEW', ?, 'challenges.nwaofna.org')`
+		).bind(id, formType, JSON.stringify(clean)).run();
+	} catch (e) {
+		return json({ ok: false, error: "storage failed" }, 500);
+	}
+	return json({ ok: true, id, message: "Thank you! We received your submission and will be in touch." });
+}
+
+/**
+ * GET /api/challenge/v1/form-submissions?form_type=organization&status=NEW
+ * List form submissions for Operating Center follow-up. Auth via X-Challenge-Key.
+ */
+async function handleFormList(url: URL, env: Env): Promise<Response> {
+	const formType = url.searchParams.get("form_type");
+	const status = url.searchParams.get("status");
+	let sql = `SELECT id, form_type, status, payload_json, source, created_at, updated_at
+		FROM challenge_form_submissions WHERE 1=1`;
+	const binds: unknown[] = [];
+	if (formType && (VALID_FORM_TYPES as readonly string[]).includes(formType)) {
+		sql += ` AND form_type = ?`;
+		binds.push(formType);
+	}
+	if (status) {
+		sql += ` AND status = ?`;
+		binds.push(status);
+	}
+	sql += ` ORDER BY created_at DESC LIMIT 200`;
+	try {
+		const result = await env.nwana_engine_db.prepare(sql).bind(...binds).all();
+		return json({ ok: true, submissions: result.results || [] });
+	} catch (e) {
+		return json({ ok: false, error: "d1 query failed" }, 500);
+	}
 }
 
 /**
