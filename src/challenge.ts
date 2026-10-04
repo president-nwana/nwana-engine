@@ -129,6 +129,14 @@ function participantUserId(p: UnknownRecord): number | null {
 	return int(user?.user_id) ?? int(p.user_id);
 }
 
+function participantName(p: UnknownRecord): string | null {
+	const user = asRecord(p.user);
+	const first = String(user?.first_name || p.first_name || "").trim();
+	const last = String(user?.last_name || p.last_name || "").trim();
+	const full = `${first} ${last}`.trim();
+	return full || null;
+}
+
 /**
  * GET /api/challenge/v1/my-events?rsu_user_id=123
  * Returns the events the verified user is registered for in race 216323.
@@ -324,14 +332,17 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 
 	// Store the activity→sub-event mapping in D1 for weekly aggregation.
 	// Only needed because RunSignup requires bundle-event submission.
+	// Capture the participant name for leaderboard display.
+	const participantForName = mine.find((p) => participantUserId(p) === rsuUserId);
+	const userName = participantForName ? participantName(participantForName) : null;
 	try {
 		await env.nwana_engine_db.prepare(
 			`INSERT OR IGNORE INTO challenge_activities
-			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, activity_date, distance_m, time_s, activity_type)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, user_name, activity_date, distance_m, time_s, activity_type)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		).bind(
 			tallySplitNum, CHALLENGE_RACE_ID, submitEventId, eventId,
-			registrationId, rsuUserId, date, distanceM, timeS, activityType
+			registrationId, rsuUserId, userName, date, distanceM, timeS, activityType
 		).run();
 	} catch (e) {
 		// Mapping failure should not fail the submission; log and continue.
@@ -377,5 +388,151 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	if (path === "/api/challenge/v1/activities" && request.method === "POST") {
 		return handlePostActivity(request, env);
 	}
+	if (path === "/api/challenge/v1/leaderboard" && request.method === "GET") {
+		return handleLeaderboard(url, env);
+	}
 	return json({ ok: false, error: "unknown challenge endpoint" }, 404);
+}
+
+/**
+ * Monday of the week containing dateStr (YYYY-MM-DD).
+ * Week = Monday–Sunday. Uses UTC date arithmetic on the date-only value.
+ */
+function mondayOfWeek(dateStr: string): string {
+	const [y, m, d] = dateStr.split("-").map(Number);
+	const date = new Date(Date.UTC(y, m - 1, d));
+	const day = date.getUTCDay(); // 0=Sunday
+	const diff = day === 0 ? -6 : 1 - day;
+	date.setUTCDate(date.getUTCDate() + diff);
+	return date.toISOString().slice(0, 10);
+}
+
+function addDays(dateStr: string, days: number): string {
+	const [y, m, d] = dateStr.split("-").map(Number);
+	const date = new Date(Date.UTC(y, m - 1, d));
+	date.setUTCDate(date.getUTCDate() + days);
+	return date.toISOString().slice(0, 10);
+}
+
+function formatTime(seconds: number): string {
+	const h = Math.floor(seconds / 3600);
+	const m = Math.floor((seconds % 3600) / 60);
+	const s = seconds % 60;
+	if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+	return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+interface ActivityRow {
+	rsu_user_id: number;
+	user_name: string | null;
+	sub_event_id: number;
+	activity_date: string;
+	distance_m: number | null;
+	time_s: number | null;
+	activity_type: string | null;
+}
+
+/**
+ * GET /api/challenge/v1/leaderboard?week=YYYY-MM-DD&discipline=X&event_id=Y&type=mileage|speed
+ * Weekly leaderboards from canonical D1. Week = Monday–Sunday.
+ * - mileage: SUM(distance) per participant per week (per discipline's mileage event)
+ * - speed: MIN(time) per participant per event per week
+ * Open Challenge is excluded (participation + fundraising only, no sport ranking).
+ */
+async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
+	const weekParam = url.searchParams.get("week");
+	const disciplineFilter = url.searchParams.get("discipline");
+	const eventIdFilter = url.searchParams.get("event_id");
+	const typeFilter = url.searchParams.get("type"); // mileage | speed | null (both)
+
+	// Determine week range.
+	let weekStart: string;
+	if (weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam)) {
+		weekStart = mondayOfWeek(weekParam);
+	} else {
+		// Current week.
+		const now = new Date();
+		const today = now.toISOString().slice(0, 10);
+		weekStart = mondayOfWeek(today);
+	}
+	const weekEnd = addDays(weekStart, 6);
+
+	// Fetch week's activities from D1.
+	let rows: ActivityRow[] = [];
+	try {
+		const result = await env.nwana_engine_db.prepare(
+			`SELECT rsu_user_id, user_name, sub_event_id, activity_date, distance_m, time_s, activity_type
+			FROM challenge_activities
+			WHERE activity_date >= ? AND activity_date <= ?
+			ORDER BY activity_date`
+		).bind(weekStart, weekEnd).all<ActivityRow>();
+		rows = result.results || [];
+	} catch (e) {
+		return json({ ok: false, error: "d1 query failed" }, 500);
+	}
+
+	// Build lookup: event_id → def.
+	const mileageBoards: Record<string, Array<{ rank: number; rsu_user_id: number; name: string | null; total_km: number; activities: number }>> = {};
+	const speedBoards: Record<string, Array<{ rank: number; rsu_user_id: number; name: string | null; best_time_s: number; best_time: string }>> = {};
+
+	// Group mileage: by discipline (each discipline has one mileage event).
+	const mileageEvents = CHALLENGE_EVENTS.filter((e) => e.format === "mileage");
+	for (const mev of mileageEvents) {
+		if (disciplineFilter && mev.discipline !== disciplineFilter) continue;
+		if (eventIdFilter && String(mev.event_id) !== eventIdFilter) continue;
+		if (typeFilter && typeFilter !== "mileage") continue;
+		const relevant = rows.filter((r) => r.sub_event_id === mev.event_id && r.distance_m);
+		const byUser = new Map<number, { name: string | null; total_m: number; count: number }>();
+		for (const r of relevant) {
+			const cur = byUser.get(r.rsu_user_id) || { name: r.user_name, total_m: 0, count: 0 };
+			cur.total_m += r.distance_m!;
+			cur.count += 1;
+			if (!cur.name && r.user_name) cur.name = r.user_name;
+			byUser.set(r.rsu_user_id, cur);
+		}
+		const ranked = [...byUser.entries()]
+			.map(([rsu_user_id, v]) => ({
+				rsu_user_id,
+				name: v.name,
+				total_km: Math.round((v.total_m / 1000) * 100) / 100,
+				activities: v.count,
+			}))
+			.sort((a, b) => b.total_km - a.total_km)
+			.map((r, i) => ({ rank: i + 1, ...r }));
+		mileageBoards[mev.discipline] = ranked;
+	}
+
+	// Group speed: by event (MIN time per participant per event).
+	const speedEvents = CHALLENGE_EVENTS.filter((e) => e.format === "speed");
+	for (const sev of speedEvents) {
+		if (disciplineFilter && sev.discipline !== disciplineFilter) continue;
+		if (eventIdFilter && String(sev.event_id) !== eventIdFilter) continue;
+		if (typeFilter && typeFilter !== "speed") continue;
+		const relevant = rows.filter((r) => r.sub_event_id === sev.event_id && r.time_s);
+		const byUser = new Map<number, { name: string | null; best_s: number }>();
+		for (const r of relevant) {
+			const cur = byUser.get(r.rsu_user_id);
+			if (!cur || r.time_s! < cur.best_s) {
+				byUser.set(r.rsu_user_id, { name: r.user_name || cur?.name || null, best_s: r.time_s! });
+			}
+		}
+		const ranked = [...byUser.entries()]
+			.map(([rsu_user_id, v]) => ({
+				rsu_user_id,
+				name: v.name,
+				best_time_s: v.best_s,
+				best_time: formatTime(v.best_s),
+			}))
+			.sort((a, b) => a.best_time_s - b.best_time_s)
+			.map((r, i) => ({ rank: i + 1, ...r }));
+		speedBoards[String(sev.event_id)] = ranked;
+	}
+
+	return json({
+		ok: true,
+		week_start: weekStart,
+		week_end: weekEnd,
+		mileage: mileageBoards,
+		speed: speedBoards,
+	});
 }
