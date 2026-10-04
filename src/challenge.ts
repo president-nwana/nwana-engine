@@ -12,8 +12,8 @@ export const CHALLENGE_RACE_ID = 216323;
 export interface ChallengeEventDef {
 	event_id: number;
 	event_name: string;
-	discipline: "Nordic Walking" | "Race Walking" | "Running" | "Cycling";
-	format: "mileage" | "speed" | "relay" | "team";
+	discipline: "Nordic Walking" | "Race Walking" | "Running" | "Cycling" | "Walking" | "Open Challenge";
+	format: "mileage" | "speed" | "relay" | "team" | "open";
 	distance_label: string;
 	fixed_distance_m: number | null;
 }
@@ -55,6 +55,9 @@ export const CHALLENGE_EVENTS: ChallengeEventDef[] = [
 	{ event_id: 1222898, event_name: "Walking — 1 Mile", discipline: "Walking", format: "speed", distance_label: "1 Mile", fixed_distance_m: 1609 },
 	{ event_id: 1222899, event_name: "Walking — 5K", discipline: "Walking", format: "speed", distance_label: "5K", fixed_distance_m: 5000 },
 	{ event_id: 1222900, event_name: "Walking — 10K", discipline: "Walking", format: "speed", distance_label: "10K", fixed_distance_m: 10000 },
+	// Open Challenge (1) — participation + fundraising, not a competitive discipline.
+	// Activity type is selected at logging time and stored in D1 for personal history.
+	{ event_id: 1222924, event_name: "Open Challenge — Move for NWANA", discipline: "Open Challenge", format: "open", distance_label: "Any Activity", fixed_distance_m: null },
 ];
 
 export const CHALLENGE_EVENT_IDS = CHALLENGE_EVENTS.map((e) => e.event_id);
@@ -175,6 +178,7 @@ interface ActivityInput {
 	date?: unknown; // YYYY-MM-DD
 	distance_m?: unknown; // meters, null when not given
 	time_s?: unknown; // seconds, null when not given
+	activity_type?: unknown; // Open Challenge only: Hiking, Swimming, etc.
 }
 
 /**
@@ -195,6 +199,7 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	const date = typeof input.date === "string" ? input.date : "";
 	const distanceM = input.distance_m == null ? null : int(input.distance_m);
 	const timeS = input.time_s == null ? null : int(input.time_s);
+	const activityType = typeof input.activity_type === "string" ? input.activity_type.slice(0, 50) : null;
 	const def = eventId ? EVENT_BY_ID.get(eventId) : undefined;
 
 	if (!rsuUserId || !def || !eventId) return json({ ok: false, error: "unknown event or user" }, 400);
@@ -205,11 +210,15 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	if (timeS !== null && !(timeS > 0 && timeS <= 86400 * 2)) {
 		return json({ ok: false, error: "invalid time_s" }, 400);
 	}
-	// Speed/relay events require a time; mileage/team require a distance.
+	// Speed/relay events require a time; mileage/team/open require a distance.
 	const needsTime = def.format === "speed" || def.format === "relay";
-	const needsDistance = def.format === "mileage" || def.format === "team";
+	const needsDistance = def.format === "mileage" || def.format === "team" || def.format === "open";
 	if (needsTime && timeS === null) return json({ ok: false, error: "time is required for this event" }, 400);
 	if (needsDistance && distanceM === null) return json({ ok: false, error: "distance is required for this event" }, 400);
+	// Open Challenge requires an activity type for personal history.
+	if (def.format === "open" && !activityType) {
+		return json({ ok: false, error: "activity type is required for Open Challenge" }, 400);
+	}
 
 	// Verify ownership: the user must have a registration for this event,
 	// either directly or via a discipline bundle covering it.
@@ -318,11 +327,11 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	try {
 		await env.nwana_engine_db.prepare(
 			`INSERT OR IGNORE INTO challenge_activities
-			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, activity_date, distance_m, time_s)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, activity_date, distance_m, time_s, activity_type)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		).bind(
 			tallySplitNum, CHALLENGE_RACE_ID, submitEventId, eventId,
-			registrationId, rsuUserId, date, distanceM, timeS
+			registrationId, rsuUserId, date, distanceM, timeS, activityType
 		).run();
 	} catch (e) {
 		// Mapping failure should not fail the submission; log and continue.
