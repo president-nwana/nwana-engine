@@ -176,7 +176,7 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	const timeS = input.time_s == null ? null : int(input.time_s);
 	const def = eventId ? EVENT_BY_ID.get(eventId) : undefined;
 
-	if (!rsuUserId || !def) return json({ ok: false, error: "unknown event or user" }, 400);
+	if (!rsuUserId || !def || !eventId) return json({ ok: false, error: "unknown event or user" }, 400);
 	if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ ok: false, error: "date must be YYYY-MM-DD" }, 400);
 	if (distanceM !== null && !(distanceM > 0 && distanceM <= 100000000)) {
 		return json({ ok: false, error: "invalid distance_m" }, 400);
