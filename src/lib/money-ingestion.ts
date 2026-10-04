@@ -422,8 +422,8 @@ async function buildIngestBatch(
 						gross_cents, gross_status, fee_cents, fee_status,
 						amount_paid_cents, amount_paid_status,
 						net_cents, net_status, refund_cents, refund_status,
-						attribution, source_ref, source_payload_hash
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+						attribution, source_ref, source_payload_hash, fundraiser_id
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				)
 				.bind(
 					eventKey,
@@ -446,6 +446,7 @@ async function buildIngestBatch(
 					ATTRIBUTION_UNKNOWN,
 					n.sourceRef,
 					n.snapshotHash,
+					(n as { fundraiserId?: string | null }).fundraiserId ?? null,
 				),
 		);
 	};

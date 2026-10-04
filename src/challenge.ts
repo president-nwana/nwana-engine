@@ -437,14 +437,17 @@ interface DonationRow {
 	occurred_at: string | null;
 	gross_cents: number | null;
 	source_ref: string;
+	fundraiser_id: string | null;
 }
 
 /**
  * GET /api/challenge/v1/fundraising-leaderboard?week=YYYY-MM-DD
  * Weekly fundraising leaderboard from canonical money_events.
  * Race 216323 only. Week = Monday–Sunday.
- * Groups by fundraiser (source_ref). No fake data — empty until real donations sync.
- * Open Challenge participates (discipline does not affect donation ranking).
+ * Groups by fundraiser_id (NOT by transaction — multiple donations to one
+ * fundraiser produce one row with summed amount). No fake data — empty until
+ * real donations sync. Open Challenge participates (discipline does not
+ * affect donation ranking).
  */
 async function handleFundraisingLeaderboard(url: URL, env: Env): Promise<Response> {
 	const weekParam = url.searchParams.get("week");
@@ -461,7 +464,7 @@ async function handleFundraisingLeaderboard(url: URL, env: Env): Promise<Respons
 	let rows: DonationRow[] = [];
 	try {
 		const result = await env.nwana_engine_db.prepare(
-			`SELECT source_transaction_id, occurred_at, gross_cents, source_ref
+			`SELECT source_transaction_id, occurred_at, gross_cents, source_ref, fundraiser_id
 			FROM money_events
 			WHERE source_ref LIKE 'race:216323/%'
 			  AND event_type IN ('donation_received', 'fundraiser_donation_received')
@@ -474,12 +477,11 @@ async function handleFundraisingLeaderboard(url: URL, env: Env): Promise<Respons
 		return json({ ok: false, error: "d1 query failed" }, 500);
 	}
 
-	// Group by fundraiser. source_ref may contain fundraiser info;
-	// for v1, group by the donation's source identity.
-	// TODO: resolve fundraiser_id → display name via fundraiser mapping.
+	// Group by fundraiser_id. Donations without a fundraiser_id (general race
+	// donations) are grouped under a shared "general" key.
 	const byFundraiser = new Map<string, { total_cents: number; count: number }>();
 	for (const r of rows) {
-		const key = r.source_transaction_id;
+		const key = r.fundraiser_id || "__general__";
 		const cur = byFundraiser.get(key) || { total_cents: 0, count: 0 };
 		cur.total_cents += r.gross_cents!;
 		cur.count += 1;
@@ -487,8 +489,8 @@ async function handleFundraisingLeaderboard(url: URL, env: Env): Promise<Respons
 	}
 
 	const ranked = [...byFundraiser.entries()]
-		.map(([fundraiser_key, v]) => ({
-			fundraiser_key,
+		.map(([fundraiser_id, v]) => ({
+			fundraiser_id,
 			total_usd: Math.round((v.total_cents / 100) * 100) / 100,
 			donations: v.count,
 		}))
