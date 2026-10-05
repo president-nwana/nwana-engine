@@ -5905,6 +5905,16 @@ export default {
 			(url.pathname.startsWith("/operating-center") || url.pathname.startsWith("/admin"));
 		const operatingCenterApiRoute = operatingCenterRoute && !isPageShell;
 
+		// RunSignup OAuth2 flow (2026-10-05): the authorize/callback endpoints
+		// must work without an OC session. The authorize redirect goes to
+		// RunSignup and back; the callback validates the D1-stored state
+		// (CSRF protection) before storing tokens. Only the person who
+		// initiated the flow can complete it.
+		const runSignupOAuthRoute =
+			url.pathname === "/api/operating-center/runsignup-oauth/authorize" ||
+			url.pathname === "/api/operating-center/runsignup-oauth/callback";
+		const operatingCenterApiAuthRequired = operatingCenterApiRoute && !runSignupOAuthRoute;
+
 		// ADR-0047 role-based navigation: every /api/portal/* data route is
 		// tenant-user only. The tenant comes from the token, never the URL.
 		const portalApiRoute = url.pathname.startsWith("/api/portal/");
@@ -5932,7 +5942,7 @@ export default {
 		//     inherently NWANA-scoped by their data model.
 		// demo_user and other-tenant sessions are portal-only (403 here).
 		// demo_user sessions are read-only everywhere (403 on non-GET).
-		if (operatingCenterApiRoute) {
+		if (operatingCenterApiAuthRequired) {
 			// Tenant gate (2026-10-02): NWANA is no longer special-cased.
 			// Any active tenant's owner/admin/user may use the operating center;
 			// data isolation is enforced per-query by tenant_id.
