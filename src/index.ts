@@ -44,6 +44,7 @@ import {
 	testSeries2026WriteAccess,
 } from "./race-lifecycle";
 import { applySeries2026Levels, AUTO_APPROVED_CONFIRMATION } from "./series-2026-apply";
+import { processStage8D1 } from "./series-2026-stage8-d1";
 import {
 	diagnoseRegistrationAccess,
 	getRaceEventIds,
@@ -8027,6 +8028,31 @@ export default {
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Write test failed" }, 500);
+			}
+		}
+
+		// D1-only Stage 8 processing (2026-10-05, owner-authorized).
+		// Computes Performance Level, Level Place, points from approved
+		// results in D1; updates race_event_results and lifecycle stage.
+		// No RunSignup API calls. No writes to RunSignup.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/process-stage8-d1") {
+			try {
+				const body = await request.json() as { distance?: string; event_id?: number; confirm?: string };
+				if (body.confirm !== "PROCESS_D1") {
+					return json({ ok: false, error: 'Explicit confirm: "PROCESS_D1" is required' }, 400);
+				}
+				if (!body.distance || !Number.isInteger(body.event_id)) {
+					return json({ ok: false, error: "distance and event_id are required" }, 400);
+				}
+				const result = await processStage8D1({
+					db: env.nwana_engine_db,
+					distance: body.distance,
+					eventId: body.event_id as number,
+				});
+				return json(result, result.ok ? 200 : 422);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "D1 processing failed" }, 500);
 			}
 		}
 

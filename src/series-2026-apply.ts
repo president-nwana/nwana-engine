@@ -473,6 +473,7 @@ export async function applyEventResultSet(
 	accessToken: string,
 	push: (step: ApplyStepResult) => void,
 	disqualifiedResultIds?: Set<string>,
+	d1Only?: boolean,
 ): Promise<{ computed: ComputedLifecycleResult[]; resultCount: number }> {
 	const live = await readEventResultSet(source, eventId, resultSetId, accessToken);
 	push({
@@ -924,10 +925,17 @@ export async function applySeries2026Levels(
 		await logApply(input.db, { distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: null, resultCount: 0 }, "REJECTED", result.steps, result.error);
 		return result;
 	}
-	if (event.stage !== "verifying" && !isRebuild) {
+	if (event.stage !== "verifying" && !isRebuild && !input.d1Only) {
 		const result = fail(base, "check_stage", `Event ${input.eventId} is in stage "${event.stage}", not "verifying". Nothing to apply.`);
 		await logApply(input.db, { distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: null, resultCount: 0 }, "REJECTED", result.steps, result.error);
 		return result;
+	}
+	if (input.d1Only && event.stage !== "verifying") {
+		push({
+			step: "check_stage",
+			status: "ok",
+			detail: `D1-only mode: proceeding despite stage "${event.stage}" (owner-authorized).`,
+		});
 	}
 
 	if (isRebuild) {
