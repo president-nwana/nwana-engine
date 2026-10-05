@@ -8148,16 +8148,70 @@ export default {
 					// - site_news_published: site news created
 					// - social_published: social posts published
 					breakdown: {
-						results_published: lifecycleStage === "published" || lifecycleStage === "levels_computed",
-						// Note: "published" currently means results written; site/social not verified.
-						// This is the bug Albert identified.
-						site_news_published: "UNKNOWN - not verified",
-						social_published: "UNKNOWN - not verified",
+						results_published: lifecycleStage === "results_published" || lifecycleStage === "published",
+						site_news_published: (history.results || []).some((h) => h.status.includes("PUBLISHED")),
+						social_published: (history.results || []).some((h) => h.status.includes("PUBLISHED")),
 					},
 				});
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Status check failed" }, 500);
+			}
+		}
+
+		// Full publication for Stage 8 1K (2026-10-05, owner-authorized).
+		// Creates site winner news + Meta congratulations (male asset, both winners male).
+		// Idempotent: checks publication history first; skips if already published.
+		// Does NOT rewrite RunSignup results.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/publish-stage8") {
+			try {
+				const body = await request.json() as { distance?: string; event_id?: number; result_set_id?: number; race_id?: number; confirm?: string };
+				if (body.confirm !== "PUBLISH") {
+					return json({ ok: false, error: 'Explicit confirm: "PUBLISH" is required' }, 400);
+				}
+				if (!body.distance || !Number.isInteger(body.event_id) || !Number.isInteger(body.result_set_id) || !Number.isInteger(body.race_id)) {
+					return json({ ok: false, error: "distance, event_id, result_set_id, race_id are required" }, 400);
+				}
+				if (!env.NWANA_META_TOKEN) {
+					return json({ ok: false, error: "NWANA_META_TOKEN is not configured" }, 503);
+				}
+				const accessToken = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+				const publicationKey = `runsignup:series-2026:${body.race_id}:${body.event_id}:${body.result_set_id}`;
+				const publicBaseUrl = env.PUBLIC_BASE_URL || "https://nwana-engine.nwana-engine.workers.dev";
+				const cardUrl = `${publicBaseUrl}/result-publications/card/${encodeURIComponent(publicationKey)}.png`;
+				const result = await executeResultPublication({
+					db: env.nwana_engine_db,
+					publicationKey,
+					runSignupToken: accessToken,
+					metaToken: env.NWANA_META_TOKEN,
+					imageUrl: cardUrl,
+					authorizedBy: { kind: "owner_result_approvals", distance: body.distance, eventId: body.event_id as number },
+				});
+				// If publication succeeded, update lifecycle to "published".
+				if (result.ok && !result.already_published) {
+					const db = env.nwana_engine_db;
+					const lifecycleRow = await db
+						.prepare(`SELECT events_json FROM race_lifecycle WHERE series = 'SERIES_2026' AND distance = ?`)
+						.bind(body.distance)
+						.first<{ events_json: string | null }>();
+					if (lifecycleRow?.events_json) {
+						try {
+							const events = JSON.parse(lifecycleRow.events_json) as Array<{ event_id: number; stage: string }>;
+							const ev = events.find((e) => e.event_id === body.event_id);
+							if (ev) {
+								ev.stage = "published";
+								await db
+									.prepare(`UPDATE race_lifecycle SET events_json = ? WHERE series = 'SERIES_2026' AND distance = ?`)
+									.bind(JSON.stringify(events), body.distance)
+									.run();
+							}
+						} catch { /* ignore */ }
+					}
+				}
+				return json(result, result.ok ? 200 : 422);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Publication failed" }, 500);
 			}
 		}
 
