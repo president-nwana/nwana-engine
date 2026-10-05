@@ -79,7 +79,27 @@ async function runSignupGet(
 			`RunSignup request failed: ${response.status} for ${url.pathname} :: ${body.slice(0, 300)}`,
 		);
 	}
-	return (await response.json()) as UnknownRecord;
+	const data = (await response.json()) as UnknownRecord;
+	// RunSignup returns HTTP 200 with an error payload for auth failures
+	// (e.g. error_code 6 "Key authentication failed"). Treat that as an
+	// error, not an empty result set.
+	const err = data.error as Record<string, unknown> | undefined;
+	if (err && typeof err === "object") {
+		const code = Number((err as Record<string, unknown>).error_code);
+		const msg =
+			typeof (err as Record<string, unknown>).error_msg === "string"
+				? ((err as Record<string, unknown>).error_msg as string)
+				: "Unknown RunSignup API error";
+		if (code === 6 || code === 13 || code === 17) {
+			throw new Error(
+				`RunSignup AUTH_FAILED (error_code ${code}): ${msg}. OAuth re-authorization required.`,
+			);
+		}
+		throw new Error(
+			`RunSignup API error (error_code ${Number.isInteger(code) ? code : "?"}): ${msg}`,
+		);
+	}
+	return data;
 }
 
 /**

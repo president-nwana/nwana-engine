@@ -1148,8 +1148,23 @@ export function renderRaceResultsHtml(): string {
 					:'<span class="err">● ERROR</span>';
 				let html='<div style="font-size:18px;margin-bottom:8px">'+badge+'</div>'+
 					'<div class="meta">'+esc(h.detail)+'</div>'+
-					'<div class="meta">Checked '+esc(h.checked_at)+'</div>'+
-					'<button id="retry-sync" style="width:auto;margin-top:10px">Retry Series Sync</button>';
+					'<div class="meta">Checked '+esc(h.checked_at)+'</div>';
+				// OAuth auth status
+				try{
+					const a=await api('/api/operating-center/runsignup-oauth/status');
+					const abadge=a.status==='CONNECTED'?'<span class="ok">● CONNECTED</span>'
+						:a.status==='TOKEN_REFRESHED'?'<span class="ok">● TOKEN_REFRESHED</span>'
+						:a.status==='REAUTH_REQUIRED'?'<span class="err">● REAUTH_REQUIRED</span>'
+						:'<span class="meta">● NOT_CONFIGURED</span>';
+					html+='<div style="margin-top:10px"><strong>RunSignup OAuth:</strong> '+abadge+
+						(a.expires_at?'<div class="meta">Token expires '+esc(a.expires_at)+'</div>':'')+
+						((a.status==='REAUTH_REQUIRED'||a.status==='NOT_CONFIGURED')
+							?'<div style="margin-top:8px"><a class="oc-menu-btn" href="/api/operating-center/runsignup-oauth/authorize">Connect RunSignup</a></div>'
+							:'')+'</div>';
+				}catch(e){
+					html+='<div class="meta" style="margin-top:10px">OAuth status unavailable.</div>';
+				}
+				html+='<button id="retry-sync" style="width:auto;margin-top:10px">Retry Series Sync</button>';
 				if(h.status==='OK'&&h.awaiting_approval&&h.awaiting_approval.length){
 					html+='<div style="margin-top:14px;padding:12px;border:2px solid var(--ok);border-radius:10px;background:#f0f7f2">'+
 						'<strong>Awaiting approval</strong>'+

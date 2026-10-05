@@ -16,6 +16,13 @@ import { getEventApprovals, recordResultApproval } from "./series-2026-approvals
 import { getRunSignupApiHealth } from "./series-2026-api-health";
 import { diagnoseRunSignupRaw } from "./series-2026-api-diagnose";
 import {
+	buildRunSignupAuthorizeUrl,
+	exchangeAuthorizationCode,
+	getRunSignupAuthStatus,
+	getValidRunSignupToken,
+	ReauthRequiredError,
+} from "./runsignup-oauth";
+import {
 	clearResultDecision,
 	getEventDisqualifications,
 	recordResultDisqualification,
@@ -8113,6 +8120,84 @@ export default {
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Diagnosis failed" }, 500);
+			}
+		}
+
+		// RunSignup OAuth2: one-time owner authorization flow.
+		// Albert authorizes once via browser; the Engine stores access +
+		// refresh tokens in D1 and auto-refreshes before expiry.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/runsignup-oauth/authorize") {
+			try {
+				const clientId = (env as unknown as Record<string, string | undefined>).RUNSIGNUP_OAUTH_CLIENT_ID;
+				if (!clientId) {
+					return json({ ok: false, error: "RUNSIGNUP_OAUTH_CLIENT_ID is not configured" }, 503);
+				}
+				const state = crypto.randomUUID().replace(/-/g, "");
+				await env.nwana_engine_db
+					.prepare(`INSERT INTO runsignup_oauth_state (state) VALUES (?)`)
+					.bind(state)
+					.run();
+				// Prune states older than 15 minutes.
+				await env.nwana_engine_db
+					.prepare(`DELETE FROM runsignup_oauth_state WHERE created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-15 minutes')`)
+					.run();
+				const redirectUri = `${new URL(request.url).origin}/api/operating-center/runsignup-oauth/callback`;
+				const authorizeUrl = buildRunSignupAuthorizeUrl({ clientId, redirectUri, state });
+				return Response.redirect(authorizeUrl, 302);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "OAuth authorize failed" }, 500);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/runsignup-oauth/callback") {
+			try {
+				const clientId = (env as unknown as Record<string, string | undefined>).RUNSIGNUP_OAUTH_CLIENT_ID;
+				const clientSecret = (env as unknown as Record<string, string | undefined>).RUNSIGNUP_OAUTH_CLIENT_SECRET;
+				if (!clientId || !clientSecret) {
+					return json({ ok: false, error: "RunSignup OAuth client is not configured" }, 503);
+				}
+				const code = url.searchParams.get("code");
+				const state = url.searchParams.get("state");
+				if (!code || !state) {
+					return new Response("<h2>Authorization failed</h2><p>Missing code or state.</p>", { status: 400, headers: { "content-type": "text/html;charset=utf-8" } });
+				}
+				const stored = await env.nwana_engine_db
+					.prepare(`SELECT state FROM runsignup_oauth_state WHERE state = ?`)
+					.bind(state)
+					.first<{ state: string }>();
+				if (!stored) {
+					return new Response("<h2>Authorization failed</h2><p>Invalid or expired state. Please start over.</p>", { status: 400, headers: { "content-type": "text/html;charset=utf-8" } });
+				}
+				await env.nwana_engine_db
+					.prepare(`DELETE FROM runsignup_oauth_state WHERE state = ?`)
+					.bind(state)
+					.run();
+				const redirectUri = `${new URL(request.url).origin}/api/operating-center/runsignup-oauth/callback`;
+				await exchangeAuthorizationCode(env.nwana_engine_db, {
+					clientId,
+					clientSecret,
+					code,
+					redirectUri,
+				});
+				return new Response(
+					"<h2>RunSignup connected</h2><p>OAuth tokens stored. The Engine will auto-refresh before expiry.</p><p><a href='/operating-center/results'>Back to Operating Center</a></p>",
+					{ headers: { "content-type": "text/html;charset=utf-8" } },
+				);
+			} catch (error) {
+				console.error(error);
+				const msg = error instanceof Error ? error.message : "OAuth callback failed";
+				return new Response(`<h2>Authorization failed</h2><p>${msg.replace(/[<>&"']/g, "")}</p>`, { status: 500, headers: { "content-type": "text/html;charset=utf-8" } });
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/runsignup-oauth/status") {
+			try {
+				const status = await getRunSignupAuthStatus(env.nwana_engine_db);
+				return json({ ok: true, ...status });
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Status check failed" }, 500);
 			}
 		}
 
