@@ -45,11 +45,12 @@ function extractApiError(body: string): { code: number | null; msg: string | nul
 
 export async function diagnoseRunSignupRaw(
 	accessToken: string,
+	override?: { raceId?: number; eventId?: number; resultSetId?: number },
 ): Promise<RunSignupRawDiagnostic> {
 	const steps: RunSignupRawDiagnostic["steps"] = [];
-	const raceId = 210020;
-	const eventId = 1177725;
-	const resultSetId = 665163;
+	const raceId = override?.raceId ?? 210020;
+	const eventId = override?.eventId ?? 1177725;
+	const resultSetId = override?.resultSetId ?? 665163;
 
 	// Step 1: get-result-sets
 	const setsUrl = new URL(

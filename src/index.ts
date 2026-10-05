@@ -21,6 +21,7 @@ import {
 	getRunSignupAuthStatus,
 	getValidRunSignupToken,
 	ReauthRequiredError,
+	resolveRunSignupAccessToken,
 } from "./runsignup-oauth";
 import {
 	clearResultDecision,
@@ -3017,7 +3018,7 @@ async function discoverRunSignup(
         env: Env,
 ): Promise<Response> {
         const source = new RunSignupSource({
-                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
                 apiCallerToken: env.RUNSIGNUP_API_REG,
                 apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
@@ -3331,7 +3332,7 @@ async function previewRunSignupEvents(
         env: Env,
 ): Promise<Response> {
         const source = new RunSignupSource({
-                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
                 apiCallerToken: env.RUNSIGNUP_API_REG,
                 apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
@@ -3459,7 +3460,7 @@ async function ingestRunSignupEvents(
         env: Env,
 ): Promise<Response> {
         const source = new RunSignupSource({
-                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
                 apiCallerToken: env.RUNSIGNUP_API_REG,
                 apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
@@ -3750,7 +3751,7 @@ async function ingestRunSignupDiscovery(
         env: Env,
 ): Promise<Response> {
         const source = new RunSignupSource({
-                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
                 apiCallerToken: env.RUNSIGNUP_API_REG,
                 apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
@@ -3975,7 +3976,7 @@ async function syncRunSignup(
         env: Env,
 ): Promise<Response> {
         const source = new RunSignupSource({
-                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
                 apiCallerToken: env.RUNSIGNUP_API_REG,
                 apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
@@ -4557,7 +4558,7 @@ async function ingestRunSignupRelationships(
         env: Env,
 ): Promise<Response> {
         const source = new RunSignupSource({
-                accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+                accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
                 apiCallerToken: env.RUNSIGNUP_API_REG,
                 apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
         });
@@ -7981,7 +7982,7 @@ export default {
 				}
 				const state = await syncRaceLifecycleDistance({
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					apiCallerToken: env.RUNSIGNUP_API_REG,
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					distance,
@@ -8019,7 +8020,7 @@ export default {
 				}
 				const result = await testSeries2026WriteAccess({
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					distance: body.distance,
 				});
 				return json(result);
@@ -8046,7 +8047,7 @@ export default {
 				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					apiCallerToken: env.RUNSIGNUP_API_REG,
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
@@ -8062,7 +8063,7 @@ export default {
 					liveResults = [];
 				} else {
 					try {
-						liveResults = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+						liveResults = await fetchLiveEventResults(await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]), source.raceId, eventId);
 					} catch (error) {
 						console.error("fetchLiveEventResults failed:", error instanceof Error ? error.message : error);
 						liveResults = [];
@@ -8109,10 +8110,8 @@ export default {
 
 		if (request.method === "GET" && url.pathname === "/api/operating-center/series-2026/runsignup-health") {
 			try {
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
-				const health = await getRunSignupApiHealth(env.nwana_engine_db, env.RUNSIGNUP_ACCESS_TOKEN);
+				const token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+				const health = await getRunSignupApiHealth(env.nwana_engine_db, token);
 				return json({ ok: true, ...health });
 			} catch (error) {
 				console.error(error);
@@ -8122,10 +8121,16 @@ export default {
 
 		if (request.method === "GET" && url.pathname === "/api/operating-center/series-2026/runsignup-diagnose") {
 			try {
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
-				const diag = await diagnoseRunSignupRaw(env.RUNSIGNUP_ACCESS_TOKEN);
+				const token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+				const hasOverride = url.searchParams.get("race_id") || url.searchParams.get("event_id") || url.searchParams.get("result_set_id");
+				const override = hasOverride
+					? {
+						raceId: url.searchParams.get("race_id") ? Number(url.searchParams.get("race_id")) : undefined,
+						eventId: url.searchParams.get("event_id") ? Number(url.searchParams.get("event_id")) : undefined,
+						resultSetId: url.searchParams.get("result_set_id") ? Number(url.searchParams.get("result_set_id")) : undefined,
+					}
+					: undefined;
+				const diag = await diagnoseRunSignupRaw(token, override);
 				return json({ ok: true, ...diag });
 			} catch (error) {
 				console.error(error);
@@ -8226,13 +8231,13 @@ export default {
 				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					metaToken: env.NWANA_META_TOKEN,
 					apiCallerToken: env.RUNSIGNUP_API_REG,
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
 				};
-				const live = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				const live = await fetchLiveEventResults(await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]), source.raceId, eventId);
 				const liveById = new Map(live.map((r) => [r.result_id, r]));
 				const recorded = [];
 				for (const resultId of resultIds) {
@@ -8291,13 +8296,13 @@ export default {
 				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					metaToken: env.NWANA_META_TOKEN,
 					apiCallerToken: env.RUNSIGNUP_API_REG,
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
 				};
-				const live = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				const live = await fetchLiveEventResults(await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]), source.raceId, eventId);
 				const liveById = new Map(live.map((r) => [r.result_id, r]));
 				const recorded = [];
 				for (const resultId of resultIds) {
@@ -8367,7 +8372,7 @@ export default {
 				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					metaToken: env.NWANA_META_TOKEN,
 					apiCallerToken: env.RUNSIGNUP_API_REG,
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
@@ -8398,7 +8403,7 @@ export default {
 				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					apiCallerToken: env.RUNSIGNUP_API_REG,
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
@@ -8459,7 +8464,7 @@ export default {
 				}
 				const result = await applySeries2026Levels({
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					distance: body.distance,
 					eventId: body.event_id as number,
 					confirmation: body.confirmation ?? "",
@@ -8571,7 +8576,7 @@ export default {
 				}
 				const result = await linkRunSignupRace({
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					packetId: String(body.packet_id ?? ""),
 					raceId: Number(body.race_id),
 					eventId: body.event_id !== undefined ? Number(body.event_id) : undefined,
@@ -8638,7 +8643,7 @@ export default {
 				}
 				const result = await applyCreationStep({
 					db: env.nwana_engine_db,
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					packetId: String(body.packet_id ?? ""),
 					stepId: String(body.step_id ?? ""),
 					confirm: String(body.confirm ?? ""),
@@ -9078,7 +9083,7 @@ export default {
 			if (operatorGate) return operatorGate;
 			try {
 				const summary = await syncSeries2026Registrations(env.nwana_engine_db, {
-					accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					apiCallerToken: env.RUNSIGNUP_API_REG,
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 				});
@@ -9135,7 +9140,7 @@ export default {
 				const eventIds = await getRaceEventIds(env.nwana_engine_db, 209477);
 				const diagnosis = await diagnoseRegistrationAccess(
 					{
-						accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+						accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 						apiCallerToken: env.RUNSIGNUP_API_REG,
 						apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					},
@@ -9599,7 +9604,7 @@ if (
 		}
 		const autoEnv = {
 			db: env.nwana_engine_db,
-			accessToken: env.RUNSIGNUP_ACCESS_TOKEN,
+			accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 			metaToken: env.NWANA_META_TOKEN,
 			apiCallerToken: env.RUNSIGNUP_API_REG,
 			apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
