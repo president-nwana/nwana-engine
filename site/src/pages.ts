@@ -221,6 +221,18 @@ export async function homePage(db: D1Database): Promise<string> {
       </div>
     </div>
   </div></div>
+  <div class="section"><div class="wrap">
+    <div class="kicker">Free instructor education</div>
+    <h2>Free Instructor Education for Participating Organizations</h2>
+    <p>Your organization chooses the people. NWANA provides their Nordic Walking instructor education at no cost to them.</p>
+    <p>Senior programs, health and rehabilitation organizations, community groups, veterans programs, youth programs, parks and recreation departments, schools, universities and other participating organizations can nominate their own people.</p>
+    <p>Donations, grants, sponsors, fundraising and workplace giving help NWANA operate and scale the program.</p>
+    <div class="cta-row" style="margin-top:22px">
+      <a class="btn" href="https://challenges.nwaofna.org/organizations">For Organizations</a>
+      <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="https://challenges.nwaofna.org/instructor-training">Instructor Education</a>
+      <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="https://challenges.nwaofna.org/fundraising">Support the Program</a>
+    </div>
+  </div></div>
   <div class="section alt"><div class="wrap">
     <div class="kicker">Race calendar</div>
     <h2>Next on the start line</h2>
@@ -235,7 +247,7 @@ export async function homePage(db: D1Database): Promise<string> {
   <div class="section alt"><div class="wrap">
     <div class="kicker">The mission</div>
     <h2>Built like a federation, from day one</h2>
-    <p>NWANA is a 501(c)(3) public charity on a simple mission: make Nordic walking a recognized, professionally run sport across North America. Verified competitions, transparent standings, trained instructors, and local groups in every region. Your donation builds the machine that makes it all run: race operations, verification, the Academy, and free community programs.</p>
+    <p>NWANA is a 501(c)(3) public charity on a simple mission: make Nordic walking a recognized, professionally run sport across North America. Verified competitions, transparent standings, trained instructors, and local groups in every region. Your support helps NWANA provide free instructor education, grow local groups, and power verified competitions.</p>
     <div class="cta-row" style="margin-top:22px">
       <a class="btn btn-navy" href="${DONATE_URL}">Donate to NWANA</a>
       <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="/calendar">Find your race</a>
