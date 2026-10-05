@@ -1069,6 +1069,11 @@ export function renderRaceResultsHtml(): string {
 			<p><a class="oc-menu-btn" href="/login">Sign in</a></p>
 		</section>
 		<div id="app" hidden>
+			<section class="panel" id="api-health-panel">
+				<h2>RunSignup Results API health</h2>
+				<div id="api-health">Loading…</div>
+				<div><span class="message" id="api-health-message" aria-live="polite"></span></div>
+			</section>
 			<section class="panel">
 				<h2>Result publication</h2>
 				<p class="meta">One click per ready result: publishes to 4 Meta destinations and the NWANA site news (winner announcement + next-race promo). Requires the owner key and an explicit confirmation. Already-published results are skipped automatically.</p>
@@ -1130,6 +1135,68 @@ export function renderRaceResultsHtml(): string {
 					'<div class="meta">'+(d.synced_at?'Synced '+esc(d.synced_at):'Never synced')+'</div>'+
 					events+'</section>';
 			}).join('');
+		}
+		async function loadApiHealth(){
+			const box=document.querySelector('#api-health');
+			const msg=document.querySelector('#api-health-message');
+			try{
+				const h=await api('/api/operating-center/series-2026/runsignup-health');
+				const badge=h.status==='OK'
+					?'<span class="ok">● OK</span>'
+					:h.status==='EMPTY_RESPONSE_PROTECTED'
+					?'<span style="color:#a86a1c;font-weight:650">● EMPTY_RESPONSE_PROTECTED</span>'
+					:'<span class="err">● ERROR</span>';
+				let html='<div style="font-size:18px;margin-bottom:8px">'+badge+'</div>'+
+					'<div class="meta">'+esc(h.detail)+'</div>'+
+					'<div class="meta">Checked '+esc(h.checked_at)+'</div>'+
+					'<button id="retry-sync" style="width:auto;margin-top:10px">Retry Series Sync</button>';
+				if(h.status==='OK'&&h.awaiting_approval&&h.awaiting_approval.length){
+					html+='<div style="margin-top:14px;padding:12px;border:2px solid var(--ok);border-radius:10px;background:#f0f7f2">'+
+						'<strong>Awaiting approval</strong>'+
+						h.awaiting_approval.map(a=>
+							'<div style="margin-top:8px"><strong>'+esc(a.distance)+'</strong> — '+esc(a.event_name)+' ('+esc(a.event_date)+'): '+
+							esc(String(a.unapproved_count))+' result(s) awaiting approval. '+
+							'<button data-review="'+esc(a.distance)+'|'+esc(String(a.event_id))+'" style="width:auto;margin-top:6px">Review results</button></div>'
+						).join('')+'</div><div id="approval-detail"></div>';
+				}else if(h.status==='OK'){
+					html+='<div class="meta" style="margin-top:10px">No stages awaiting approval.</div>';
+				}
+				box.innerHTML=html;
+				const retry=document.querySelector('#retry-sync');
+				if(retry)retry.addEventListener('click',async()=>{
+					msg.textContent='Syncing all distances…';
+					try{
+						for(const d of DISTANCES){
+							await api('/api/operating-center/race-lifecycle/sync?distance='+encodeURIComponent(d),{method:'POST'});
+						}
+						msg.textContent='Sync complete. Refreshing health…';
+						await loadApiHealth();
+						msg.textContent='Sync complete.';
+					}catch(err){msg.textContent='Sync failed: '+err.message}
+				});
+				box.querySelectorAll('[data-review]').forEach(btn=>btn.addEventListener('click',async()=>{
+					const parts=btn.dataset.review.split('|');
+					const detail=document.querySelector('#approval-detail');
+					detail.innerHTML='<div class="meta">Loading results…</div>';
+					try{
+						const p=await api('/api/operating-center/series-2026/results/pending?distance='+encodeURIComponent(parts[0])+'&event_id='+encodeURIComponent(parts[1]));
+						if(!p.results.length){detail.innerHTML='<div class="unavailable">No results found.</div>';return}
+						detail.innerHTML='<table><thead><tr><th>Athlete</th><th>Time</th><th>Status</th><th></th></tr></thead><tbody>'+
+							p.results.map(r=>'<tr><td>'+esc(r.athlete)+'</td><td>'+esc(r.time||'')+'</td><td>'+
+								(r.approved?'<span class="ok">Approved</span>':'<span class="meta">Pending</span>')+'</td><td>'+
+								(r.approved?'':'<button data-approve="'+esc(parts[0])+'|'+esc(parts[1])+'|'+esc(r.result_id)+'" style="width:auto">Approve</button>')+'</td></tr>').join('')+
+							'</tbody></table>';
+						detail.querySelectorAll('[data-approve]').forEach(ab=>ab.addEventListener('click',async()=>{
+							const ap=ab.dataset.approve.split('|');
+							ab.disabled=true;ab.textContent='Approving…';
+							try{
+								await api('/api/operating-center/series-2026/results/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance:ap[0],event_id:Number(ap[1]),result_ids:[ap[2]]})});
+								await loadApiHealth();
+							}catch(err){ab.disabled=false;ab.textContent='Approve';msg.textContent='Approve failed: '+err.message}
+						}));
+					}catch(err){detail.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+				}));
+			}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 		}
 		async function loadLifecycle(){
 			const box=document.querySelector('#lifecycle');
@@ -1194,7 +1261,7 @@ export function renderRaceResultsHtml(): string {
 			try{renderResults(await api('/api/operating-center/race-results'))}
 			catch(err){document.querySelector('#results').innerHTML='<div class="panel"><div class="unavailable">'+esc(err.message)+'</div></div>'}
 		}
-		if(!getKey()){window.location.href='/login'}else{showApp();refresh();loadLifecycle();loadPubDrafts()}
+		if(!getKey()){window.location.href='/login'}else{showApp();refresh();loadApiHealth();loadLifecycle();loadPubDrafts()}
 	</script>
 </body></html>`;
 }

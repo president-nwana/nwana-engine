@@ -13,6 +13,7 @@ import {
 import { applySeries2026PublicationHistory, previewSeries2026ResultPublications, buildPublicationDraftFromD1, SERIES_2026_SOURCES } from "./series-2026-results";
 import { getDistanceProgression } from "./series-2026-progression-data";
 import { getEventApprovals, recordResultApproval } from "./series-2026-approvals";
+import { getRunSignupApiHealth } from "./series-2026-api-health";
 import {
 	clearResultDecision,
 	getEventDisqualifications,
@@ -8085,6 +8086,19 @@ export default {
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Pending approvals failed" }, 500);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/series-2026/runsignup-health") {
+			try {
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const health = await getRunSignupApiHealth(env.nwana_engine_db, env.RUNSIGNUP_ACCESS_TOKEN);
+				return json({ ok: true, ...health });
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Health check failed" }, 500);
 			}
 		}
 
