@@ -14,6 +14,7 @@ import { applySeries2026PublicationHistory, previewSeries2026ResultPublications,
 import { getDistanceProgression } from "./series-2026-progression-data";
 import { getEventApprovals, recordResultApproval } from "./series-2026-approvals";
 import { getRunSignupApiHealth } from "./series-2026-api-health";
+import { diagnoseRunSignupRaw } from "./series-2026-api-diagnose";
 import {
 	clearResultDecision,
 	getEventDisqualifications,
@@ -8099,6 +8100,19 @@ export default {
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "Health check failed" }, 500);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/series-2026/runsignup-diagnose") {
+			try {
+				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
+					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
+				}
+				const diag = await diagnoseRunSignupRaw(env.RUNSIGNUP_ACCESS_TOKEN);
+				return json({ ok: true, ...diag });
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Diagnosis failed" }, 500);
 			}
 		}
 
