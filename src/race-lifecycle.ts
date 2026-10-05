@@ -913,6 +913,30 @@ export async function syncRaceLifecycleDistance(
 	const raceResponse = await runSignupGetJson(raceUrl, callEnv);
 	const race = raceResponse.race as Record<string, unknown> | undefined;
 	const rawEvents = Array.isArray(race?.events) ? race.events : [];
+	// Guard: never wipe a populated lifecycle with an empty API response.
+	// The RunSignup API is flaky (522s); an empty events list on a distance
+	// that previously had events means the fetch failed, not that the events
+	// vanished. Fail closed so the next sync/cron retry can recover.
+	if (rawEvents.length === 0) {
+		const prev = await input.db
+			.prepare(
+				`SELECT events_json FROM race_lifecycle WHERE series = ? AND distance = ?`,
+			)
+			.bind(RACE_LIFECYCLE_SERIES, input.distance)
+			.first<{ events_json: string | null }>();
+		let prevCount = 0;
+		try {
+			const parsed = prev?.events_json ? JSON.parse(prev.events_json) : [];
+			prevCount = Array.isArray(parsed) ? parsed.length : 0;
+		} catch {
+			prevCount = 0;
+		}
+		if (prevCount > 0) {
+			throw new Error(
+				`Refusing to overwrite ${prevCount} lifecycle events with an empty RunSignup response for ${input.distance} (API flakiness guard)`,
+			);
+		}
+	}
 	const registrationUrl =
 		typeof race?.url === "string" && race.url.length > 0 ? race.url : null;
 
