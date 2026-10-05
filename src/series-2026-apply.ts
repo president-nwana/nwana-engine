@@ -79,6 +79,11 @@ export interface ApplyLevelsInput {
 	// in chunks; progress is tracked in series_rebuild_progress.
 	eventLimit?: number;
 	resetRebuild?: boolean;
+	// D1-only mode (2026-10-05): skip the RunSignup write-access gate.
+	// Used when the owner explicitly authorizes D1 processing (levels,
+	// points, standings) while RunSignup write access is still unverified.
+	// No writes to RunSignup are performed in this mode.
+	d1Only?: boolean;
 }
 
 export interface ApplyLevelsResult {
@@ -901,7 +906,7 @@ export async function applySeries2026Levels(
 		await logApply(input.db, { distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: null, resultCount: 0 }, "REJECTED", result.steps, result.error);
 		return result;
 	}
-	if (row.write_access !== "CONFIRMED") {
+	if (row.write_access !== "CONFIRMED" && !input.d1Only) {
 		const result = fail(
 			base,
 			"check_write_access",
