@@ -1367,6 +1367,11 @@ export async function testSeries2026WriteAccess(input: {
 	db: D1Database;
 	accessToken: string;
 	distance: string;
+	// Optional explicit event ID for the write probe (2026-10-05).
+	// When provided, tests against this specific event (must have approved
+	// results). When omitted, falls back to auto-discovery of a "verifying"
+	// stage event. Explicit is preferred: owner-designated, not auto-discovered.
+	eventId?: number;
 }): Promise<WriteTestResult> {
 	const source = SERIES_2026_SOURCES.find(
 		(entry) => entry.distance === input.distance,
@@ -1383,14 +1388,43 @@ export async function testSeries2026WriteAccess(input: {
 		throw new Error(`Run a lifecycle sync for ${input.distance} first.`);
 	}
 	const events = JSON.parse(row.events_json) as LifecycleEventView[];
-	const candidate = events.find((event) => event.stage === "verifying");
-	if (!candidate) {
-		return {
-			attempted: false,
-			write_access: "UNKNOWN",
-			detail:
-				"No event is in the verifying stage; there is nothing safe to test the write against.",
-		};
+	let candidate: LifecycleEventView | undefined;
+	if (input.eventId) {
+		// Explicit event: owner-designated test target.
+		candidate = events.find((event) => event.event_id === input.eventId);
+		if (!candidate) {
+			return {
+				attempted: false,
+				write_access: "UNKNOWN",
+				detail: `Event ${input.eventId} is not in the lifecycle for ${input.distance}.`,
+			};
+		}
+		// Verify the event has approved results (safe to test against).
+		const approvals = await input.db
+			.prepare(
+				`SELECT COUNT(*) as cnt FROM series_result_approvals
+				 WHERE series = ? AND distance = ? AND event_id = ?`,
+			)
+			.bind(RACE_LIFECYCLE_SERIES, input.distance, input.eventId)
+			.first<{ cnt: number }>();
+		if (!approvals || approvals.cnt === 0) {
+			return {
+				attempted: false,
+				write_access: "UNKNOWN",
+				detail: `Event ${input.eventId} has no approved results; nothing safe to test the write against.`,
+			};
+		}
+	} else {
+		// Auto-discovery: find a "verifying" stage event.
+		candidate = events.find((event) => event.stage === "verifying");
+		if (!candidate) {
+			return {
+				attempted: false,
+				write_access: "UNKNOWN",
+				detail:
+					"No event is in the verifying stage; there is nothing safe to test the write against. Provide an explicit event_id with approved results.",
+			};
+		}
 	}
 
 	const callEnv: RunSignupCallEnv = { accessToken: input.accessToken };

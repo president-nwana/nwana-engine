@@ -8009,7 +8009,7 @@ export default {
 
 		if (request.method === "POST" && url.pathname === "/api/operating-center/race-lifecycle/write-test") {
 			try {
-				const body = await request.json() as { distance?: string; confirm?: string };
+				const body = await request.json() as { distance?: string; confirm?: string; event_id?: number };
 				if (!body.distance) {
 					return json({ ok: false, error: "distance is required" }, 400);
 				}
@@ -8023,6 +8023,7 @@ export default {
 					db: env.nwana_engine_db,
 					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 					distance: body.distance,
+					eventId: body.event_id,
 				});
 				return json(result);
 			} catch (error) {
