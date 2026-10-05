@@ -45,6 +45,7 @@ import {
 } from "./race-lifecycle";
 import { applySeries2026Levels, AUTO_APPROVED_CONFIRMATION } from "./series-2026-apply";
 import { processStage8D1 } from "./series-2026-stage8-d1";
+import { writebackStage8ToRunSignup } from "./series-2026-stage8-writeback";
 import {
 	diagnoseRegistrationAccess,
 	getRaceEventIds,
@@ -8054,6 +8055,32 @@ export default {
 			} catch (error) {
 				console.error(error);
 				return json({ ok: false, error: error instanceof Error ? error.message : "D1 processing failed" }, 500);
+			}
+		}
+
+		// Stage 8 1K RunSignup write-back (2026-10-05, owner-authorized).
+		// Writes Performance Level and Level Place to RunSignup result rows.
+		// Requires write_access = CONFIRMED (verified via TEST_WRITE).
+		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/writeback-stage8") {
+			try {
+				const body = await request.json() as { distance?: string; event_id?: number; result_set_id?: number; confirm?: string };
+				if (body.confirm !== "WRITEBACK") {
+					return json({ ok: false, error: 'Explicit confirm: "WRITEBACK" is required' }, 400);
+				}
+				if (!body.distance || !Number.isInteger(body.event_id) || !Number.isInteger(body.result_set_id)) {
+					return json({ ok: false, error: "distance, event_id, and result_set_id are required" }, 400);
+				}
+				const result = await writebackStage8ToRunSignup({
+					db: env.nwana_engine_db,
+					env: env as unknown as Record<string, unknown>,
+					distance: body.distance,
+					eventId: body.event_id as number,
+					resultSetId: body.result_set_id as number,
+				});
+				return json(result, result.ok ? 200 : 422);
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Write-back failed" }, 500);
 			}
 		}
 
