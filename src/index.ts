@@ -8218,10 +8218,11 @@ export default {
 
 		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/results/approve") {
 			try {
-				const body = await request.json() as { distance?: string; event_id?: number; result_ids?: string[] };
+				const body = await request.json() as { distance?: string; event_id?: number; result_ids?: string[]; result_set_ids?: number[] };
 				const distance = body.distance ?? "";
 				const eventId = Number(body.event_id);
 				const resultIds = Array.isArray(body.result_ids) ? body.result_ids.filter((id) => typeof id === "string") : [];
+				const knownSetIds = Array.isArray(body.result_set_ids) ? body.result_set_ids.filter((id) => Number.isInteger(id)) : undefined;
 				const source = SERIES_2026_SOURCES.find((s) => s.distance === distance);
 				if (!source || !Number.isInteger(eventId) || resultIds.length === 0) {
 					return json({ ok: false, error: "distance, event_id and result_ids[] are required" }, 400);
@@ -8237,7 +8238,7 @@ export default {
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
 				};
-				const live = await fetchLiveEventResults(await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]), source.raceId, eventId);
+				const live = await fetchLiveEventResults(await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]), source.raceId, eventId, knownSetIds);
 				const liveById = new Map(live.map((r) => [r.result_id, r]));
 				const recorded = [];
 				for (const resultId of resultIds) {

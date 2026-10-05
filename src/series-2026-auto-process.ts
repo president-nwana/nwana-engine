@@ -104,25 +104,39 @@ async function runSignupGet(
 
 /**
  * Live results for one event (all result sets). Read-only.
+ * If get-result-sets discovery fails (RunSignup 522 flakiness), falls back
+ * to the provided knownSetIds.
  */
 export async function fetchLiveEventResults(
 	accessToken: string,
 	raceId: number,
 	eventId: number,
+	knownSetIds?: number[],
 ): Promise<LiveEventResult[]> {
 	const out: LiveEventResult[] = [];
-	const setsUrl = new URL(
-		`https://api.runsignup.com/rest/race/${raceId}/results/get-result-sets`,
-	);
-	setsUrl.searchParams.set("format", "json");
-	setsUrl.searchParams.set("event_id", String(eventId));
-	const setsData = await runSignupGet(setsUrl, accessToken);
-	const sets = Array.isArray(setsData.individual_results_sets)
-		? (setsData.individual_results_sets as UnknownRecord[])
-		: [];
-	for (const set of sets) {
-		const resultSetId = Number(set.individual_result_set_id);
-		if (!Number.isInteger(resultSetId)) continue;
+	let setIds: number[] = [];
+	try {
+		const setsUrl = new URL(
+			`https://api.runsignup.com/rest/race/${raceId}/results/get-result-sets`,
+		);
+		setsUrl.searchParams.set("format", "json");
+		setsUrl.searchParams.set("event_id", String(eventId));
+		const setsData = await runSignupGet(setsUrl, accessToken);
+		const sets = Array.isArray(setsData.individual_results_sets)
+			? (setsData.individual_results_sets as UnknownRecord[])
+			: [];
+		setIds = sets
+			.map((s) => Number(s.individual_result_set_id))
+			.filter((id) => Number.isInteger(id));
+	} catch (error) {
+		// Discovery failed (e.g. 522). Fall back to known set IDs if provided.
+		if (!knownSetIds?.length) throw error;
+		setIds = knownSetIds;
+	}
+	if (!setIds.length && knownSetIds?.length) {
+		setIds = knownSetIds;
+	}
+	for (const resultSetId of setIds) {
 		const resultsUrl = new URL(
 			`https://api.runsignup.com/rest/race/${raceId}/results/get-results`,
 		);

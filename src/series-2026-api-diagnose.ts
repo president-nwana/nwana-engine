@@ -23,6 +23,7 @@ export interface RunSignupRawDiagnostic {
 		api_error_code: number | null;
 		api_error_msg: string | null;
 		result_count: number | null;
+		results?: Array<{ result_id: string; athlete: string; time: string | null }>;
 	}>;
 }
 
@@ -52,7 +53,9 @@ export async function diagnoseRunSignupRaw(
 	const eventId = override?.eventId ?? 1177725;
 	const resultSetId = override?.resultSetId ?? 665163;
 
-	// Step 1: get-result-sets
+	// Step 1: get-result-sets (skip if we already know the set ID — the
+	// endpoint is flaky with 522s and we don't need discovery)
+	if (!override?.resultSetId) {
 	const setsUrl = new URL(
 		`https://api.runsignup.com/rest/race/${raceId}/results/get-result-sets`,
 	);
@@ -92,9 +95,11 @@ export async function diagnoseRunSignupRaw(
 			result_count: null,
 		});
 	}
+	}
 
-	// Step 2: get-results for the known set (only if step 1 did not transport-fail)
-	if (steps[0].transport_error === null) {
+	// Step 2: get-results for the known set (only if step 1 did not transport-fail, or if set ID was provided)
+	const canProceed = override?.resultSetId || steps[0]?.transport_error === null;
+	if (canProceed) {
 		const resultsUrl = new URL(
 			`https://api.runsignup.com/rest/race/${raceId}/results/get-results`,
 		);
@@ -109,11 +114,17 @@ export async function diagnoseRunSignupRaw(
 			const body = await resp.text();
 			const apiErr = extractApiError(body);
 			let count: number | null = null;
+			let results: Array<{ result_id: string; athlete: string; time: string | null }> | undefined;
 			try {
 				const data = JSON.parse(body) as Record<string, unknown>;
 				const sets = data.individual_results_sets as Array<Record<string, unknown>> | undefined;
-				const rows = Array.isArray(sets?.[0]?.results) ? sets[0].results : [];
-				count = (rows as unknown[]).length;
+				const rows = (Array.isArray(sets?.[0]?.results) ? sets[0].results : []) as Array<Record<string, unknown>>;
+				count = rows.length;
+				results = rows.map((r) => ({
+					result_id: String(r.result_id ?? ""),
+					athlete: [r.first_name, r.last_name].filter(Boolean).join(" "),
+					time: (r.chip_time as string) ?? (r.clock_time as string) ?? null,
+				})).filter((r) => r.result_id);
 			} catch {
 				count = null;
 			}
@@ -125,6 +136,7 @@ export async function diagnoseRunSignupRaw(
 				api_error_code: apiErr.code,
 				api_error_msg: apiErr.msg,
 				result_count: count,
+				results,
 			});
 		} catch (error) {
 			steps.push({
