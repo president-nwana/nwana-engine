@@ -157,7 +157,11 @@ export async function writebackStage8ToRunSignup(input: {
 		`&individual_result_set_id=${resultSetId}&request_format=json`;
 	await postRunSignupForm(writeUrl, accessToken, { results: rows });
 
-	// 4. Update lifecycle stage to "published".
+	// 4. Update lifecycle stage to "results_published" (NOT "published").
+	// "published" implies site news + social are done, which they are not.
+	// Albert's requirement (2026-10-05): distinguish results_published,
+	// site_news_published, social_published. This write-back only does
+	// the RunSignup result fields.
 	const lifecycleRow = await db
 		.prepare(`SELECT events_json FROM race_lifecycle WHERE series = 'SERIES_2026' AND distance = ?`)
 		.bind(distance)
@@ -169,12 +173,12 @@ export async function writebackStage8ToRunSignup(input: {
 			const events = JSON.parse(lifecycleRow.events_json) as Array<{ event_id: number; stage: string }>;
 			const ev = events.find((e) => e.event_id === eventId);
 			if (ev) {
-				ev.stage = "published";
+				ev.stage = "results_published";
 				await db
 					.prepare(`UPDATE race_lifecycle SET events_json = ? WHERE series = 'SERIES_2026' AND distance = ?`)
 					.bind(JSON.stringify(events), distance)
 					.run();
-				lifecycleStage = "published";
+				lifecycleStage = "results_published";
 			}
 		} catch {
 			// stage update failed, but write-back succeeded

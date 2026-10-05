@@ -8084,6 +8084,83 @@ export default {
 			}
 		}
 
+		// Publication status check for Stage 8 (2026-10-05).
+		// Returns: site news URL (if exists), social post IDs/URLs, or exact reason why not.
+		// Does NOT create anything — read-only verification.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/series-2026/publication-status") {
+			try {
+				const eventId = Number(url.searchParams.get("event_id"));
+				const distance = url.searchParams.get("distance") || "1K";
+				if (!Number.isInteger(eventId)) {
+					return json({ ok: false, error: "event_id is required" }, 400);
+				}
+				const db = env.nwana_engine_db;
+
+				// 1. Check result_publication_history.
+				const history = await db
+					.prepare(
+						`SELECT publication_key, status, metadata, created_at, updated_at
+						 FROM result_publication_history
+						 WHERE series = 'SERIES_2026' AND event_id = ?`,
+					)
+					.bind(eventId)
+					.all<{ publication_key: string; status: string; metadata: string | null; created_at: string; updated_at: string }>();
+
+				// 2. Check lifecycle stage.
+				const lifecycleRow = await db
+					.prepare(`SELECT events_json FROM race_lifecycle WHERE series = 'SERIES_2026' AND distance = ?`)
+					.bind(distance)
+					.first<{ events_json: string | null }>();
+				let lifecycleStage = "unknown";
+				if (lifecycleRow?.events_json) {
+					try {
+						const events = JSON.parse(lifecycleRow.events_json) as Array<{ event_id: number; stage: string }>;
+						const ev = events.find((e) => e.event_id === eventId);
+						if (ev) lifecycleStage = ev.stage;
+					} catch { /* ignore */ }
+				}
+
+				// 3. Check D1 results (were levels computed?).
+				const d1Row = await db
+					.prepare(
+						`SELECT finalized, results_json FROM race_event_results
+						 WHERE series = 'SERIES_2026' AND distance = ? AND event_id = ?`,
+					)
+					.bind(distance, eventId)
+					.first<{ finalized: number; results_json: string }>();
+
+				return json({
+					ok: true,
+					event_id: eventId,
+					distance,
+					lifecycle_stage: lifecycleStage,
+					d1_finalized: d1Row ? d1Row.finalized === 1 : false,
+					d1_has_results: !!d1Row?.results_json,
+					publication_history: (history.results || []).map((h) => ({
+						publication_key: h.publication_key,
+						status: h.status,
+						created_at: h.created_at,
+						updated_at: h.updated_at,
+						metadata: h.metadata ? JSON.parse(h.metadata) : null,
+					})),
+					// Explicit breakdown (Albert's requirement):
+					// - results_published: Performance Level/Level Place written to RunSignup
+					// - site_news_published: site news created
+					// - social_published: social posts published
+					breakdown: {
+						results_published: lifecycleStage === "published" || lifecycleStage === "levels_computed",
+						// Note: "published" currently means results written; site/social not verified.
+						// This is the bug Albert identified.
+						site_news_published: "UNKNOWN - not verified",
+						social_published: "UNKNOWN - not verified",
+					},
+				});
+			} catch (error) {
+				console.error(error);
+				return json({ ok: false, error: error instanceof Error ? error.message : "Status check failed" }, 500);
+			}
+		}
+
 		// ADR-0042: owner approves results; the Machine runs the downstream
 		// lifecycle. Approvals are the only owner action here; everything
 		// after them is automatic. All routes are owner-key gated by the
