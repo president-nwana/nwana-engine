@@ -8163,8 +8163,30 @@ export default {
 		// Creates site winner news + Meta congratulations (male asset, both winners male).
 		// Idempotent: checks publication history first; skips if already published.
 		// Does NOT rewrite RunSignup results.
-		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/publish-stage8") {
+		// WASM rasterizer diagnostic (2026-10-05).
+		// Minimal regression test: rasterizes a tiny SVG, returns exact error stage.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/diag/wasm-raster") {
 			try {
+				const { rasterizeSvgToPng } = await import("./svg-raster");
+				const testSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="red"/><text x="10" y="50" font-family="Liberation Sans" font-size="20">Test</text></svg>`;
+				const start = Date.now();
+				const png = await rasterizeSvgToPng(testSvg, { width: 100 });
+				const elapsed = Date.now() - start;
+				return json({
+					ok: true,
+					png_bytes: png.length,
+					elapsed_ms: elapsed,
+					message: "WASM rasterizer works",
+				});
+			} catch (error) {
+				return json({
+					ok: false,
+					error: error instanceof Error ? error.message : String(error),
+					stage: error instanceof Error ? error.message.split(":")[0] : "UNKNOWN",
+				}, 500);
+			}
+		}
+		if (request.method === "POST" && url.pathname === "/api/operating-center/series-2026/publish-stage8") {			try {
 				const body = await request.json() as { distance?: string; event_id?: number; result_set_id?: number; race_id?: number; confirm?: string };
 				if (body.confirm !== "PUBLISH") {
 					return json({ ok: false, error: 'Explicit confirm: "PUBLISH" is required' }, 400);
