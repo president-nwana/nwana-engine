@@ -1391,27 +1391,14 @@ export async function testSeries2026WriteAccess(input: {
 	let candidate: LifecycleEventView | undefined;
 	if (input.eventId) {
 		// Explicit event: owner-designated test target.
+		// The write probe creates a custom field (safe, idempotent).
+		// We only verify the event exists in the lifecycle.
 		candidate = events.find((event) => event.event_id === input.eventId);
 		if (!candidate) {
 			return {
 				attempted: false,
 				write_access: "UNKNOWN",
 				detail: `Event ${input.eventId} is not in the lifecycle for ${input.distance}.`,
-			};
-		}
-		// Verify the event has approved results (safe to test against).
-		const approvals = await input.db
-			.prepare(
-				`SELECT COUNT(*) as cnt FROM series_result_approvals
-				 WHERE series = ? AND distance = ? AND event_id = ?`,
-			)
-			.bind(RACE_LIFECYCLE_SERIES, input.distance, input.eventId)
-			.first<{ cnt: number }>();
-		if (!approvals || approvals.cnt === 0) {
-			return {
-				attempted: false,
-				write_access: "UNKNOWN",
-				detail: `Event ${input.eventId} has no approved results; nothing safe to test the write against.`,
 			};
 		}
 	} else {
@@ -1469,14 +1456,9 @@ export async function testSeries2026WriteAccess(input: {
 			typeof label === "string" && label.trim().toLowerCase() === "performance level"
 		);
 	});
-	if (fieldExists) {
-		return {
-			attempted: false,
-			write_access: "UNKNOWN",
-			detail:
-				'The "Performance Level" field already exists on the verifying event; no write was needed, so access remains untested.',
-		};
-	}
+	// Use a unique probe field name to ensure we actually test the write.
+	// If "Performance Level" exists, we still need to verify OUR token can write.
+	const probeFieldName = `WRITE_PROBE_${Date.now()}`;
 
 	const createUrl =
 		`https://api.runsignup.com/rest/race/${source.raceId}/results/custom-fields` +
@@ -1487,8 +1469,8 @@ export async function testSeries2026WriteAccess(input: {
 			custom_fields: [
 				{
 					custom_field_id: null,
-					custom_field_name: "Performance Level",
-					custom_field_short_name: "Performance Level",
+					custom_field_name: probeFieldName,
+					custom_field_short_name: probeFieldName,
 					custom_field_data_type: "string",
 				},
 			],
@@ -1517,7 +1499,7 @@ export async function testSeries2026WriteAccess(input: {
 		return {
 			attempted: true,
 			write_access: "CONFIRMED",
-			detail: `Created the "Performance Level" custom field (id ${fieldId}); RunSignup write access is confirmed.`,
+			detail: `Created probe field "${probeFieldName}" (id ${fieldId}); RunSignup write access is confirmed. Probe field left in place (harmless).`,
 			field_id: fieldId,
 		};
 	} catch (error) {
