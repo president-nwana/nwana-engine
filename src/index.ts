@@ -8238,7 +8238,38 @@ export default {
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
 				};
-				const live = await fetchLiveEventResults(await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]), source.raceId, eventId, knownSetIds);
+				const oauthToken = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+				let live = await fetchLiveEventResults(oauthToken, source.raceId, eventId, knownSetIds);
+				// If discovery returned empty but caller provided known set IDs,
+				// fetch directly (bypasses flaky get-result-sets).
+				if (!live.length && knownSetIds?.length) {
+					const { fetchLiveEventResults: fetchDirect } = await import("./series-2026-auto-process");
+					// Force direct fetch by simulating discovery failure
+					live = [];
+					for (const sid of knownSetIds) {
+						try {
+							const url = new URL(`https://api.runsignup.com/rest/race/${source.raceId}/results/get-results`);
+							url.searchParams.set("format", "json");
+							url.searchParams.set("event_id", String(eventId));
+							url.searchParams.set("individual_result_set_id", String(sid));
+							url.searchParams.set("results_per_page", "1000");
+							const resp = await fetch(url, { headers: { Authorization: `Bearer ${oauthToken}` } });
+							const data = await resp.json() as Record<string, unknown>;
+							const sets = Array.isArray(data.individual_results_sets) ? data.individual_results_sets as Array<Record<string, unknown>> : [];
+							const rows = Array.isArray(sets[0]?.results) ? sets[0].results as Array<Record<string, unknown>> : [];
+							for (const row of rows) {
+								const rid = String(row.result_id ?? "");
+								if (!rid) continue;
+								live.push({
+									result_id: rid,
+									athlete: [String(row.first_name ?? ""), String(row.last_name ?? "")].filter(Boolean).join(" "),
+									gender: String(row.gender ?? ""),
+									time: String(row.chip_time ?? row.clock_time ?? ""),
+								});
+							}
+						} catch { /* skip failed set */ }
+					}
+				}
 				const liveById = new Map(live.map((r) => [r.result_id, r]));
 				const recorded = [];
 				for (const resultId of resultIds) {
