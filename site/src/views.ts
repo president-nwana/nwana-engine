@@ -91,7 +91,7 @@ a{color:var(--navy-2)}
 .hero{background:radial-gradient(1200px 500px at 80% -10%,#1d3a6b 0%,var(--navy) 55%,#071627 100%);color:#fff;padding:76px 0 70px;position:relative;overflow:hidden}
 .hero:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(115deg,transparent 0 46px,rgba(201,162,39,.05) 46px 48px);pointer-events:none}
 .hero .wrap{position:relative;z-index:1}
-.hero-photo{background:linear-gradient(100deg,rgba(7,22,39,.55) 0%,rgba(7,22,39,.38) 45%,rgba(7,22,39,.12) 78%,rgba(7,22,39,.25) 100%),url("/hero/hero-desktop.jpg") left top/cover no-repeat,#071627}
+.hero-photo{background:linear-gradient(100deg,rgba(7,22,39,.82) 0%,rgba(7,22,39,.65) 45%,rgba(7,22,39,.35) 78%,rgba(7,22,39,.45) 100%),url("/albert-fatikhov.png") right top/cover no-repeat,#071627}
 .eyebrow{display:inline-block;color:var(--gold-2);letter-spacing:2.5px;text-transform:uppercase;font-size:12.5px;font-weight:700;margin-bottom:16px}
 .hero h1{color:#fff;font-size:clamp(34px,5.2vw,58px);max-width:16em;margin-bottom:18px}
 .hero h1 .gold{color:var(--gold-2)}
@@ -124,7 +124,7 @@ a{color:var(--navy-2)}
 .grid.cols-4{grid-template-columns:repeat(4,1fr)}
 @media(max-width:1100px){.grid.cols-4{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:820px){.grid.cols-3,.grid.cols-2{grid-template-columns:1fr}.grid.cols-4{grid-template-columns:1fr}.stats .wrap{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:640px){.hero{padding:54px 0 50px}.hero-photo{background:linear-gradient(100deg,rgba(7,22,39,.55) 0%,rgba(7,22,39,.38) 45%,rgba(7,22,39,.12) 78%,rgba(7,22,39,.25) 100%),url("/hero/hero-mobile.jpg") center 8%/cover no-repeat,#071627}}
+@media(max-width:640px){.hero{padding:54px 0 50px}.hero-photo{background:linear-gradient(100deg,rgba(7,22,39,.82) 0%,rgba(7,22,39,.65) 45%,rgba(7,22,39,.35) 78%,rgba(7,22,39,.45) 100%),url("/albert-fatikhov.png") center 8%/cover no-repeat,#071627}}
 .board-photo{width:96px;height:96px;border-radius:50%;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;margin-bottom:14px;border:3px solid var(--gold-2);overflow:hidden}
 .board-photo img{width:100%;height:100%;object-fit:cover;display:block;flex:none}
 .board-card h3{margin:0 0 4px}
