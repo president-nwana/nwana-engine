@@ -293,9 +293,10 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 		// RunSignup requires elevation gain (split_elevation_gain_in_mm); 0 when not available from the file.
 		split_elevation_gain_in_mm: 0,
 	};
-	if (distanceM !== null) {
-		// Fixed-distance events: submit the event distance; mileage: the logged distance.
-		const valueM = def.fixed_distance_m ?? distanceM;
+	// Fixed-distance events (speed/relay): always submit the event distance.
+	// Mileage/team/open: submit the logged distance.
+	const valueM = def.fixed_distance_m ?? distanceM;
+	if (valueM !== null && valueM !== undefined) {
 		activity.result_split_tally_value = Math.round((valueM / 1000) * 100) / 100; // km, 2dp
 	}
 	if (timeS !== null) {
