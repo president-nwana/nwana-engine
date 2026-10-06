@@ -286,10 +286,10 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 						event_id: existing.event_id,
 					}, 409);
 				}
-				// Pending or failed: if the reservation is stale (>5 min), reclaim it.
+				// Pending or failed: if the reservation is stale (>60s), reclaim it.
 				// Otherwise tell the client to wait — another request is in-flight.
 				const ageMs = existing?.submitted_at ? Date.now() - Date.parse(existing.submitted_at) : Infinity;
-				if (existing && (existing.status === "failed" || ageMs > 5 * 60 * 1000)) {
+				if (existing && (existing.status === "failed" || ageMs > 60 * 1000)) {
 					await env.nwana_engine_db.prepare(
 						"DELETE FROM challenge_activity_fingerprints WHERE rsu_user_id = ? AND fingerprint = ?"
 					).bind(rsuUserId, fingerprint).run();
