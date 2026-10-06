@@ -414,7 +414,7 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 		).bind(
 			tallySplitNum, CHALLENGE_RACE_ID, submitEventId, eventId,
 			registrationId, rsuUserId, userName, team.team_id, team.team_name,
-			date, distanceM, timeS, activityType, source
+			date, valueM, timeS, activityType, source
 		).run();
 	} catch (e) {
 		// Mapping failure should not fail the submission; log and continue.
