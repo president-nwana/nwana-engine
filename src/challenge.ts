@@ -546,7 +546,15 @@ async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
 	// RunSignup Teams API: POST /rest/v2/teams/manage-teams.json
 	// Request format: { "race_teams": [{ "team_name", "team_type_id", "team_gender" }] }
 	// The API expects the JSON in a "request" POST parameter.
-	const apiUrl = `https://api.runsignup.com/rest/v2/teams/manage-teams.json`;
+	// REQUIRED query params: race_id, event_ids
+	const apiUrl = new URL(`https://api.runsignup.com/rest/v2/teams/manage-teams.json`);
+	apiUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
+	// Use the valid_event_ids from the Challenge Team type, or fallback to regular events
+	const challengeTeamEventIds = CHALLENGE_EVENTS
+		.filter(e => e.format === "mileage" || e.format === "speed")
+		.map(e => e.event_id)
+		.join(",");
+	apiUrl.searchParams.set("event_ids", challengeTeamEventIds);
 	const requestPayload = {
 		race_teams: [
 			{
@@ -562,7 +570,7 @@ async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
 		formData.set("request", JSON.stringify(requestPayload));
 		formData.set("format", "json");
 
-		const res = await fetch(apiUrl, {
+		const res = await fetch(apiUrl.toString(), {
 			method: "POST",
 			headers: {
 				"Authorization": `Bearer ${token}`,
@@ -571,10 +579,19 @@ async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
 			body: formData.toString(),
 		});
 
-		const data = await res.json() as {
+		const responseText = await res.text();
+		let data: {
 			race_team_ids?: number[];
 			error?: { error_code?: number; error_msg?: string };
 		};
+		try {
+			data = JSON.parse(responseText);
+		} catch {
+			return json({
+				ok: false,
+				error: `RunSignup API returned non-JSON (HTTP ${res.status}): ${responseText.slice(0, 200)}`,
+			}, 502);
+		}
 
 		if (!res.ok || data.error) {
 			return json({
