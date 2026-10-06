@@ -547,7 +547,7 @@ async function handleListTeams(env: Env): Promise<Response> {
  * Uses POST /rest/v2/teams/manage-teams.json with OAuth Bearer.
  */
 async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
-	let body: { team_name?: string; team_type_id?: number; team_gender?: string };
+	let body: { team_name?: string; team_type_id?: number; team_gender?: string; rsu_user_id?: number };
 	try {
 		body = await request.json() as typeof body;
 	} catch {
@@ -555,6 +555,7 @@ async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
 	}
 	const teamName = (body.team_name || "").trim();
 	const teamTypeId = Number(body.team_type_id);
+	const rsuUserId = body.rsu_user_id ? Number(body.rsu_user_id) : null;
 	if (!teamName) return json({ ok: false, error: "team_name is required" }, 400);
 	if (!Number.isInteger(teamTypeId) || teamTypeId <= 0) {
 		return json({ ok: false, error: "valid team_type_id is required" }, 400);
@@ -630,9 +631,41 @@ async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
 			return json({ ok: false, error: "Team creation returned no ID" }, 502);
 		}
 
+		const newTeamId = teamIds[0];
+		const now = Math.floor(Date.now() / 1000);
+
+		// Write to D1 cache immediately + add creator to My Teams as captain
+		try {
+			const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+			const teamTypeLabel = teamTypeId === 165480 ? "Challenge Team"
+				: teamTypeId === 165317 ? "Relay Team" : "";
+			await db.prepare(`
+				INSERT INTO challenge_teams (team_id, team_name, team_type_id, team_type, member_count, synced_at)
+				VALUES (?, ?, ?, ?, 1, ?)
+				ON CONFLICT(team_id) DO UPDATE SET
+					team_name = excluded.team_name,
+					team_type_id = excluded.team_type_id,
+					team_type = excluded.team_type,
+					synced_at = excluded.synced_at
+			`).bind(newTeamId, teamName, teamTypeId, teamTypeLabel, now).run();
+
+			if (rsuUserId && Number.isInteger(rsuUserId) && rsuUserId > 0) {
+				await db.prepare(`
+					INSERT INTO challenge_team_members (team_id, rsu_user_id, is_captain, synced_at)
+					VALUES (?, ?, 1, ?)
+					ON CONFLICT(team_id, rsu_user_id) DO UPDATE SET
+						is_captain = 1,
+						synced_at = excluded.synced_at
+				`).bind(newTeamId, rsuUserId, now).run();
+			}
+		} catch (dbErr) {
+			// D1 write failure should not fail the team creation
+			console.log("D1 teams cache write failed:", dbErr instanceof Error ? dbErr.message : dbErr);
+		}
+
 		return json({
 			ok: true,
-			team_id: teamIds[0],
+			team_id: newTeamId,
 			team_name: teamName,
 		});
 	} catch (e) {
@@ -864,6 +897,179 @@ async function handleDebugRaceInfo(env: Env): Promise<Response> {
 	}
 }
 
+/**
+ * GET /api/challenge/v1/teams/search?query=...&limit=20&offset=0&team_type_id=...
+ * Server-side search over the D1 teams cache. Never returns the full catalog.
+ * RunSignup is source of truth; D1 is the searchable index (synced on-demand).
+ */
+async function handleSearchTeams(url: URL, env: Env): Promise<Response> {
+	try {
+		const query = (url.searchParams.get("query") || "").trim();
+		const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "20", 10) || 20, 1), 50);
+		const offset = Math.max(parseInt(url.searchParams.get("offset") || "0", 10) || 0, 0);
+		const teamTypeId = url.searchParams.get("team_type_id");
+
+		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+
+		let sql = `SELECT team_id, team_name, team_type_id, team_type, member_count FROM challenge_teams WHERE 1=1`;
+		const params: (string | number)[] = [];
+
+		if (query) {
+			sql += ` AND team_name LIKE ?`;
+			params.push(`%${query}%`);
+		}
+		if (teamTypeId) {
+			sql += ` AND team_type_id = ?`;
+			params.push(parseInt(teamTypeId, 10));
+		}
+
+		sql += ` ORDER BY team_name ASC LIMIT ? OFFSET ?`;
+		params.push(limit, offset);
+
+		const result = await db.prepare(sql).bind(...params).all<{
+			team_id: number;
+			team_name: string;
+			team_type_id: number;
+			team_type: string;
+			member_count: number;
+		}>();
+
+		// Get total count for pagination
+		let countSql = `SELECT COUNT(*) as total FROM challenge_teams WHERE 1=1`;
+		const countParams: (string | number)[] = [];
+		if (query) {
+			countSql += ` AND team_name LIKE ?`;
+			countParams.push(`%${query}%`);
+		}
+		if (teamTypeId) {
+			countSql += ` AND team_type_id = ?`;
+			countParams.push(parseInt(teamTypeId, 10));
+		}
+		const countResult = await db.prepare(countSql).bind(...countParams).first<{ total: number }>();
+
+		return json({
+			ok: true,
+			teams: result.results || [],
+			total: countResult?.total || 0,
+			limit,
+			offset,
+			has_more: (offset + limit) < (countResult?.total || 0),
+		});
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
+	}
+}
+
+/**
+ * POST /api/challenge/v1/teams/sync
+ * Sync teams from RunSignup (source of truth) into D1 cache.
+ * On-demand only (no polling). Called after team creation or manually.
+ */
+async function handleSyncTeams(env: Env): Promise<Response> {
+	try {
+		let token: string;
+		try {
+			token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+		} catch (e) {
+			return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+		}
+
+		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+		const now = Math.floor(Date.now() / 1000);
+
+		// Fetch from RunSignup (paginated)
+		const regularEvents = CHALLENGE_EVENTS.filter(e => e.format === "mileage" || e.format === "speed");
+		const relayEvents = CHALLENGE_EVENTS.filter(e => e.format === "relay");
+		const allEventIds = [...regularEvents, ...relayEvents].map(e => e.event_id).join(",");
+
+		let synced = 0;
+		let page = 1;
+
+		while (true) {
+			const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams`);
+			url.searchParams.set("format", "json");
+			url.searchParams.set("event_id", allEventIds);
+			url.searchParams.set("include_group_sizes", "T");
+			url.searchParams.set("page", String(page));
+			url.searchParams.set("results_per_page", "100");
+
+			const res = await runSignupGetJson<{
+				race_teams?: Array<{
+					team_id: number;
+					team_name: string;
+					team_type_id: number;
+					team_member_current_count?: number;
+					last_modified_ts?: number;
+				}>;
+			}>(url, token);
+
+			if (!res.ok || !res.data?.race_teams || res.data.race_teams.length === 0) {
+				break;
+			}
+
+			for (const t of res.data.race_teams) {
+				const teamType = t.team_type_id === 165480 ? "Challenge Team"
+					: t.team_type_id === 165317 ? "Relay Team"
+					: "";
+				await db.prepare(`
+					INSERT INTO challenge_teams (team_id, team_name, team_type_id, team_type, member_count, last_modified_ts, synced_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT(team_id) DO UPDATE SET
+						team_name = excluded.team_name,
+						team_type_id = excluded.team_type_id,
+						team_type = excluded.team_type,
+						member_count = excluded.member_count,
+						last_modified_ts = excluded.last_modified_ts,
+						synced_at = excluded.synced_at
+				`).bind(
+					t.team_id,
+					t.team_name,
+					t.team_type_id,
+					teamType,
+					t.team_member_current_count || 0,
+					t.last_modified_ts || null,
+					now
+				).run();
+				synced++;
+			}
+
+			if (res.data.race_teams.length < 100) break;
+			page++;
+			if (page > 100) break; // safety limit
+		}
+
+		return json({ ok: true, synced, synced_at: now });
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
+	}
+}
+
+/**
+ * GET /api/challenge/v1/teams/mine?rsu_user_id=...
+ * Teams the current user belongs to or manages (from D1).
+ */
+async function handleMyTeams(url: URL, env: Env): Promise<Response> {
+	try {
+		const rsuUserId = url.searchParams.get("rsu_user_id");
+		if (!rsuUserId) {
+			return json({ ok: false, error: "rsu_user_id is required" }, 400);
+		}
+
+		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+		const result = await db.prepare(`
+			SELECT t.team_id, t.team_name, t.team_type_id, t.team_type, t.member_count, m.is_captain
+			FROM challenge_teams t
+			JOIN challenge_team_members m ON m.team_id = t.team_id
+			WHERE m.rsu_user_id = ?
+			ORDER BY t.team_name ASC
+		`).bind(parseInt(rsuUserId, 10)).all();
+
+		return json({ ok: true, teams: result.results || [] });
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
+	}
+}
+
 /** Main entry: auth check + routing. Called early from the worker fetch handler. */
 export async function handleChallengeApi(request: Request, env: Env, url: URL): Promise<Response> {
 	const presented = request.headers.get("X-Challenge-Key") || "";
@@ -903,6 +1109,15 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	}
 	if (path === "/api/challenge/v1/setup-challenge-team-type" && request.method === "POST") {
 		return handleSetupChallengeTeamType(env);
+	}
+	if (path === "/api/challenge/v1/teams/search" && request.method === "GET") {
+		return handleSearchTeams(url, env);
+	}
+	if (path === "/api/challenge/v1/teams/sync" && request.method === "POST") {
+		return handleSyncTeams(env);
+	}
+	if (path === "/api/challenge/v1/teams/mine" && request.method === "GET") {
+		return handleMyTeams(url, env);
 	}
 	if (path === "/api/challenge/v1/debug-race-info" && request.method === "GET") {
 		return handleDebugRaceInfo(env);
