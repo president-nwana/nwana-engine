@@ -587,6 +587,230 @@ async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
 	}
 }
 
+/**
+ * POST /api/challenge/v1/setup-challenge-team-type
+ * Creates a general "Challenge Team" group type in RunSignup for race 216323.
+ * This is for regular participant teams (Hallandale Beach, Central Park, etc.),
+ * NOT relay teams. Preserves the existing Relay Team type.
+ *
+ * WARNING: The RunSignup team-types API DELETES any existing types not included
+ * in the request. This handler first fetches all existing types and includes
+ * them to avoid deletion.
+ */
+async function handleSetupChallengeTeamType(env: Env): Promise<Response> {
+	try {
+		let token: string;
+		try {
+			token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+		} catch (e) {
+			return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+		}
+
+		// Step 1: Get race info to find race_event_days_id
+		// Try the race endpoint first
+		const raceUrl = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}`);
+		raceUrl.searchParams.set("format", "json");
+		const raceRes = await runSignupGetJson<{
+			race?: {
+				race_event_days_id?: number;
+				event_days?: Array<{ race_event_days_id: number }>;
+			};
+		}>(raceUrl, token);
+
+		let raceEventDaysId: number | undefined;
+		if (raceRes.ok && raceRes.data?.race) {
+			raceEventDaysId = raceRes.data.race.race_event_days_id
+				|| raceRes.data.race.event_days?.[0]?.race_event_days_id;
+		}
+
+		if (!raceEventDaysId) {
+			// Fallback: try to get from events endpoint
+			const eventsUrl = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/events`);
+			eventsUrl.searchParams.set("format", "json");
+			const eventsRes = await runSignupGetJson<{
+				events?: Array<{ race_event_days_id?: number }>;
+			}>(eventsUrl, token);
+			if (eventsRes.ok && eventsRes.data?.events?.[0]?.race_event_days_id) {
+				raceEventDaysId = eventsRes.data.events[0].race_event_days_id;
+			}
+		}
+
+		if (!raceEventDaysId) {
+			// Log and continue without it - may work with OAuth
+			console.log("Warning: race_event_days_id not found, attempting POST without it");
+		}
+
+		// Step 2: Get all existing team types (to preserve them)
+		// Try each event until we find team types
+		let existingTypes: Array<{
+			team_type_id: number;
+			team_type: string;
+			team_type_desc?: string;
+			min_members?: number;
+			max_members?: number | null;
+			min_male_members?: number;
+			max_male_members?: number | null;
+			min_female_members?: number;
+			max_female_members?: number | null;
+			max_num_teams?: number | null;
+			valid_event_ids?: number[];
+			require_gender_selection?: string;
+			allow_all_male_team?: string;
+			allow_all_female_team?: string;
+			allow_coed_team?: string;
+			allow_nonbinary_in_male_or_female?: string;
+		}> = [];
+
+		const relayEvents = CHALLENGE_EVENTS.filter(e => e.format === "relay");
+		for (const event of relayEvents.slice(0, 3)) {
+			const typeUrl = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams/team-types`);
+			typeUrl.searchParams.set("format", "json");
+			typeUrl.searchParams.set("event_id", String(event.event_id));
+			const typeRes = await runSignupGetJson<{ race_team_types?: typeof existingTypes }>(typeUrl, token);
+			if (typeRes.ok && typeRes.data?.race_team_types && typeRes.data.race_team_types.length > 0) {
+				existingTypes = typeRes.data.race_team_types;
+				break;
+			}
+		}
+
+		// Step 3: Check if Challenge Team type already exists
+		const challengeTeamExists = existingTypes.some(t =>
+			t.team_type.toLowerCase().includes("challenge team")
+		);
+		if (challengeTeamExists) {
+			return json({
+				ok: true,
+				message: "Challenge Team type already exists",
+				existing_types: existingTypes.map(t => ({ team_type_id: t.team_type_id, team_type: t.team_type })),
+			});
+		}
+
+		// Step 4: Build the full list (existing + new Challenge Team)
+		// Get all non-relay event IDs for the Challenge Team type
+		const regularEventIds = CHALLENGE_EVENTS
+			.filter(e => e.format !== "relay" && e.format !== "team" && e.format !== "open")
+			.map(e => e.event_id);
+
+		const allTypes = [
+			// Preserve existing types (Relay Team, etc.)
+			...existingTypes.map(t => ({
+				team_type_id: t.team_type_id,
+				team_type: t.team_type,
+				team_type_desc: t.team_type_desc || "",
+				min_members: t.min_members ?? 0,
+				max_members: t.max_members ?? null,
+				min_male_members: t.min_male_members ?? 0,
+				max_male_members: t.max_male_members ?? null,
+				min_female_members: t.min_female_members ?? 0,
+				max_female_members: t.max_female_members ?? null,
+				max_num_teams: t.max_num_teams ?? null,
+				valid_event_ids: t.valid_event_ids || [],
+				require_gender_selection: t.require_gender_selection || "F",
+				allow_all_male_team: t.allow_all_male_team || "T",
+				allow_all_female_team: t.allow_all_female_team || "T",
+				allow_coed_team: t.allow_coed_team || "T",
+				allow_nonbinary_in_male_or_female: t.allow_nonbinary_in_male_or_female || "T",
+			})),
+			// Add new Challenge Team type (no team_type_id = create new)
+			{
+				team_type: "Challenge Team",
+				team_type_desc: "General teams for Charity Challenge Series participants — clubs, companies, families, friends, communities (e.g. Hallandale Beach, Central Park, New Jersey, Kolobok).",
+				min_members: 1,
+				max_members: null,
+				min_male_members: 0,
+				max_male_members: null,
+				min_female_members: 0,
+				max_female_members: null,
+				max_num_teams: null,
+				valid_event_ids: regularEventIds,
+				require_gender_selection: "F",
+				allow_all_male_team: "T",
+				allow_all_female_team: "T",
+				allow_coed_team: "T",
+				allow_nonbinary_in_male_or_female: "T",
+			},
+		];
+
+		// Step 5: POST to create/update team types
+		// WARNING: Any existing type NOT in this list will be DELETED.
+		// Try without race_event_days_id first (may not be required with OAuth).
+		const apiUrl = `https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams/team-types`;
+		const formData = new URLSearchParams();
+		formData.set("request", JSON.stringify({ race_team_types: allTypes }));
+		formData.set("format", "json");
+		formData.set("request_format", "json");
+		// Only include race_event_days_id if we found it
+		if (raceEventDaysId) {
+			formData.set("race_event_days_id", String(raceEventDaysId));
+		}
+
+		const res = await fetch(apiUrl, {
+			method: "POST",
+			headers: {
+				"Authorization": `Bearer ${token}`,
+				"Content-Type": "application/x-www-form-urlencoded",
+			},
+			body: formData.toString(),
+		});
+
+		const data = await res.json() as {
+			race_team_type_ids?: number[];
+			error?: { error_code?: number; error_msg?: string };
+		};
+
+		if (!res.ok || data.error) {
+			return json({
+				ok: false,
+				error: data.error?.error_msg || `RunSignup API error (${res.status})`,
+			}, 502);
+		}
+
+		return json({
+			ok: true,
+			message: "Challenge Team type created",
+			race_team_type_ids: data.race_team_type_ids,
+			preserved_existing: existingTypes.length,
+			regular_events_count: regularEventIds.length,
+		});
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
+	}
+}
+
+/**
+ * GET /api/challenge/v1/debug-race-info
+ * Debug endpoint to see RunSignup race API structure.
+ */
+async function handleDebugRaceInfo(env: Env): Promise<Response> {
+	try {
+		const token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+
+		// Try events endpoint
+		const eventsUrl = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/events`);
+		eventsUrl.searchParams.set("format", "json");
+		const eventsRes = await runSignupGetJson<unknown>(eventsUrl, token);
+
+		let eventKeys: string[] = [];
+		let eventSample = "";
+		if (eventsRes.ok && eventsRes.data) {
+			const data = eventsRes.data as { events?: Array<Record<string, unknown>> };
+			if (data.events && data.events[0]) {
+				eventKeys = Object.keys(data.events[0]);
+				eventSample = JSON.stringify(data.events[0]).slice(0, 1000);
+			}
+		}
+
+		return json({
+			ok: true,
+			event_keys: eventKeys,
+			event_sample: eventSample,
+			events_error: eventsRes.ok ? null : eventsRes.api_error_msg,
+		});
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
+	}
+}
+
 /** Main entry: auth check + routing. Called early from the worker fetch handler. */
 export async function handleChallengeApi(request: Request, env: Env, url: URL): Promise<Response> {
 	const presented = request.headers.get("X-Challenge-Key") || "";
@@ -623,6 +847,12 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	}
 	if (path === "/api/challenge/v1/teams" && request.method === "POST") {
 		return handleCreateTeam(request, env);
+	}
+	if (path === "/api/challenge/v1/setup-challenge-team-type" && request.method === "POST") {
+		return handleSetupChallengeTeamType(env);
+	}
+	if (path === "/api/challenge/v1/debug-race-info" && request.method === "GET") {
+		return handleDebugRaceInfo(env);
 	}
 	if (path.startsWith("/api/challenge/v1/forms/") && request.method === "POST") {
 		const formType = path.slice("/api/challenge/v1/forms/".length);
