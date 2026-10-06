@@ -212,6 +212,17 @@ interface ActivityInput {
  * Verifies the user owns a registration for the event, then POSTs the
  * activity to RunSignup and reads it back.
  */
+/** Release a pending fingerprint reservation so a retry may proceed. No-op if no fingerprint. */
+async function releaseFingerprintReservation(env: Env, rsuUserId: number, fingerprint: string | null): Promise<void> {
+	if (!fingerprint) return;
+	try {
+		await env.nwana_engine_db.prepare(
+			"DELETE FROM challenge_activity_fingerprints WHERE rsu_user_id = ? AND fingerprint = ? AND status = 'pending'"
+		).bind(rsuUserId, fingerprint).run();
+	} catch (e) {
+		console.error("fingerprint release failed", e);
+	}
+}
 async function handlePostActivity(request: Request, env: Env): Promise<Response> {
 	let input: ActivityInput;
 	try {
@@ -251,22 +262,49 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 		return json({ ok: false, error: "activity type is required for Open Challenge" }, 400);
 	}
 
-	// Deduplication: same source file must never create a second activity.
-	// Check BEFORE any RunSignup write.
+	// Deduplication: atomic fingerprint reservation BEFORE any RunSignup write.
+	// Only the request that wins the INSERT may call RunSignup. Concurrent
+	// requests with the same fingerprint get 409 (completed) or 409
+	// (processing). This is the concurrency-safe scheme — never check-then-act.
 	if (fingerprint) {
 		try {
-			const existing = await env.nwana_engine_db.prepare(
-				"SELECT tally_split_num, event_id FROM challenge_activity_fingerprints WHERE rsu_user_id = ? AND fingerprint = ?"
-			).bind(rsuUserId, fingerprint).first<{ tally_split_num: number | null; event_id: number }>();
-			if (existing) {
-				return json({
-					ok: false,
-					error: "duplicate",
-					detail: "This activity has already been submitted.",
-					tally_split_num: existing.tally_split_num,
-					event_id: existing.event_id,
-				}, 409);
+			// Try to acquire the reservation.
+			const reserve = await env.nwana_engine_db.prepare(
+				"INSERT OR IGNORE INTO challenge_activity_fingerprints (rsu_user_id, fingerprint, event_id, tally_split_num, status) VALUES (?, ?, ?, NULL, 'pending')"
+			).bind(rsuUserId, fingerprint, eventId).run();
+			if (reserve.meta.changes === 0) {
+				// Reservation already held — inspect it.
+				const existing = await env.nwana_engine_db.prepare(
+					"SELECT tally_split_num, event_id, status, submitted_at FROM challenge_activity_fingerprints WHERE rsu_user_id = ? AND fingerprint = ?"
+				).bind(rsuUserId, fingerprint).first<{ tally_split_num: number | null; event_id: number; status: string; submitted_at: string }>();
+				if (existing?.status === "completed") {
+					return json({
+						ok: false,
+						error: "duplicate",
+						detail: "This activity has already been submitted.",
+						tally_split_num: existing.tally_split_num,
+						event_id: existing.event_id,
+					}, 409);
+				}
+				// Pending or failed: if the reservation is stale (>5 min), reclaim it.
+				// Otherwise tell the client to wait — another request is in-flight.
+				const ageMs = existing?.submitted_at ? Date.now() - Date.parse(existing.submitted_at) : Infinity;
+				if (existing && (existing.status === "failed" || ageMs > 5 * 60 * 1000)) {
+					await env.nwana_engine_db.prepare(
+						"DELETE FROM challenge_activity_fingerprints WHERE rsu_user_id = ? AND fingerprint = ?"
+					).bind(rsuUserId, fingerprint).run();
+					const retry = await env.nwana_engine_db.prepare(
+						"INSERT OR IGNORE INTO challenge_activity_fingerprints (rsu_user_id, fingerprint, event_id, tally_split_num, status) VALUES (?, ?, ?, NULL, 'pending')"
+					).bind(rsuUserId, fingerprint, eventId).run();
+					if (retry.meta.changes === 0) {
+						return json({ ok: false, error: "processing", detail: "This activity is being processed. Please wait and try again." }, 409);
+					}
+					// Reclaimed — proceed as the winner.
+				} else {
+					return json({ ok: false, error: "processing", detail: "This activity is being processed. Please wait and try again." }, 409);
+				}
 			}
+			// Reservation acquired — this request alone may call RunSignup.
 		} catch (e) {
 			// If the dedup table is unavailable, fail closed — never risk a duplicate.
 			return json({ ok: false, error: "dedup unavailable", detail: "Could not verify uniqueness. Try again." }, 503);
@@ -347,12 +385,14 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 			body: form.toString(),
 		});
 	} catch (e) {
+		await releaseFingerprintReservation(env, rsuUserId, fingerprint);
 		return json({ ok: false, error: "runsignup_unreachable" }, 502);
 	}
 	let postData: { tally_split_nums?: number[]; error?: { error_msg?: string } };
 	try {
 		postData = (await postRes.json()) as typeof postData;
 	} catch {
+		await releaseFingerprintReservation(env, rsuUserId, fingerprint);
 		return json({ ok: false, error: "invalid RunSignup response" }, 502);
 	}
 	if (!postRes.ok || postData.error || !Array.isArray(postData.tally_split_nums) || postData.tally_split_nums.length === 0) {
@@ -370,19 +410,20 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 				detail = `HTTP ${postRes.status}: ${JSON.stringify(postData).slice(0, 300)}`;
 			}
 		} catch { /* keep default */ }
+		await releaseFingerprintReservation(env, rsuUserId, fingerprint);
 		return json({ ok: false, error: "runsignup_rejected", detail }, 502);
 	}
 	const tallySplitNum = postData.tally_split_nums[0];
 
-	// Store fingerprint AFTER successful RunSignup write (deduplication).
+	// Mark reservation completed AFTER successful RunSignup write.
 	if (fingerprint) {
 		try {
 			await env.nwana_engine_db.prepare(
-				"INSERT OR IGNORE INTO challenge_activity_fingerprints (rsu_user_id, fingerprint, event_id, tally_split_num) VALUES (?, ?, ?, ?)"
-			).bind(rsuUserId, fingerprint, eventId, tallySplitNum).run();
+				"UPDATE challenge_activity_fingerprints SET status = 'completed', tally_split_num = ?, event_id = ? WHERE rsu_user_id = ? AND fingerprint = ? AND status = 'pending'"
+			).bind(tallySplitNum, eventId, rsuUserId, fingerprint).run();
 		} catch (e) {
 			// Non-fatal: activity is already in RunSignup; log but don't fail.
-			console.error("fingerprint store failed", e);
+			console.error("fingerprint complete failed", e);
 		}
 	}
 
