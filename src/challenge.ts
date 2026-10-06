@@ -1219,13 +1219,17 @@ async function handleFormList(url: URL, env: Env): Promise<Response> {
  * 212466 fund attribution is applied. No polling — explicit trigger only.
  */
 async function handleSyncDonations(env: Env): Promise<Response> {
-	if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-		return json({ ok: false, error: "missing RunSignup token" }, 500);
+	// Use OAuth token lifecycle (not static RUNSIGNUP_ACCESS_TOKEN which expires).
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return json({ ok: false, error: "OAuth token unavailable", detail: e instanceof Error ? e.message : "" }, 502);
 	}
 	try {
 		const result = await syncRunSignupDonations(
 			env.nwana_engine_db,
-			env.RUNSIGNUP_ACCESS_TOKEN,
+			token,
 			{ raceId: CHALLENGE_RACE_ID }
 		);
 		return json({ race_id: CHALLENGE_RACE_ID, ...result });
