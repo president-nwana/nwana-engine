@@ -82,12 +82,41 @@ function errorPage(error: unknown): Response {
 	});
 }
 
+import { LOGO_JPG_BASE64, FAVICON_PNG_BASE64 } from "./assets-embedded";
+
+function base64ToBytes(b64: string): Uint8Array {
+	const bin = atob(b64);
+	const bytes = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+	return bytes;
+}
+
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
 		const path = url.pathname.replace(/\/+$/, "") || "/";
 
 		try {
+			// Serve embedded static assets (logo, favicon) directly from the
+			// Worker bundle. This ensures they work even if the assets/
+			// directory was not included in the deploy. The source files live
+			// in public/ (local to nwana-site, not external URLs).
+			if (request.method === "GET" && (path === "/logo.jpg" || path === "/logo.jpeg")) {
+				return new Response(base64ToBytes(LOGO_JPG_BASE64), {
+					headers: {
+						"content-type": "image/jpeg",
+						"cache-control": "public, max-age=86400",
+					},
+				});
+			}
+			if (request.method === "GET" && (path === "/favicon.png" || path === "/favicon.ico")) {
+				return new Response(base64ToBytes(FAVICON_PNG_BASE64), {
+					headers: {
+						"content-type": "image/png",
+						"cache-control": "public, max-age=86400",
+					},
+				});
+			}
 			if (request.method === "GET" && path === "/health") {
 				return Response.json({ ok: true, service: "nwana-site" });
 			}
