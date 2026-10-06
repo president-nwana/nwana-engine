@@ -1388,6 +1388,7 @@ export interface WinnerAnnouncementInput {
 	eventDate: string | null;
 	distance: string | null;
 	rows: ReadonlyArray<WinnerAnnouncementRow>;
+	imageUrl?: string | null;
 }
 
 export interface WinnerAnnouncementNews {
@@ -1457,6 +1458,12 @@ export function buildWinnerAnnouncementNews(
 	const title = `Winner congratulations: ${eventLabel}`;
 
 	const lines: string[] = [];
+	// Include the result card image (same as Meta) at the top of the news.
+	if (input.imageUrl) {
+		lines.push(
+			`<p><img src="${escapeNewsHtml(input.imageUrl)}" alt="${escapeNewsHtml(title)}" style="max-width:100%;height:auto;" /></p>`,
+		);
+	}
 	lines.push(
 		`<p>Congratulations to the winners of ${escapeNewsHtml(eventLabel)}` +
 			(dateLabel ? ` (${escapeNewsHtml(dateLabel)})` : "") +
@@ -1512,6 +1519,7 @@ export async function autoPublishWinnerNews(
 		series: string;
 		raceId: number;
 		eventId: number;
+		imageUrl?: string | null;
 	},
 ): Promise<AutoPublishNewsOutcome> {
 	const slug = winnerAnnouncementSlug(params.publicationKey);
@@ -1552,6 +1560,7 @@ export async function autoPublishWinnerNews(
 		eventDate: snapshot.event_date,
 		distance: snapshot.distance,
 		rows,
+		imageUrl: params.imageUrl ?? null,
 	});
 	if (!news) return { published: false, skipped: "no_winners" };
 
@@ -1806,27 +1815,43 @@ function normalizePromoEventDate(value: string | null): string | null {
 export function buildNextRacePromoNews(input: {
 	publicationKey: string;
 	next: NextRacePromoDetails;
+	upcoming?: NextRacePromoDetails[];
 }): NextRacePromoNews {
+	const upcoming = input.upcoming ?? [input.next];
 	const distanceLabel = (input.next.distance ?? "").trim();
 	const eventLabel =
 		(input.next.eventName ?? "").trim() || `NWANA ${distanceLabel || "race"}`;
 	const dateLabel = (input.next.eventDate ?? "").trim();
-	const title = `Next race: ${eventLabel}`;
 
+	// If multiple events share the nearest date, list them all.
+	let title: string;
 	const lines: string[] = [];
-	lines.push(
-		`<p>The next ${escapeNewsHtml(eventLabel)}` +
-			(dateLabel ? ` is scheduled for ${escapeNewsHtml(dateLabel)}` : " is coming up") +
-			`.</p>`,
-	);
-	if (distanceLabel) {
-		lines.push(`<p>Distance: ${escapeNewsHtml(distanceLabel)}.</p>`);
-	}
-	const regUrl = (input.next.registrationUrl ?? "").trim();
-	if (regUrl) {
+	if (upcoming.length > 1) {
+		title = `Next races: ${dateLabel || "coming up"}`;
+		lines.push(`<p>Upcoming races on ${escapeNewsHtml(dateLabel)}:</p>`);
+		lines.push("<ul>");
+		for (const ev of upcoming) {
+			const evLabel = (ev.eventName ?? "").trim() || `NWANA ${(ev.distance ?? "").trim() || "race"}`;
+			const dist = (ev.distance ?? "").trim();
+			lines.push(`<li>${escapeNewsHtml(evLabel)}${dist ? ` (${escapeNewsHtml(dist)})` : ""}</li>`);
+		}
+		lines.push("</ul>");
+	} else {
+		title = `Next race: ${eventLabel}`;
 		lines.push(
-			`<p><a href="${escapeNewsHtml(regUrl)}">Register on RunSignup</a></p>`,
+			`<p>The next ${escapeNewsHtml(eventLabel)}` +
+				(dateLabel ? ` is scheduled for ${escapeNewsHtml(dateLabel)}` : " is coming up") +
+				`.</p>`,
 		);
+		if (distanceLabel) {
+			lines.push(`<p>Distance: ${escapeNewsHtml(distanceLabel)}.</p>`);
+		}
+		const regUrl = (input.next.registrationUrl ?? "").trim();
+		if (regUrl) {
+			lines.push(
+				`<p><a href="${escapeNewsHtml(regUrl)}">Register on RunSignup</a></p>`,
+			);
+		}
 	}
 	lines.push(
 		`<p>Results from the latest race are published in the <a href="/results">results section</a>.</p>`,
@@ -1877,13 +1902,16 @@ export async function autoPublishNextRacePromo(
 	if (!distance) return { published: false, skipped: "no_results_snapshot" };
 
 	const today = params.nowDate ?? new Date().toISOString().slice(0, 10);
+	// Look across ALL Series 2026 distances (not just the published event's
+	// distance) to find the nearest upcoming stage. If multiple events are
+	// on the same nearest date, they are all included in the promo.
 	const candidates = await db
 		.prepare(
 			`SELECT event_id, event_name, event_date, distance, registration_url
 			 FROM race_event_results
-			 WHERE series = ? AND distance = ?`,
+			 WHERE series = ?`,
 		)
-		.bind(params.series, distance)
+		.bind(params.series)
 		.all<{
 			event_id: number;
 			event_name: string | null;
@@ -1892,28 +1920,37 @@ export async function autoPublishNextRacePromo(
 			registration_url: string | null;
 		}>();
 
-	let next: { date: string; row: NextRacePromoDetails } | null = null;
+	let nearestDate: string | null = null;
+	const nearestRows: NextRacePromoDetails[] = [];
 	for (const row of candidates.results) {
 		const date = normalizePromoEventDate(row.event_date);
 		if (!date || date <= today) continue;
-		if (!next || date < next.date) {
-			next = {
-				date,
-				row: {
-					eventId: row.event_id,
-					eventName: row.event_name,
-					eventDate: row.event_date,
-					distance: row.distance,
-					registrationUrl: row.registration_url,
-				},
-			};
+		if (!nearestDate || date < nearestDate) {
+			nearestDate = date;
+			nearestRows.length = 0;
+			nearestRows.push({
+				eventId: row.event_id,
+				eventName: row.event_name,
+				eventDate: row.event_date,
+				distance: row.distance,
+				registrationUrl: row.registration_url,
+			});
+		} else if (date === nearestDate) {
+			nearestRows.push({
+				eventId: row.event_id,
+				eventName: row.event_name,
+				eventDate: row.event_date,
+				distance: row.distance,
+				registrationUrl: row.registration_url,
+			});
 		}
 	}
-	if (!next) return { published: false, skipped: "no_upcoming_race" };
+	if (!nearestDate || nearestRows.length === 0) return { published: false, skipped: "no_upcoming_race" };
 
 	const news = buildNextRacePromoNews({
 		publicationKey: params.publicationKey,
-		next: next.row,
+		next: nearestRows[0],
+		upcoming: nearestRows,
 	});
 	await db
 		.prepare(

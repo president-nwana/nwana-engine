@@ -275,6 +275,7 @@ export async function executeResultPublication(
 			series: "SERIES_2026",
 			raceId: draft.source.race_id,
 			eventId: draft.source.event_id,
+			imageUrl: input.imageUrl,
 		});
 		const outcome = siteNews as { published?: boolean; skipped?: string; slug?: string };
 		if (outcome.published) {

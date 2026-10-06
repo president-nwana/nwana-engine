@@ -12,8 +12,9 @@ export interface Stage8D1Result {
 		time: string;
 		time_seconds: number;
 		performance_level: string;
-		level_place: number;
+		level_place: string;
 		points: number;
+		gender: string;
 	}>;
 	standings: Array<{
 		athlete: string;
@@ -83,6 +84,13 @@ export async function processStage8D1(input: {
 		"232931669": "7:45", // Michael Blanchard
 	};
 
+	// Verified gender mapping for Stage 8 (2026-10-05).
+	// Both winners are male (Albert confirmed).
+	const VERIFIED_GENDERS: Record<string, string> = {
+		"232911744": "M", // ALBERT FATIKHOV
+		"232931669": "M", // Michael Blanchard
+	};
+
 	// 2. Compute levels.
 	const computed = approvals.results.map((row) => {
 		// Use verified time if approval record has blank time.
@@ -95,8 +103,9 @@ export async function processStage8D1(input: {
 			time: timeStr,
 			time_seconds: timeSeconds,
 			performance_level: level,
-			level_place: 0, // computed below
+			level_place: "0", // string, computed below
 			points: 1000, // 1000 points per completed event (observed from historical data)
+			gender: VERIFIED_GENDERS[row.result_id] || "M",
 		};
 	});
 
@@ -109,7 +118,7 @@ export async function processStage8D1(input: {
 	for (const [, group] of byLevel) {
 		group.sort((a, b) => a.time_seconds - b.time_seconds);
 		group.forEach((c, idx) => {
-			c.level_place = idx + 1;
+			c.level_place = String(idx + 1);
 		});
 	}
 
@@ -122,6 +131,7 @@ export async function processStage8D1(input: {
 			performance_level: c.performance_level,
 			level_place: c.level_place,
 			points: c.points,
+			gender: c.gender,
 		})),
 	);
 
