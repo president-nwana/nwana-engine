@@ -6,6 +6,7 @@
 // the OAuth-verified rsu_user_id supplied by the caller. Never trust email.
 
 import { runSignupGetJson } from "./runsignup-client";
+import { resolveRunSignupAccessToken } from "./runsignup-oauth";
 import { syncRunSignupDonations } from "./lib/money-ingestion";
 
 export const CHALLENGE_RACE_ID = 216323;
@@ -93,6 +94,8 @@ function int(v: unknown): number | null {
 
 interface Env {
 	RUNSIGNUP_ACCESS_TOKEN?: string;
+	RUNSIGNUP_OAUTH_CLIENT_ID?: string;
+	RUNSIGNUP_OAUTH_CLIENT_SECRET?: string;
 	CHALLENGE_API_KEY?: string;
 	nwana_engine_db: D1Database;
 }
@@ -101,8 +104,14 @@ interface Env {
  * NOTE: the API returns an ARRAY of per-event objects: [{event, participants[]}, ...]
  * — one entry per queried event_id, NOT {participants: [...]} at the top level. */
 async function fetchParticipants(env: Env): Promise<{ ok: boolean; participants?: UnknownRecord[]; error?: string }> {
-	const token = env.RUNSIGNUP_ACCESS_TOKEN;
-	if (!token) return { ok: false, error: "RunSignup director grant not configured" };
+	// Use OAuth token lifecycle (not static RUNSIGNUP_ACCESS_TOKEN which expires).
+	// The OAuth was restored 2026-10-05 and is CONNECTED.
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return { ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" };
+	}
 	const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/participants`);
 	url.searchParams.set("event_id", ALL_QUERY_EVENT_IDS.join(","));
 	url.searchParams.set("results_per_page", "500");
