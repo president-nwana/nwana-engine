@@ -433,7 +433,7 @@ async function handleWeekStats(url: URL, env: Env): Promise<Response> {
  * GET /api/challenge/v1/team-types
  * Get race team types for the Charity Challenge Series (race 216323).
  * Returns team_type_id values needed to create teams via the Teams API.
- * Checks relay events first (teams are known to be enabled there).
+ * Prioritizes the general "Challenge Team" type (team_type_id 165480) over Relay Team.
  */
 async function handleTeamTypes(env: Env): Promise<Response> {
 	try {
@@ -444,30 +444,41 @@ async function handleTeamTypes(env: Env): Promise<Response> {
 			return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
 		}
 		// The team-types API requires an event_id parameter.
-		// Try relay events first (teams enabled for 4-person relays), then fall back to others.
-		const relayEvents = CHALLENGE_EVENTS.filter(e => e.format === "relay");
-		const otherEvents = CHALLENGE_EVENTS.filter(e => e.format !== "relay");
-		const eventsToTry = [...relayEvents, ...otherEvents].slice(0, 5);
+		// Use a regular (non-relay) event to get the Challenge Team type.
+		// Challenge Team type_id 165480 is valid for regular challenge events.
+		const regularEvents = CHALLENGE_EVENTS.filter(e =>
+			e.format === "mileage" || e.format === "speed"
+		);
+		const eventsToTry = [...regularEvents.slice(0, 3)];
+
+		let challengeTeamType: unknown = null;
+		let allTypes: unknown[] = [];
 
 		for (const event of eventsToTry) {
 			const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams/team-types`);
 			url.searchParams.set("format", "json");
 			url.searchParams.set("event_id", String(event.event_id));
-			const res = await runSignupGetJson<{ race_team_types?: unknown[] }>(url, token);
+			const res = await runSignupGetJson<{ race_team_types?: Array<{ team_type_id: number; team_type: string }> }>(url, token);
 			if (res.ok && res.data?.race_team_types && res.data.race_team_types.length > 0) {
-				return json({
-					ok: true,
-					team_types: res.data,
-					event_id: event.event_id,
-					event_name: event.event_name,
-				});
+				allTypes = res.data.race_team_types;
+				// Find the Challenge Team type (not Relay Team)
+				const found = res.data.race_team_types.find(t =>
+					t.team_type.toLowerCase().includes("challenge team")
+				);
+				if (found) {
+					challengeTeamType = found;
+					break;
+				}
 			}
 		}
-		// No team types found on any checked event
+
 		return json({
 			ok: true,
-			team_types: { race_team_types: [] },
-			note: "No team types configured for checked events. Groups/Teams may not be enabled.",
+			team_types: { race_team_types: allTypes },
+			challenge_team_type: challengeTeamType,
+			note: challengeTeamType
+				? "Challenge Team type found"
+				: "Challenge Team type not found - may need to be created in RunSignup dashboard",
 		});
 	} catch (e) {
 		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
