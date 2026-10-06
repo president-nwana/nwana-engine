@@ -290,6 +290,8 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	const activity: UnknownRecord = {
 		tally_split_date: date,
 		tally_split_comment: `Submitted via NWANA Charity Challenge Series${subEventLabel}`,
+		// RunSignup requires elevation gain; 0 when not available from the file.
+		elevation_ft: 0,
 	};
 	if (distanceM !== null) {
 		// Fixed-distance events: submit the event distance; mileage: the logged distance.
