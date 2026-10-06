@@ -278,7 +278,13 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 
 	// Build the vr-activities request. Distance unit: event distances are
 	// configured in kilometers; result_split_tally_value carries the value.
-	const token = env.RUNSIGNUP_ACCESS_TOKEN!;
+	// Use OAuth token lifecycle (not static RUNSIGNUP_ACCESS_TOKEN which expires).
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return json({ ok: false, error: "OAuth token unavailable", detail: e instanceof Error ? e.message : "" }, 502);
+	}
 	const subEventDef = EVENT_BY_ID.get(eventId);
 	const subEventLabel = viaBundle && subEventDef ? ` [${subEventDef.event_name}]` : "";
 	const activity: UnknownRecord = {
