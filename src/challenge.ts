@@ -339,9 +339,6 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 				detail = `HTTP ${postRes.status}: ${JSON.stringify(postData).slice(0, 300)}`;
 			}
 		} catch { /* keep default */ }
-				detail = postData.error.error_msg;
-			}
-		} catch { /* keep default */ }
 		return json({ ok: false, error: "runsignup_rejected", detail }, 502);
 	}
 	const tallySplitNum = postData.tally_split_nums[0];
