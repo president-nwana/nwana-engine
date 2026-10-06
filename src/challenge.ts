@@ -479,17 +479,29 @@ async function handleTeamTypes(env: Env): Promise<Response> {
  * List existing race teams for the Charity Challenge Series.
  */
 async function handleListTeams(env: Env): Promise<Response> {
-	let token: string;
 	try {
-		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+		let token: string;
+		try {
+			token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+		} catch (e) {
+			return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+		}
+		// The teams API requires event_id. Use relay events (where teams are enabled).
+		const relayEvents = CHALLENGE_EVENTS.filter(e => e.format === "relay");
+		const eventIds = relayEvents.map(e => e.event_id).join(",");
+		if (!eventIds) {
+			return json({ ok: false, error: "No relay events configured" }, 500);
+		}
+		const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams`);
+		url.searchParams.set("format", "json");
+		url.searchParams.set("event_id", eventIds);
+		url.searchParams.set("include_group_sizes", "T");
+		const res = await runSignupGetJson<unknown>(url, token);
+		if (!res.ok) return json({ ok: false, error: res.api_error_msg || `RunSignup error (${res.http_status})` }, 502);
+		return json({ ok: true, teams: res.data });
 	} catch (e) {
-		return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
 	}
-	const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams`);
-	url.searchParams.set("format", "json");
-	const res = await runSignupGetJson<unknown>(url, token);
-	if (!res.ok) return json({ ok: false, error: res.api_error_msg || `RunSignup error (${res.http_status})` }, 502);
-	return json({ ok: true, teams: res.data });
 }
 
 /**
