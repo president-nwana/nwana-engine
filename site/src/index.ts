@@ -82,7 +82,7 @@ function errorPage(error: unknown): Response {
 	});
 }
 
-import { LOGO_JPG_BASE64, FAVICON_PNG_BASE64 } from "./assets-embedded";
+import { LOGO_JPG_BASE64, FAVICON_PNG_BASE64, ALBERT_FATIKHOV_PNG_BASE64 } from "./assets-embedded";
 
 function base64ToBytes(b64: string): Uint8Array {
 	const bin = atob(b64);
@@ -111,6 +111,17 @@ export default {
 			}
 			if (request.method === "GET" && (path === "/favicon.png" || path === "/favicon.ico")) {
 				return new Response(base64ToBytes(FAVICON_PNG_BASE64), {
+					headers: {
+						"content-type": "image/png",
+						"cache-control": "public, max-age=86400",
+					},
+				});
+			}
+			// Albert Fatikhov photo (homepage strip). Local asset, not external URL.
+			// Source: downloaded from the working CloudFront URL from commit ac4323be,
+			// stored in public/albert-fatikhov.png and embedded here for reliability.
+			if (request.method === "GET" && path === "/albert-fatikhov.png") {
+				return new Response(base64ToBytes(ALBERT_FATIKHOV_PNG_BASE64), {
 					headers: {
 						"content-type": "image/png",
 						"cache-control": "public, max-age=86400",

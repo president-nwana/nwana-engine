@@ -199,6 +199,13 @@ export async function homePage(db: D1Database): Promise<string> {
       <a class="btn btn-outline" href="https://academy.nwaofna.org">Explore the Academy</a>
     </div>
   </div></div>
+  <div class="albert-strip"><div class="wrap" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+    <img src="/albert-fatikhov.png" alt="Albert Fatikhov, President of NWANA" style="width:120px;height:120px;border-radius:50%;object-fit:cover;flex:none;box-shadow:0 2px 8px rgba(10,31,61,.18)">
+    <div style="flex:1;min-width:240px">
+      <div class="kicker">From the President</div>
+      <p style="margin:8px 0 0;font-size:16px;line-height:1.5">"Nordic walking changed my life. As a world champion, I know what this sport can do. NWANA exists to give every North American the same opportunity — verified competition, fair levels, and a path to the world stage."<br><strong>— Albert Fatikhov, President</strong></p>
+    </div>
+  </div></div>
   ${statBand(stats)}
   <div class="section"><div class="wrap">
     <div class="kicker">How it works</div>
