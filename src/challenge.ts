@@ -225,6 +225,7 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	const distanceM = input.distance_m == null ? null : int(input.distance_m);
 	const timeS = input.time_s == null ? null : int(input.time_s);
 	const activityType = typeof input.activity_type === "string" ? input.activity_type.slice(0, 50) : null;
+	const fingerprint = typeof input.fingerprint === "string" ? input.fingerprint.slice(0, 200) : null;
 	const def = eventId ? EVENT_BY_ID.get(eventId) : undefined;
 
 	if (!rsuUserId || !def || !eventId) return json({ ok: false, error: "unknown event or user" }, 400);
@@ -243,6 +244,28 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	// Open Challenge requires an activity type for personal history.
 	if (def.format === "open" && !activityType) {
 		return json({ ok: false, error: "activity type is required for Open Challenge" }, 400);
+	}
+
+	// Deduplication: same source file must never create a second activity.
+	// Check BEFORE any RunSignup write.
+	if (fingerprint) {
+		try {
+			const existing = await env.nwana_engine_db.prepare(
+				"SELECT tally_split_num, event_id FROM challenge_activity_fingerprints WHERE rsu_user_id = ? AND fingerprint = ?"
+			).bind(rsuUserId, fingerprint).first<{ tally_split_num: number | null; event_id: number }>();
+			if (existing) {
+				return json({
+					ok: false,
+					error: "duplicate",
+					detail: "This activity has already been submitted.",
+					tally_split_num: existing.tally_split_num,
+					event_id: existing.event_id,
+				}, 409);
+			}
+		} catch (e) {
+			// If the dedup table is unavailable, fail closed — never risk a duplicate.
+			return json({ ok: false, error: "dedup unavailable", detail: "Could not verify uniqueness. Try again." }, 503);
+		}
 	}
 
 	// Verify ownership: the user must have a registration for this event,
@@ -345,6 +368,18 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 		return json({ ok: false, error: "runsignup_rejected", detail }, 502);
 	}
 	const tallySplitNum = postData.tally_split_nums[0];
+
+	// Store fingerprint AFTER successful RunSignup write (deduplication).
+	if (fingerprint) {
+		try {
+			await env.nwana_engine_db.prepare(
+				"INSERT OR IGNORE INTO challenge_activity_fingerprints (rsu_user_id, fingerprint, event_id, tally_split_num) VALUES (?, ?, ?, ?)"
+			).bind(rsuUserId, fingerprint, eventId, tallySplitNum).run();
+		} catch (e) {
+			// Non-fatal: activity is already in RunSignup; log but don't fail.
+			console.error("fingerprint store failed", e);
+		}
+	}
 
 	// Read back to confirm the write landed.
 	const getUrl = new URL("https://api.runsignup.com/rest/v2/vr-activities.json");
