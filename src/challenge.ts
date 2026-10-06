@@ -429,6 +429,152 @@ async function handleWeekStats(url: URL, env: Env): Promise<Response> {
 	}
 }
 
+/**
+ * GET /api/challenge/v1/team-types
+ * Get race team types for the Charity Challenge Series (race 216323).
+ * Returns team_type_id values needed to create teams via the Teams API.
+ * Checks relay events first (teams are known to be enabled there).
+ */
+async function handleTeamTypes(env: Env): Promise<Response> {
+	try {
+		let token: string;
+		try {
+			token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+		} catch (e) {
+			return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+		}
+		// The team-types API requires an event_id parameter.
+		// Try relay events first (teams enabled for 4-person relays), then fall back to others.
+		const relayEvents = CHALLENGE_EVENTS.filter(e => e.format === "relay");
+		const otherEvents = CHALLENGE_EVENTS.filter(e => e.format !== "relay");
+		const eventsToTry = [...relayEvents, ...otherEvents].slice(0, 5);
+
+		for (const event of eventsToTry) {
+			const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams/team-types`);
+			url.searchParams.set("format", "json");
+			url.searchParams.set("event_id", String(event.event_id));
+			const res = await runSignupGetJson<{ race_team_types?: unknown[] }>(url, token);
+			if (res.ok && res.data?.race_team_types && res.data.race_team_types.length > 0) {
+				return json({
+					ok: true,
+					team_types: res.data,
+					event_id: event.event_id,
+					event_name: event.event_name,
+				});
+			}
+		}
+		// No team types found on any checked event
+		return json({
+			ok: true,
+			team_types: { race_team_types: [] },
+			note: "No team types configured for checked events. Groups/Teams may not be enabled.",
+		});
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
+	}
+}
+
+/**
+ * GET /api/challenge/v1/teams
+ * List existing race teams for the Charity Challenge Series.
+ */
+async function handleListTeams(env: Env): Promise<Response> {
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+	}
+	const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams`);
+	url.searchParams.set("format", "json");
+	const res = await runSignupGetJson<unknown>(url, token);
+	if (!res.ok) return json({ ok: false, error: res.api_error_msg || `RunSignup error (${res.http_status})` }, 502);
+	return json({ ok: true, teams: res.data });
+}
+
+/**
+ * POST /api/challenge/v1/teams
+ * Create a new race team via RunSignup Teams API.
+ * Body: { team_name: string, team_type_id: number, team_gender?: "C"|"M"|"F" }
+ * Uses POST /rest/v2/teams/manage-teams.json with OAuth Bearer.
+ */
+async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
+	let body: { team_name?: string; team_type_id?: number; team_gender?: string };
+	try {
+		body = await request.json() as typeof body;
+	} catch {
+		return json({ ok: false, error: "Invalid JSON body" }, 400);
+	}
+	const teamName = (body.team_name || "").trim();
+	const teamTypeId = Number(body.team_type_id);
+	if (!teamName) return json({ ok: false, error: "team_name is required" }, 400);
+	if (!Number.isInteger(teamTypeId) || teamTypeId <= 0) {
+		return json({ ok: false, error: "valid team_type_id is required" }, 400);
+	}
+	const teamGender = body.team_gender === "M" || body.team_gender === "F" ? body.team_gender : "C";
+
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+	}
+
+	// RunSignup Teams API: POST /rest/v2/teams/manage-teams.json
+	// Request format: { "race_teams": [{ "team_name", "team_type_id", "team_gender" }] }
+	// The API expects the JSON in a "request" POST parameter.
+	const apiUrl = `https://api.runsignup.com/rest/v2/teams/manage-teams.json`;
+	const requestPayload = {
+		race_teams: [
+			{
+				team_name: teamName,
+				team_type_id: teamTypeId,
+				team_gender: teamGender,
+			},
+		],
+	};
+
+	try {
+		const formData = new URLSearchParams();
+		formData.set("request", JSON.stringify(requestPayload));
+		formData.set("format", "json");
+
+		const res = await fetch(apiUrl, {
+			method: "POST",
+			headers: {
+				"Authorization": `Bearer ${token}`,
+				"Content-Type": "application/x-www-form-urlencoded",
+			},
+			body: formData.toString(),
+		});
+
+		const data = await res.json() as {
+			race_team_ids?: number[];
+			error?: { error_code?: number; error_msg?: string };
+		};
+
+		if (!res.ok || data.error) {
+			return json({
+				ok: false,
+				error: data.error?.error_msg || `RunSignup API error (${res.status})`,
+			}, 502);
+		}
+
+		const teamIds = data.race_team_ids || [];
+		if (teamIds.length === 0) {
+			return json({ ok: false, error: "Team creation returned no ID" }, 502);
+		}
+
+		return json({
+			ok: true,
+			team_id: teamIds[0],
+			team_name: teamName,
+		});
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "Request failed" }, 502);
+	}
+}
+
 /** Main entry: auth check + routing. Called early from the worker fetch handler. */
 export async function handleChallengeApi(request: Request, env: Env, url: URL): Promise<Response> {
 	const presented = request.headers.get("X-Challenge-Key") || "";
@@ -456,6 +602,15 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	}
 	if (path === "/api/challenge/v1/week-stats" && request.method === "GET") {
 		return handleWeekStats(url, env);
+	}
+	if (path === "/api/challenge/v1/team-types" && request.method === "GET") {
+		return handleTeamTypes(env);
+	}
+	if (path === "/api/challenge/v1/teams" && request.method === "GET") {
+		return handleListTeams(env);
+	}
+	if (path === "/api/challenge/v1/teams" && request.method === "POST") {
+		return handleCreateTeam(request, env);
 	}
 	if (path.startsWith("/api/challenge/v1/forms/") && request.method === "POST") {
 		const formType = path.slice("/api/challenge/v1/forms/".length);
