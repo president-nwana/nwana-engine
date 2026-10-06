@@ -382,6 +382,44 @@ async function handleSeriesStats(env: Env): Promise<Response> {
 	return json({ ok: true, total_registrations: regIds.size });
 }
 
+/**
+ * GET /api/challenge/v1/week-stats?week=YYYY-MM-DD
+ * Weekly activity stats from canonical D1. Week = Monday–Sunday.
+ * Returns:
+ * - active_participants: unique rsu_user_id with at least one activity in week
+ * - total_results: total activity rows in week
+ */
+async function handleWeekStats(url: URL, env: Env): Promise<Response> {
+	const weekParam = url.searchParams.get("week");
+	let weekStart: string;
+	if (weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam)) {
+		weekStart = mondayOfWeek(weekParam);
+	} else {
+		const now = new Date();
+		const today = now.toISOString().slice(0, 10);
+		weekStart = mondayOfWeek(today);
+	}
+	const weekEnd = addDays(weekStart, 6);
+
+	try {
+		const result = await env.nwana_engine_db.prepare(
+			`SELECT COUNT(DISTINCT rsu_user_id) as active_count, COUNT(*) as total_count
+			 FROM challenge_activities
+			 WHERE activity_date >= ? AND activity_date <= ?`
+		).bind(weekStart, weekEnd).first<{ active_count: number; total_count: number }>();
+
+		return json({
+			ok: true,
+			week_start: weekStart,
+			week_end: weekEnd,
+			active_participants: result?.active_count ?? 0,
+			total_results: result?.total_count ?? 0,
+		});
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "DB error" }, 500);
+	}
+}
+
 /** Main entry: auth check + routing. Called early from the worker fetch handler. */
 export async function handleChallengeApi(request: Request, env: Env, url: URL): Promise<Response> {
 	const presented = request.headers.get("X-Challenge-Key") || "";
@@ -406,6 +444,9 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	}
 	if (path === "/api/challenge/v1/fundraising-leaderboard" && request.method === "GET") {
 		return handleFundraisingLeaderboard(url, env);
+	}
+	if (path === "/api/challenge/v1/week-stats" && request.method === "GET") {
+		return handleWeekStats(url, env);
 	}
 	if (path.startsWith("/api/challenge/v1/forms/") && request.method === "POST") {
 		const formType = path.slice("/api/challenge/v1/forms/".length);
