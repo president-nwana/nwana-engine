@@ -328,10 +328,17 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 		const pd = postData as Record<string, unknown>;
 		let detail = `HTTP ${postRes.status}`;
 		try {
-			const det = pd.details as Array<{ code?: string; message?: string }>;
+			const det = pd.details as Array<{ code?: string; message?: unknown }>;
 			if (Array.isArray(det) && det.length > 0 && det[0].code) {
-				detail = `${det[0].code}: ${det[0].message || ""}`.trim();
+				const msg = typeof det[0].message === "string" ? det[0].message : JSON.stringify(det[0].message);
+				detail = `${det[0].code}: ${msg || ""}`.trim();
 			} else if (postData.error?.error_msg) {
+				detail = postData.error.error_msg;
+			} else {
+				// Fallback: include raw response for debugging
+				detail = `HTTP ${postRes.status}: ${JSON.stringify(postData).slice(0, 300)}`;
+			}
+		} catch { /* keep default */ }
 				detail = postData.error.error_msg;
 			}
 		} catch { /* keep default */ }
