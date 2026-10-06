@@ -226,6 +226,11 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	const timeS = input.time_s == null ? null : int(input.time_s);
 	const activityType = typeof input.activity_type === "string" ? input.activity_type.slice(0, 50) : null;
 	const fingerprint = typeof input.fingerprint === "string" ? input.fingerprint.slice(0, 200) : null;
+	// Source: "manual" or "file:tcx" / "file:fit" / "file:gpx" / "file"
+	let source = "manual";
+	if (input.source === "file" || (typeof input.source === "string" && input.source.startsWith("file"))) {
+		source = typeof input.source === "string" ? input.source.slice(0, 20) : "file";
+	}
 	const def = eventId ? EVENT_BY_ID.get(eventId) : undefined;
 
 	if (!rsuUserId || !def || !eventId) return json({ ok: false, error: "unknown event or user" }, 400);
@@ -404,12 +409,12 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	try {
 		await env.nwana_engine_db.prepare(
 			`INSERT OR IGNORE INTO challenge_activities
-			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, user_name, team_id, team_name, activity_date, distance_m, time_s, activity_type)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, user_name, team_id, team_name, activity_date, distance_m, time_s, activity_type, source)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		).bind(
 			tallySplitNum, CHALLENGE_RACE_ID, submitEventId, eventId,
 			registrationId, rsuUserId, userName, team.team_id, team.team_name,
-			date, distanceM, timeS, activityType
+			date, distanceM, timeS, activityType, source
 		).run();
 	} catch (e) {
 		// Mapping failure should not fail the submission; log and continue.
@@ -1118,6 +1123,230 @@ async function handleMyTeams(url: URL, env: Env): Promise<Response> {
 	}
 }
 
+/**
+ * GET /api/challenge/v1/activities/mine?rsu_user_id=
+ * Returns only the requesting user's activities with event details.
+ */
+async function handleMyActivities(url: URL, env: Env): Promise<Response> {
+	const rsuUserId = parseInt(url.searchParams.get("rsu_user_id") || "0", 10);
+	if (!rsuUserId) return json({ ok: false, error: "rsu_user_id required" }, 400);
+	try {
+		const rows = await env.nwana_engine_db.prepare(
+			`SELECT tally_split_num, activity_date, distance_m, time_s, source, activity_type,
+			        sub_event_id, submit_event_id, registration_id, created_at
+			 FROM challenge_activities WHERE rsu_user_id = ? ORDER BY activity_date DESC, tally_split_num DESC LIMIT 200`
+		).bind(rsuUserId).all();
+		const activities = (rows.results || []).map((r: any) => {
+			const def = EVENT_BY_ID.get(r.sub_event_id);
+			return {
+				tally_split_num: r.tally_split_num,
+				date: r.activity_date,
+				distance_m: r.distance_m,
+				time_s: r.time_s,
+				source: r.source || "manual",
+				activity_type: r.activity_type,
+				event_id: r.sub_event_id,
+				event_name: def ? def.event_name : ("Event " + r.sub_event_id),
+				discipline: def ? def.discipline : "",
+				format: def ? def.format : "",
+				distance_label: def ? def.distance_label : "",
+				registration_id: r.registration_id,
+				created_at: r.created_at,
+			};
+		});
+		return json({ ok: true, activities });
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
+	}
+}
+
+/**
+ * DELETE /api/challenge/v1/activities/:tally_split_num?rsu_user_id=
+ * Deletes from RunSignup via official API, then removes D1 mapping + fingerprint.
+ * After deletion the same source file can be uploaded again.
+ */
+async function handleDeleteActivity(tallyStr: string, url: URL, env: Env): Promise<Response> {
+	const tallySplitNum = parseInt(tallyStr, 10);
+	const rsuUserId = parseInt(url.searchParams.get("rsu_user_id") || "0", 10);
+	if (!tallySplitNum || !rsuUserId) return json({ ok: false, error: "tally_split_num and rsu_user_id required" }, 400);
+
+	// Ownership check via D1 mapping.
+	const row = await env.nwana_engine_db.prepare(
+		"SELECT * FROM challenge_activities WHERE tally_split_num = ? AND rsu_user_id = ?"
+	).bind(tallySplitNum, rsuUserId).first<any>();
+	if (!row) return json({ ok: false, error: "not found or not yours" }, 404);
+
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return json({ ok: false, error: "OAuth token unavailable" }, 502);
+	}
+
+	// Official RunSignup DELETE.
+	const delUrl = new URL("https://api.runsignup.com/rest/v2/vr-activities.json");
+	delUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
+	delUrl.searchParams.set("event_id", String(row.submit_event_id));
+	delUrl.searchParams.set("registration_id", String(row.registration_id));
+	delUrl.searchParams.set("tally_split_num", String(tallySplitNum));
+	let delRes: Response;
+	try {
+		delRes = await fetch(delUrl.toString(), {
+			method: "DELETE",
+			headers: { "Authorization": "Bearer " + token },
+		});
+	} catch (e) {
+		return json({ ok: false, error: "runsignup_unreachable" }, 502);
+	}
+	let delData: any;
+	try { delData = await delRes.json(); } catch { return json({ ok: false, error: "invalid RunSignup response" }, 502); }
+	const deleted = Array.isArray(delData.tally_split_nums) && delData.tally_split_nums.includes(tallySplitNum);
+	if (!delRes.ok || !deleted) {
+		return json({ ok: false, error: "runsignup_delete_failed", detail: JSON.stringify(delData).slice(0, 300) }, 502);
+	}
+
+	// Remove D1 mapping + fingerprint so the file can be re-uploaded.
+	try {
+		await env.nwana_engine_db.prepare(
+			"DELETE FROM challenge_activities WHERE tally_split_num = ?"
+		).bind(tallySplitNum).run();
+		await env.nwana_engine_db.prepare(
+			"DELETE FROM challenge_activity_fingerprints WHERE rsu_user_id = ? AND tally_split_num = ?"
+		).bind(rsuUserId, tallySplitNum).run();
+	} catch (e) {
+		console.error("delete cleanup failed", e);
+	}
+	return json({ ok: true, deleted: tallySplitNum });
+}
+
+/**
+ * POST /api/challenge/v1/activities/:tally_split_num/move
+ * Body: { rsu_user_id, dest_event_id }
+ * Safe move: create in destination → verify → delete old → update D1.
+ * Preserves original date/distance/time without re-upload.
+ */
+async function handleMoveActivity(tallyStr: string, request: Request, env: Env): Promise<Response> {
+	const tallySplitNum = parseInt(tallyStr, 10);
+	let input: any;
+	try { input = await request.json(); } catch { return json({ ok: false, error: "invalid JSON" }, 400); }
+	const rsuUserId = parseInt(input.rsu_user_id, 10);
+	const destEventId = parseInt(input.dest_event_id, 10);
+	if (!tallySplitNum || !rsuUserId || !destEventId) {
+		return json({ ok: false, error: "tally_split_num, rsu_user_id, dest_event_id required" }, 400);
+	}
+
+	const row = await env.nwana_engine_db.prepare(
+		"SELECT * FROM challenge_activities WHERE tally_split_num = ? AND rsu_user_id = ?"
+	).bind(tallySplitNum, rsuUserId).first<any>();
+	if (!row) return json({ ok: false, error: "not found or not yours" }, 404);
+
+	const srcDef = EVENT_BY_ID.get(row.sub_event_id);
+	const destDef = EVENT_BY_ID.get(destEventId);
+	if (!destDef) return json({ ok: false, error: "unknown destination event" }, 400);
+	if (srcDef && destDef.discipline !== srcDef.discipline && destDef.format !== "open") {
+		return json({ ok: false, error: "destination must be in the same discipline" }, 400);
+	}
+	// Speed/relay destinations require a time.
+	if ((destDef.format === "speed" || destDef.format === "relay") && !row.time_s) {
+		return json({ ok: false, error: "destination requires a time, this activity has none" }, 400);
+	}
+
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return json({ ok: false, error: "OAuth token unavailable" }, 502);
+	}
+
+	// Verify user registration for destination event (direct or via bundle).
+	const fetched = await fetchParticipants(env);
+	if (!fetched.ok) return json({ ok: false, error: fetched.error }, 502);
+	const mine = (fetched.participants || []).filter((p: any) => participantUserId(p) === rsuUserId);
+	let destRegId: number | null = null;
+	let destSubmitId = destEventId;
+	const direct = mine.find((p: any) => int(p.event_id) === destEventId);
+	if (direct) {
+		destRegId = int(direct.registration_id);
+	} else {
+		for (const p of mine) {
+			const eid = int((p as any).event_id);
+			if (eid && BUNDLE_TO_EVENTS[eid] && BUNDLE_TO_EVENTS[eid].includes(destEventId)) {
+				destRegId = int((p as any).registration_id);
+				destSubmitId = eid;
+				break;
+			}
+		}
+	}
+	if (!destRegId) return json({ ok: false, error: "not registered for destination event" }, 403);
+
+	// Step 1: create in destination (same date/distance/time).
+	const valueM = destDef.fixed_distance_m ?? row.distance_m;
+	const newActivity: Record<string, unknown> = {
+		tally_split_date: row.activity_date,
+		tally_split_comment: "Moved via NWANA Charity Challenge Series",
+		split_elevation_gain_in_mm: 0,
+	};
+	if (valueM) newActivity.result_split_tally_value = Math.round((valueM / 1000) * 100) / 100;
+	if (row.time_s) newActivity.submitted_time_in_ms = row.time_s * 1000;
+
+	const postUrl = new URL("https://api.runsignup.com/rest/v2/vr-activities.json");
+	postUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
+	postUrl.searchParams.set("event_id", String(destSubmitId));
+	postUrl.searchParams.set("registration_id", String(destRegId));
+	const form = new URLSearchParams();
+	form.set("request", JSON.stringify({ activities: [newActivity] }));
+	let postRes: Response;
+	try {
+		postRes = await fetch(postUrl.toString(), {
+			method: "POST",
+			headers: { "Authorization": "Bearer " + token, "Content-Type": "application/x-www-form-urlencoded" },
+			body: form.toString(),
+		});
+	} catch (e) {
+		return json({ ok: false, error: "runsignup_unreachable" }, 502);
+	}
+	let postData: any;
+	try { postData = await postRes.json(); } catch { return json({ ok: false, error: "invalid RunSignup response" }, 502); }
+	if (!postRes.ok || !Array.isArray(postData.tally_split_nums) || !postData.tally_split_nums.length) {
+		// Step failed → do NOT delete the old activity.
+		return json({ ok: false, error: "move_create_failed", detail: JSON.stringify(postData).slice(0, 300) }, 502);
+	}
+	const newTally = postData.tally_split_nums[0];
+
+	// Step 2: delete old from RunSignup.
+	const delUrl = new URL("https://api.runsignup.com/rest/v2/vr-activities.json");
+	delUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
+	delUrl.searchParams.set("event_id", String(row.submit_event_id));
+	delUrl.searchParams.set("registration_id", String(row.registration_id));
+	delUrl.searchParams.set("tally_split_num", String(tallySplitNum));
+	try {
+		const delRes = await fetch(delUrl.toString(), { method: "DELETE", headers: { "Authorization": "Bearer " + token } });
+		const delData: any = await delRes.json().catch(() => ({}));
+		if (!delRes.ok || !(Array.isArray(delData.tally_split_nums) && delData.tally_split_nums.includes(tallySplitNum))) {
+			// New activity exists but old delete failed — report partial state honestly.
+			return json({ ok: false, error: "move_delete_failed", detail: "New activity created (tally " + newTally + ") but old could not be deleted. Delete it manually from My Activities.", new_tally_split_num: newTally }, 502);
+		}
+	} catch (e) {
+		return json({ ok: false, error: "move_delete_failed", detail: "New activity created (tally " + newTally + ") but old delete request failed.", new_tally_split_num: newTally }, 502);
+	}
+
+	// Step 3: update D1 — move mapping + fingerprint to new tally/event.
+	try {
+		await env.nwana_engine_db.prepare("DELETE FROM challenge_activities WHERE tally_split_num = ?").bind(tallySplitNum).run();
+		await env.nwana_engine_db.prepare(
+			`INSERT INTO challenge_activities
+			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, user_name, activity_date, distance_m, time_s, activity_type, source)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		).bind(newTally, CHALLENGE_RACE_ID, destSubmitId, destEventId, destRegId, rsuUserId, row.user_name, row.activity_date, row.distance_m, row.time_s, row.activity_type, row.source).run();
+		await env.nwana_engine_db.prepare(
+			"UPDATE challenge_activity_fingerprints SET event_id = ?, tally_split_num = ? WHERE rsu_user_id = ? AND tally_split_num = ?"
+		).bind(destEventId, newTally, rsuUserId, tallySplitNum).run();
+	} catch (e) {
+		console.error("move D1 update failed", e);
+	}
+	return json({ ok: true, old_tally_split_num: tallySplitNum, new_tally_split_num: newTally, dest_event_id: destEventId });
+}
+
 /** Main entry: auth check + routing. Called early from the worker fetch handler. */
 export async function handleChallengeApi(request: Request, env: Env, url: URL): Promise<Response> {
 	const presented = request.headers.get("X-Challenge-Key") || "";
@@ -1133,6 +1362,17 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	}
 	if (path === "/api/challenge/v1/activities" && request.method === "POST") {
 		return handlePostActivity(request, env);
+	}
+	if (path === "/api/challenge/v1/activities/mine" && request.method === "GET") {
+		return handleMyActivities(url, env);
+	}
+	const actMatch = path.match(/^\/api\/challenge\/v1\/activities\/(\d+)$/);
+	if (actMatch && request.method === "DELETE") {
+		return handleDeleteActivity(actMatch[1], url, env);
+	}
+	const moveMatch = path.match(/^\/api\/challenge\/v1\/activities\/(\d+)\/move$/);
+	if (moveMatch && request.method === "POST") {
+		return handleMoveActivity(moveMatch[1], request, env);
 	}
 	if (path === "/api/challenge/v1/leaderboard" && request.method === "GET") {
 		return handleLeaderboard(url, env);
