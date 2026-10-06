@@ -1330,19 +1330,34 @@ async function handleMoveActivity(tallyStr: string, request: Request, env: Env):
 		return json({ ok: false, error: "move_delete_failed", detail: "New activity created (tally " + newTally + ") but old delete request failed.", new_tally_split_num: newTally }, 502);
 	}
 
-	// Step 3: update D1 — move mapping + fingerprint to new tally/event.
+	// Step 3: update D1 — INSERT new mapping FIRST, then delete old.
+	// This order ensures we never lose track of an activity.
 	try {
-		await env.nwana_engine_db.prepare("DELETE FROM challenge_activities WHERE tally_split_num = ?").bind(tallySplitNum).run();
 		await env.nwana_engine_db.prepare(
-			`INSERT INTO challenge_activities
+			`INSERT OR IGNORE INTO challenge_activities
 			(tally_split_num, race_id, submit_event_id, sub_event_id, registration_id, rsu_user_id, user_name, activity_date, distance_m, time_s, activity_type, source)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		).bind(newTally, CHALLENGE_RACE_ID, destSubmitId, destEventId, destRegId, rsuUserId, row.user_name, row.activity_date, row.distance_m, row.time_s, row.activity_type, row.source).run();
+		// Verify the insert landed before deleting old.
+		const verify = await env.nwana_engine_db.prepare(
+			"SELECT tally_split_num FROM challenge_activities WHERE tally_split_num = ?"
+		).bind(newTally).first();
+		if (!verify) {
+			throw new Error("new mapping insert failed verification");
+		}
+		await env.nwana_engine_db.prepare("DELETE FROM challenge_activities WHERE tally_split_num = ?").bind(tallySplitNum).run();
 		await env.nwana_engine_db.prepare(
 			"UPDATE challenge_activity_fingerprints SET event_id = ?, tally_split_num = ? WHERE rsu_user_id = ? AND tally_split_num = ?"
 		).bind(destEventId, newTally, rsuUserId, tallySplitNum).run();
 	} catch (e) {
+		// D1 update failed but RunSignup move succeeded — report honestly so it can be fixed.
 		console.error("move D1 update failed", e);
+		return json({
+			ok: false,
+			error: "move_d1_failed",
+			detail: "Activity moved in RunSignup (new tally " + newTally + ") but D1 update failed. Contact support with this tally number.",
+			new_tally_split_num: newTally,
+		}, 502);
 	}
 	return json({ ok: true, old_tally_split_num: tallySplitNum, new_tally_split_num: newTally, dest_event_id: destEventId });
 }
