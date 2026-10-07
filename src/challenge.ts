@@ -477,6 +477,32 @@ async function handleWeekStats(url: URL, env: Env): Promise<Response> {
 }
 
 /**
+ * GET /api/challenge/v1/academy-stats
+ * Academy impact metrics for the Charity Challenge live stats bar.
+ * Source: Moodle course id=2 (Beginner Instructor Certification), synced to D1.
+ * certified = Practical Video Submission graded "Competent" (technique review passed).
+ * in_training = enrolled students without a passing technique review.
+ * Privacy: aggregate counts only, no names.
+ */
+async function handleAcademyStats(env: Env): Promise<Response> {
+	try {
+		const row = await env.nwana_engine_db.prepare(
+			`SELECT
+				SUM(CASE WHEN certified = 1 THEN 1 ELSE 0 END) AS certified,
+				SUM(CASE WHEN certified = 0 THEN 1 ELSE 0 END) AS in_training
+			 FROM academy_instructor_snapshot WHERE course_id = 2`
+		).first<{ certified: number | null; in_training: number | null }>();
+		return json({
+			ok: true,
+			certified: row?.certified ?? 0,
+			in_training: row?.in_training ?? 0,
+		});
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "DB error" }, 500);
+	}
+}
+
+/**
  * GET /api/challenge/v1/team-types
  * Get race team types for the Charity Challenge Series (race 216323).
  * Returns team_type_id values needed to create teams via the Teams API.
@@ -1008,21 +1034,17 @@ async function handleSearchTeams(url: URL, env: Env): Promise<Response> {
 }
 
 /**
- * POST /api/challenge/v1/teams/sync
- * Sync teams from RunSignup (source of truth) into D1 cache.
- * On-demand only (no polling). Called after team creation or manually.
+ * Sync race teams from RunSignup (source of truth) into the D1 challenge_teams cache.
+ * Shared by the on-demand sync endpoint and the live Challenge Team count stats endpoint.
+ * Team types are mapped from RunSignup team_type_id: 165480 = "Challenge Team",
+ * 165317 = "Relay Team"; anything else is stored with an empty team_type.
+ * Returns the number of team rows upserted.
  */
-async function handleSyncTeams(env: Env): Promise<Response> {
-	try {
-		let token: string;
-		try {
-			token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
-		} catch (e) {
-			return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
-		}
-
-		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
-		const now = Math.floor(Date.now() / 1000);
+async function syncChallengeTeamsFromRunSignup(
+	db: D1Database,
+	token: string,
+): Promise<number> {
+	const now = Math.floor(Date.now() / 1000);
 
 		// Fetch from RunSignup (paginated)
 		const regularEvents = CHALLENGE_EVENTS.filter(e => e.format === "mileage" || e.format === "speed");
@@ -1085,7 +1107,157 @@ async function handleSyncTeams(env: Env): Promise<Response> {
 			if (page > 100) break; // safety limit
 		}
 
-		return json({ ok: true, synced, synced_at: now });
+	return synced;
+}
+
+/**
+ * GET /api/challenge/v1/team-count
+ * Total team entities across all four Charity Challenge team systems, for the
+ * yellow live stats bar. Sources of truth (all RunSignup, race 216323):
+ * - challenge: race teams with team type "Challenge Team" (team_type_id 165480)
+ * - relay: race teams with team type "Relay Team" (team_type_id 165317)
+ * - fundraising: race fundraisers with is_team_fundraiser = "T"
+ * - umbrella: distinct umbrella teams referenced by race fundraisers
+ * D1 team_entities is the cache; it is refreshed from RunSignup when the last
+ * sync is older than 15 minutes. total counts distinct entities, deduplicated
+ * by normalized name across systems (one organization counted once).
+ * Aggregate counts only — no team names leave this endpoint.
+ */
+async function handleTeamCount(env: Env): Promise<Response> {
+	const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+	try {
+		const STALE_AFTER_S = 15 * 60;
+		const now = Math.floor(Date.now() / 1000);
+		let refreshed = false;
+		try {
+			const lastSync = await db.prepare(
+				`SELECT MAX(synced_at) AS last_sync FROM team_entities`
+			).first<{ last_sync: number | null }>();
+			if (!lastSync?.last_sync || now - lastSync.last_sync > STALE_AFTER_S) {
+				const token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+				await refreshTeamEntities(db, token, now);
+				refreshed = true;
+			}
+		} catch (e) {
+			// Fall through to the cached counts: a slightly stale number beats an error on the stats bar.
+		}
+		const rows = await db.prepare(
+			`SELECT system, name FROM team_entities`
+		).all<{ system: string; name: string }>();
+		const breakdown: Record<string, number> = { challenge: 0, relay: 0, fundraising: 0, umbrella: 0 };
+		const seen = new Set<string>();
+		for (const r of rows.results || []) {
+			if (r.system in breakdown) breakdown[r.system]++;
+			seen.add(r.name.toLowerCase().trim().replace(/\s+/g, " "));
+		}
+		const typeTotal = breakdown.challenge + breakdown.relay + breakdown.fundraising + breakdown.umbrella;
+		return json({
+			ok: true,
+			total: seen.size,
+			breakdown,
+			duplicates_removed: typeTotal - seen.size,
+			refreshed,
+		});
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "DB error" }, 500);
+	}
+}
+
+/**
+ * Refresh the D1 team_entities cache from RunSignup (source of truth).
+ * Race teams come through the shared challenge_teams sync; fundraising and
+ * umbrella teams come from the race fundraisers API. A system is only replaced
+ * when its source answered successfully, so a failed API call keeps old rows.
+ */
+async function refreshTeamEntities(db: D1Database, token: string, now: number): Promise<void> {
+	// 1. Race teams (Challenge + Relay) via the shared sync.
+	await syncChallengeTeamsFromRunSignup(db, token);
+	const raceTeams = await db.prepare(
+		`SELECT team_id, team_name, team_type FROM challenge_teams WHERE team_type IN ('Challenge Team', 'Relay Team')`
+	).all<{ team_id: number; team_name: string; team_type: string }>();
+	const bySystem = new Map<string, Array<{ entity_id: string; name: string }>>();
+	const push = (system: string, entity_id: string, name: string) => {
+		if (!bySystem.has(system)) bySystem.set(system, []);
+		bySystem.get(system)!.push({ entity_id, name });
+	};
+	for (const t of raceTeams.results || []) {
+		push(t.team_type === "Challenge Team" ? "challenge" : "relay", `rsu-team-${t.team_id}`, t.team_name);
+	}
+
+	// 2. Fundraising teams + umbrella teams via the race fundraisers API.
+	let fundOk = false;
+	{
+		const seenFund = new Set<string>();
+		const seenUmb = new Set<string>();
+		let page = 1;
+		while (true) {
+			const url = new URL("https://api.runsignup.com/rest/v2/race-fundraisers/get-race-fundraisers.json");
+			url.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
+			url.searchParams.set("included_fundraiser_types", "teams");
+			url.searchParams.set("include_umbrella_teams", "T");
+			url.searchParams.set("include_fundraiser_type_info", "T");
+			url.searchParams.set("num", "500");
+			url.searchParams.set("page", String(page));
+			const res = await runSignupGetJson<{
+				race_fundraisers?: Array<{
+					race_fundraiser_id: number;
+					race_fundraiser_name: string;
+					is_team_fundraiser?: string;
+					umbrella_team_id?: number | null;
+					umbrella_team_name?: string | null;
+				}>;
+			}>(url, token);
+			if (!res.ok) break;
+			fundOk = true;
+			const list = res.data?.race_fundraisers || [];
+			if (list.length === 0) break;
+			for (const f of list) {
+				if (f.is_team_fundraiser === "T" && f.race_fundraiser_id && !seenFund.has(String(f.race_fundraiser_id))) {
+					seenFund.add(String(f.race_fundraiser_id));
+					push("fundraising", `rsu-fund-${f.race_fundraiser_id}`, f.race_fundraiser_name || `Fundraiser ${f.race_fundraiser_id}`);
+				}
+				if (f.umbrella_team_id && !seenUmb.has(String(f.umbrella_team_id))) {
+					seenUmb.add(String(f.umbrella_team_id));
+					push("umbrella", `rsu-umb-${f.umbrella_team_id}`, f.umbrella_team_name || `Umbrella ${f.umbrella_team_id}`);
+				}
+			}
+			if (list.length < 500) break;
+			page++;
+			if (page > 20) break; // safety limit
+		}
+	}
+
+	// 3. Replace per system (only systems whose source answered).
+	const systems = ["challenge", "relay"];
+	if (fundOk) systems.push("fundraising", "umbrella");
+	for (const system of systems) {
+		await db.prepare(`DELETE FROM team_entities WHERE system = ?`).bind(system).run();
+		for (const e of bySystem.get(system) || []) {
+			await db.prepare(
+				`INSERT INTO team_entities (system, entity_id, name, synced_at) VALUES (?, ?, ?, ?)`
+			).bind(system, e.entity_id, e.name, now).run();
+		}
+	}
+}
+
+/**
+ * POST /api/challenge/v1/teams/sync
+ * Sync teams from RunSignup (source of truth) into D1 cache.
+ * On-demand only (no polling). Called after team creation or manually.
+ */
+async function handleSyncTeams(env: Env): Promise<Response> {
+	try {
+		let token: string;
+		try {
+			token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+		} catch (e) {
+			return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+		}
+
+		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+		const synced = await syncChallengeTeamsFromRunSignup(db, token);
+
+		return json({ ok: true, synced, synced_at: Math.floor(Date.now() / 1000) });
 	} catch (e) {
 		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
 	}
@@ -1256,6 +1428,12 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	}
 	if (path === "/api/challenge/v1/week-stats" && request.method === "GET") {
 		return handleWeekStats(url, env);
+	}
+	if (path === "/api/challenge/v1/academy-stats" && request.method === "GET") {
+		return handleAcademyStats(env);
+	}
+	if (path === "/api/challenge/v1/team-count" && request.method === "GET") {
+		return handleTeamCount(env);
 	}
 	if (path === "/api/challenge/v1/team-types" && request.method === "GET") {
 		return handleTeamTypes(env);
