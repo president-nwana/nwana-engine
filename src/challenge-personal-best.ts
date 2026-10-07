@@ -25,13 +25,20 @@
 //   from scratch on every insert/delete, so deleting the current PB
 //   automatically recalculates from the remaining valid results.
 //
-// INGESTION GAP (documented, stub below)
+// INGESTION GAP (documented; reconcileChallengeActivities() below)
 // - D1 only sees activities submitted through the Engine site. Activities
 //   submitted directly in the RunSignup UI are invisible until ingested.
-// - Minimal ingestion (same pattern as the approved milestones CSV -> D1):
-//   RunSignup vr-activities report/API -> ingestChallengeResultRows() ->
-//   challenge_activities (INSERT OR IGNORE) -> recomputePersonalBest().
-//   Trigger: explicit owner/Engine action only, never a cron poll.
+// - Sync is RECONCILIATION, not append-only: a full per-event RunSignup
+//   activity set is diffed against D1 — missing D1 rows are inserted,
+//   changed rows are updated, D1 rows absent from RunSignup are deleted
+//   (direct RunSignup deletions must not leave stale D1 rows, otherwise
+//   a deleted-PB would survive and stay false). After the diff, affected
+//   PBs are recomputed via recomputePersonalBest().
+// - Upstream step (explicit owner/Engine action, mirroring the approved
+//   milestones CSV -> D1 pattern): fetch the RunSignup vr-activities
+//   report/API for the fixed-distance events, normalize each row to
+//   IngestActivityRow, and call reconcileChallengeActivities(). Never a
+//   cron poll.
 //
 // FUTURE API SHAPE (proposed, NOT exposed — no route is wired until the
 // Dashboard phase; adding it needs an explicit flag/approval):
@@ -45,7 +52,7 @@
 //   -> { ok, rsu_user_id, personal_bests: [ ... per event ... ] }
 
 import { classifySeries2026Level } from "./race-lifecycle";
-import { CHALLENGE_EVENTS } from "./challenge";
+import { CHALLENGE_EVENTS } from "./challenge-events";
 
 /** The 19 fixed-distance ("speed") events, race 216323. */
 export const SPEED_EVENT_IDS: readonly number[] = CHALLENGE_EVENTS.filter(
@@ -279,4 +286,162 @@ export async function ingestChallengeResultRows(
 		}
 	}
 	return { upserted, pbRecomputed };
+}
+
+/** Outcome of a reconciliation sync for one or more events. */
+export interface ReconcileOutcome {
+	/** Rows inserted (present in RunSignup, absent in D1). */
+	inserted: number;
+	/** Rows updated (present in both, field values differ). */
+	updated: number;
+	/** Rows deleted (present in D1, absent from RunSignup). */
+	deleted: number;
+	/** PB recomputes performed over affected (user, event) pairs. */
+	pbRecomputed: number;
+}
+
+/** Minimal D1 row shape needed for the diff. */
+interface D1ActivityRow {
+	tally_split_num: number;
+	rsu_user_id: number;
+	registration_id: number | null;
+	activity_date: string | null;
+	distance_m: number | null;
+	time_s: number | null;
+}
+
+function rowsEqual(a: D1ActivityRow, b: IngestActivityRow): boolean {
+	const norm = (v: number | null | undefined) => (v ?? null);
+	return (
+		a.rsu_user_id === b.rsu_user_id &&
+		norm(a.registration_id) === norm(b.registration_id) &&
+		(a.activity_date ?? null) === (b.activity_date ?? null) &&
+		norm(a.distance_m) === norm(b.distance_m) &&
+		norm(a.time_s) === norm(b.time_s)
+	);
+}
+
+/**
+ * Reconciliation sync: RunSignup -> D1 (NOT append-only).
+ *
+ * Takes the FULL normalized activity set for the given event(s) as currently
+ * reported by RunSignup and diffs it against D1 `challenge_activities`:
+ * - RunSignup rows missing in D1 -> INSERT.
+ * - Rows present in both but with differing fields -> UPDATE.
+ * - D1 rows absent from the RunSignup set -> DELETE (covers activities
+ *   deleted directly in the RunSignup UI, so a deleted PB cannot survive
+ *   as a false record).
+ * Then recomputes PBs for every affected (rsu_user_id, sub_event_id) pair
+ * via recomputePersonalBest() (which rebuilds from the remaining valid
+ * rows, so PB deletion recalc is automatic).
+ *
+ * Idempotent: running twice with the same input performs zero changes on
+ * the second run. Not wired to any route/cron — explicit owner/Engine
+ * action only.
+ *
+ * Scope: reconciliation runs per event. The scope is the union of the
+ * events present in `rows` and the optional `opts.eventIds` — the latter
+ * exists so an event can be reconciled down to zero activities (an empty
+ * `rows` array alone means "nothing in scope", never "delete everything").
+ */
+export async function reconcileChallengeActivities(
+	db: PbDatabase,
+	rows: IngestActivityRow[],
+	opts?: { eventIds?: number[] },
+): Promise<ReconcileOutcome> {
+	const outcome: ReconcileOutcome = { inserted: 0, updated: 0, deleted: 0, pbRecomputed: 0 };
+	const affected = new Set<string>();
+	const markAffected = (uid: number, eid: number) => {
+		affected.add(`${uid}:${eid}`);
+	};
+
+	// Group incoming rows by event; dedupe by tally_split_num within event.
+	const byEvent = new Map<number, Map<number, IngestActivityRow>>();
+	for (const r of rows) {
+		if (!Number.isInteger(r.tally_split_num) || !Number.isInteger(r.rsu_user_id)) continue;
+		if (!Number.isInteger(r.sub_event_id)) continue;
+		let m = byEvent.get(r.sub_event_id);
+		if (!m) {
+			m = new Map();
+			byEvent.set(r.sub_event_id, m);
+		}
+		if (!m.has(r.tally_split_num)) m.set(r.tally_split_num, r);
+	}
+
+	const scope = new Set<number>(byEvent.keys());
+	for (const eid of opts?.eventIds ?? []) if (Number.isInteger(eid)) scope.add(eid);
+
+	for (const eventId of scope) {
+		const incoming = byEvent.get(eventId) ?? new Map<number, IngestActivityRow>();
+		const current = await db
+			.prepare(
+				`SELECT tally_split_num, rsu_user_id, registration_id, activity_date, distance_m, time_s
+				 FROM challenge_activities WHERE sub_event_id = ?`,
+			)
+			.bind(eventId)
+			.all<D1ActivityRow>();
+		const currentById = new Map<number, D1ActivityRow>();
+		for (const row of current.results || []) currentById.set(row.tally_split_num, row);
+
+		// Deletes: in D1 but absent from the RunSignup set.
+		for (const [tallyId, d1row] of currentById) {
+			if (!incoming.has(tallyId)) {
+				await db
+					.prepare("DELETE FROM challenge_activities WHERE tally_split_num = ?")
+					.bind(tallyId)
+					.run();
+				outcome.deleted++;
+				markAffected(d1row.rsu_user_id, eventId);
+			}
+		}
+
+		// Inserts + updates.
+		for (const [tallyId, r] of incoming) {
+			const d1row = currentById.get(tallyId);
+			if (!d1row) {
+				await db
+					.prepare(
+						`INSERT INTO challenge_activities
+						 (tally_split_num, race_id, submit_event_id, sub_event_id, registration_id,
+						  rsu_user_id, user_name, activity_date, distance_m, time_s, source)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					)
+					.bind(
+						r.tally_split_num, r.race_id, r.submit_event_id, r.sub_event_id,
+						r.registration_id, r.rsu_user_id, r.user_name ?? null,
+						r.activity_date, r.distance_m ?? null, r.time_s ?? null,
+						r.source ?? "runsignup-ingest",
+					)
+					.run();
+				outcome.inserted++;
+				markAffected(r.rsu_user_id, eventId);
+			} else if (!rowsEqual(d1row, r)) {
+				await db
+					.prepare(
+						`UPDATE challenge_activities
+						 SET rsu_user_id = ?, registration_id = ?, user_name = ?, activity_date = ?,
+						     distance_m = ?, time_s = ?, source = ?
+						 WHERE tally_split_num = ?`,
+					)
+					.bind(
+						r.rsu_user_id, r.registration_id, r.user_name ?? null,
+						r.activity_date, r.distance_m ?? null, r.time_s ?? null,
+						r.source ?? "runsignup-ingest", tallyId,
+					)
+					.run();
+				outcome.updated++;
+				markAffected(r.rsu_user_id, eventId);
+				if (d1row.rsu_user_id !== r.rsu_user_id) markAffected(d1row.rsu_user_id, eventId);
+			}
+		}
+	}
+
+	for (const key of affected) {
+		const [uid, eid] = key.split(":").map(Number);
+		if (isSpeedEvent(eid)) {
+			await recomputePersonalBest(db, uid, eid);
+			outcome.pbRecomputed++;
+		}
+	}
+	return outcome;
 }

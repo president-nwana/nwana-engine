@@ -10,6 +10,7 @@ import {
 	computePersonalBest,
 	ingestChallengeResultRows,
 	isSpeedEvent,
+	reconcileChallengeActivities,
 	recomputePersonalBest,
 	SPEED_EVENT_IDS,
 	type PbActivityInput,
@@ -27,6 +28,8 @@ interface ActRow {
 	sub_event_id: number;
 	time_s: number | null;
 	activity_date: string;
+	registration_id?: number | null;
+	distance_m?: number | null;
 }
 interface PbRow {
 	rsu_user_id: number;
@@ -75,12 +78,30 @@ function makeFakeDb(seedActivities: ActRow[] = []): PbDatabase & {
 								}));
 							return { results: results as T[] };
 						}
+						if (q.startsWith("select tally_split_num, rsu_user_id, registration_id, activity_date, distance_m, time_s from challenge_activities where sub_event_id = ?")) {
+							const [eid] = args as [number];
+							const results = [...activities.values()]
+								.filter((a) => a.sub_event_id === eid)
+								.map((a) => ({
+									tally_split_num: a.tally_split_num,
+									rsu_user_id: a.rsu_user_id,
+									registration_id: a.registration_id ?? null,
+									activity_date: a.activity_date,
+									distance_m: a.distance_m ?? null,
+									time_s: a.time_s,
+								}));
+							return { results: results as T[] };
+						}
 						throw new Error("fakeDb.all: unsupported query: " + q);
 					};
 					const run = async (): Promise<unknown> => {
 						if (q.startsWith("delete from challenge_personal_bests")) {
 							pbs.delete(`${args[0]}:${args[1]}`);
 							return { meta: { changes: 1 } };
+						}
+						if (q === "delete from challenge_activities where tally_split_num = ?") {
+							const existed = activities.delete(args[0] as number);
+							return { meta: { changes: existed ? 1 : 0 } };
 						}
 						if (q.startsWith("insert or replace into challenge_personal_bests")) {
 							const [uid, eid, best, tally, date, prev, impr, level] = args as [
@@ -107,6 +128,31 @@ function makeFakeDb(seedActivities: ActRow[] = []): PbDatabase & {
 								tally_split_num: tally, rsu_user_id: uid, sub_event_id: subEid,
 								time_s: timeS, activity_date: date,
 							});
+							return { meta: { changes: 1 } };
+						}
+						if (q.startsWith("insert into challenge_activities")) {
+							const [tally, , , subEid, regId, uid, , date, distM, timeS] = args as [
+								number, unknown, unknown, number, number | null, number,
+								unknown, string, number | null, number | null,
+							];
+							activities.set(tally, {
+								tally_split_num: tally, rsu_user_id: uid, sub_event_id: subEid,
+								time_s: timeS, activity_date: date, distance_m: distM ?? null,
+								registration_id: regId ?? null,
+							});
+							return { meta: { changes: 1 } };
+						}
+						if (q.startsWith("update challenge_activities")) {
+							const [uid, , , date, distM, timeS, , tally] = args as [
+								number, unknown, unknown, string, number | null, number | null,
+								unknown, number,
+							];
+							const row = activities.get(tally);
+							if (!row) return { meta: { changes: 0 } };
+							row.rsu_user_id = uid;
+							row.activity_date = date;
+							row.distance_m = distM ?? null;
+							row.time_s = timeS;
 							return { meta: { changes: 1 } };
 						}
 						throw new Error("fakeDb.run: unsupported query: " + q);
@@ -321,5 +367,82 @@ describe("ingestChallengeResultRows (stub)", () => {
 		]);
 		expect(r).toEqual({ upserted: 1, pbRecomputed: 0 });
 		expect(db.pbs.size).toBe(0);
+	});
+});
+
+describe("reconcileChallengeActivities (RunSignup -> D1 reconciliation)", () => {
+	const row = (
+		tally: number, uid: number, eid: number, timeS: number | null, date = "2026-10-01",
+	): Parameters<typeof reconcileChallengeActivities>[1][number] => ({
+		tally_split_num: tally, race_id: 216323, submit_event_id: eid, sub_event_id: eid,
+		registration_id: 1, rsu_user_id: uid, activity_date: date,
+		distance_m: 5000, time_s: timeS, source: "runsignup-ingest",
+	});
+
+	it("inserts missing rows and recomputes PBs", async () => {
+		const db = makeFakeDb();
+		const out = await reconcileChallengeActivities(db, [
+			row(1, 100, NW_5K, 2400),
+			row(2, 100, NW_5K, 2250),
+		]);
+		expect(out).toMatchObject({ inserted: 2, updated: 0, deleted: 0 });
+		expect(out.pbRecomputed).toBe(1);
+		expect(db.pbs.get("100:1222836")).toMatchObject({ best_time_s: 2250, previous_best_s: 2400 });
+	});
+
+	it("is idempotent: second run with the same input changes nothing", async () => {
+		const db = makeFakeDb();
+		const rows = [row(1, 100, NW_5K, 2400), row(2, 100, NW_5K, 2250)];
+		await reconcileChallengeActivities(db, rows);
+		const out = await reconcileChallengeActivities(db, rows);
+		expect(out).toMatchObject({ inserted: 0, updated: 0, deleted: 0 });
+	});
+
+	it("deletes D1 rows removed in RunSignup and recalculates the PB", async () => {
+		const db = makeFakeDb([
+			act(1, 100, NW_5K, 2250, "2026-10-01"),
+			{ ...act(2, 100, NW_5K, 2400, "2026-10-02"), distance_m: 5000, registration_id: 1 },
+		]);
+		await recomputePersonalBest(db, 100, NW_5K);
+		expect(db.pbs.get("100:1222836")!.best_time_s).toBe(2250);
+		// RunSignup no longer reports tally 1 (deleted directly in RunSignup UI).
+		const out = await reconcileChallengeActivities(db, [row(2, 100, NW_5K, 2400, "2026-10-02")]);
+		expect(out).toMatchObject({ inserted: 0, updated: 0, deleted: 1 });
+		expect(db.activities.has(1)).toBe(false);
+		expect(db.pbs.get("100:1222836")).toMatchObject({
+			best_time_s: 2400,
+			previous_best_s: null, // only one valid result left
+		});
+	});
+
+	it("updates changed rows (e.g. corrected time in RunSignup)", async () => {
+		const db = makeFakeDb([act(1, 100, NW_5K, 2400, "2026-10-01")]);
+		const out = await reconcileChallengeActivities(db, [row(1, 100, NW_5K, 2300)]);
+		expect(out).toMatchObject({ inserted: 0, updated: 1, deleted: 0 });
+		expect(db.pbs.get("100:1222836")).toMatchObject({ best_time_s: 2300 });
+	});
+
+	it("deletes the PB row when the last activity is gone from RunSignup", async () => {
+		const db = makeFakeDb([act(1, 100, NW_5K, 2250, "2026-10-01")]);
+		await recomputePersonalBest(db, 100, NW_5K);
+		expect(db.pbs.has("100:1222836")).toBe(true);
+		// Event explicitly in scope with an empty RunSignup set.
+		const out = await reconcileChallengeActivities(db, [], { eventIds: [NW_5K] });
+		expect(out).toMatchObject({ deleted: 1 });
+		expect(db.activities.has(1)).toBe(false);
+		expect(db.pbs.has("100:1222836")).toBe(false);
+	});
+
+	it("scopes deletes per event: other events are untouched", async () => {
+		const db = makeFakeDb([
+			act(1, 100, NW_5K, 2250, "2026-10-01"),
+			act(9, 100, RUN_5K, 1200, "2026-10-01"),
+		]);
+		// Sync payload covers only NW_5K and omits tally 1 -> delete it.
+		// RUN_5K rows must survive even though the payload has no RUN_5K rows.
+		const out = await reconcileChallengeActivities(db, []);
+		expect(out.deleted).toBe(0); // empty payload = no events in scope
+		expect(db.activities.has(1)).toBe(true);
+		expect(db.activities.has(9)).toBe(true);
 	});
 });
