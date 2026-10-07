@@ -104,17 +104,16 @@ function makeFakeDb(seedActivities: ActRow[] = []): PbDatabase & {
 							return { meta: { changes: existed ? 1 : 0 } };
 						}
 						if (q.startsWith("insert or replace into challenge_personal_bests")) {
-							const [uid, eid, best, tally, date, prev, impr, level] = args as [
+							const [uid, eid, best, tally, date, prev, impr, level, achievedAt] = args as [
 								number, number, number, number, string,
-								number | null, number | null, string | null,
+								number | null, number | null, string | null, string,
 							];
 							const key = `${uid}:${eid}`;
-							const existing = pbs.get(key);
 							pbs.set(key, {
 								rsu_user_id: uid, event_id: eid, best_time_s: best,
 								best_tally_split_num: tally, best_activity_date: date,
 								previous_best_s: prev, improvement_s: impr, performance_level: level,
-								pb_achieved_at: existing?.pb_achieved_at ?? "2026-10-07T00:00:00.000Z",
+								pb_achieved_at: achievedAt,
 							});
 							return { meta: { changes: 1 } };
 						}
@@ -225,13 +224,49 @@ describe("computePersonalBest (pure)", () => {
 		expect(pb!.best_time_s).toBe(2400);
 	});
 
-	it("breaks ties deterministically (earliest date wins)", () => {
+	it("breaks ties deterministically (earliest date wins); a tie is not a new PB", () => {
 		const pb = computePersonalBest(NW_5K, [
 			{ tally_split_num: 9, time_s: 2250, activity_date: "2026-10-06" },
 			{ tally_split_num: 8, time_s: 2250, activity_date: "2026-10-05" },
 		]);
 		expect(pb!.best_tally_split_num).toBe(8);
-		expect(pb!.improvement_s).toBe(0);
+		expect(pb!.best_activity_date).toBe("2026-10-05");
+		// A tied time does not beat the record: no previous/improvement.
+		expect(pb!.previous_best_s).toBeNull();
+		expect(pb!.improvement_s).toBeNull();
+	});
+
+	it("stores the TRUE previous record, not the second-fastest time", () => {
+		// 40:00 baseline -> 38:00 PB -> 39:00 slower.
+		// previous_best must be 40:00 (the beaten record), improvement 2:00 —
+		// not 39:00 / 1:00 from the second-fastest time.
+		const pb = computePersonalBest(NW_5K, [
+			{ tally_split_num: 7, time_s: 2400, activity_date: "2026-10-01" },
+			{ tally_split_num: 8, time_s: 2280, activity_date: "2026-10-10" },
+			{ tally_split_num: 9, time_s: 2340, activity_date: "2026-10-15" },
+		]);
+		expect(pb).toMatchObject({
+			best_time_s: 2280,
+			best_tally_split_num: 8,
+			previous_best_s: 2400,
+			improvement_s: 120,
+			total_valid_results: 3,
+		});
+	});
+
+	it("keeps the beaten record through a longer history", () => {
+		// 40:00 -> 39:00 PB (prev 40:00) -> 38:00 PB (prev 39:00) -> 38:30 slower.
+		const pb = computePersonalBest(NW_5K, [
+			{ tally_split_num: 7, time_s: 2400, activity_date: "2026-10-01" },
+			{ tally_split_num: 8, time_s: 2340, activity_date: "2026-10-05" },
+			{ tally_split_num: 9, time_s: 2280, activity_date: "2026-10-10" },
+			{ tally_split_num: 10, time_s: 2310, activity_date: "2026-10-15" },
+		]);
+		expect(pb).toMatchObject({
+			best_time_s: 2280,
+			previous_best_s: 2340,
+			improvement_s: 60,
+		});
 	});
 });
 
@@ -294,6 +329,57 @@ describe("recomputePersonalBest (derived row lifecycle)", () => {
 		await recomputePersonalBest(db, 200, RUN_5K);
 		expect(db.pbs.get("100:1222836")!.performance_level).toBe("High Performance");
 		expect(db.pbs.get("200:1222848")!.performance_level).toBeNull();
+	});
+});
+
+describe("pb_achieved_at lifecycle (when the current PB was achieved)", () => {
+	it("baseline: set to the baseline activity date", async () => {
+		const db = makeFakeDb([act(7, 100, NW_5K, 2400, "2026-10-01")]);
+		await recomputePersonalBest(db, 100, NW_5K);
+		expect(db.pbs.get("100:1222836")!.pb_achieved_at).toBe("2026-10-01");
+	});
+
+	it("new PB: updated to the new PB date; slower result: date unchanged", async () => {
+		const db = makeFakeDb([act(7, 100, NW_5K, 2400, "2026-10-01")]);
+		await recomputePersonalBest(db, 100, NW_5K);
+		expect(db.pbs.get("100:1222836")!.pb_achieved_at).toBe("2026-10-01");
+
+		db.activities.set(8, act(8, 100, NW_5K, 2280, "2026-10-20"));
+		await recomputePersonalBest(db, 100, NW_5K);
+		expect(db.pbs.get("100:1222836")!.pb_achieved_at).toBe("2026-10-20");
+
+		db.activities.set(9, act(9, 100, NW_5K, 2340, "2026-10-25"));
+		await recomputePersonalBest(db, 100, NW_5K);
+		expect(db.pbs.get("100:1222836")!.pb_achieved_at).toBe("2026-10-20");
+	});
+
+	it("deleting the current PB: recalculated to the surviving PB activity date", async () => {
+		const db = makeFakeDb([
+			act(7, 100, NW_5K, 2400, "2026-10-01"),
+			act(8, 100, NW_5K, 2280, "2026-10-20"),
+		]);
+		await recomputePersonalBest(db, 100, NW_5K);
+		expect(db.pbs.get("100:1222836")!.pb_achieved_at).toBe("2026-10-20");
+
+		db.activities.delete(8); // delete the current PB activity
+		await recomputePersonalBest(db, 100, NW_5K);
+		const row = db.pbs.get("100:1222836")!;
+		expect(row.best_time_s).toBe(2400);
+		expect(row.pb_achieved_at).toBe("2026-10-01"); // surviving PB's date, not the old one
+	});
+
+	it("no stale 'first ever' timestamp after a long history", async () => {
+		const db = makeFakeDb([
+			act(7, 100, NW_5K, 2400, "2026-10-01"),
+			act(8, 100, NW_5K, 2340, "2026-10-10"),
+			act(9, 100, NW_5K, 2280, "2026-10-20"),
+		]);
+		await recomputePersonalBest(db, 100, NW_5K);
+		const row = db.pbs.get("100:1222836")!;
+		expect(row.best_time_s).toBe(2280);
+		expect(row.previous_best_s).toBe(2340);
+		expect(row.improvement_s).toBe(60);
+		expect(row.pb_achieved_at).toBe("2026-10-20"); // NOT 2026-10-01
 	});
 });
 

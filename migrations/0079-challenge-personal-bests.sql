@@ -10,8 +10,12 @@
 -- The row is DERIVED: recomputePersonalBest() (src/challenge-personal-best.ts)
 -- rebuilds it from scratch on every insert/delete, so deleting the current
 -- PB automatically recalculates from the remaining valid results.
--- previous_best_s = second-fastest valid time (NULL until 2+ valid results).
--- improvement_s = previous_best_s - best_time_s (NULL until 2+ valid results).
+-- previous_best_s = the personal record standing when the current best was
+-- achieved (NOT the second-fastest time: a later slower result never rewrites
+-- it). improvement_s = previous_best_s - best_time_s.
+-- pb_achieved_at = best_activity_date (the date the current PB was achieved):
+-- baseline date, new-PB date, unchanged on slower results, surviving-PB date
+-- after a delete-recalc. Never a stale "first ever" timestamp.
 -- performance_level is set ONLY for the 4 Nordic Walking charity events
 -- (1K/3K/5K/10K) using the exact Series 2026 thresholds, read-only;
 -- NULL for every other event/discipline (no invented thresholds).

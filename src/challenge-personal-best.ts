@@ -24,6 +24,16 @@
 // - challenge_personal_bests is DERIVED: recomputePersonalBest() rebuilds it
 //   from scratch on every insert/delete, so deleting the current PB
 //   automatically recalculates from the remaining valid results.
+// - PB history is a story over time: computePersonalBest() replays the valid
+//   activities in chronological order (activity_date, then tally_split_num).
+//   The first valid result is the baseline; every STRICTLY faster result
+//   becomes the new PB and remembers the record it beat as previous_best_s
+//   (so previous_best is the true previous personal record, NOT the
+//   second-fastest time — a later slower result never rewrites it).
+// - pb_achieved_at is derived too: it is always the activity_date of the
+//   activity that set the current best (best_activity_date), so baseline,
+//   new PB, slower-result, and delete-recalc cases are all correct by
+//   construction.
 //
 // INGESTION GAP (documented; reconcileChallengeActivities() below)
 // - D1 only sees activities submitted through the Engine site. Activities
@@ -102,9 +112,14 @@ export interface PersonalBestResult {
 	best_time_s: number;
 	best_tally_split_num: number;
 	best_activity_date: string;
-	/** Second-fastest valid time; null until 2+ valid results exist. */
+	/**
+	 * The personal record beaten by the current best — i.e. the PB that was
+	 * standing at the moment the current best was achieved. This is NOT the
+	 * second-fastest time: a slower result logged after the PB never
+	 * rewrites it. Null until a strictly faster result beats the baseline.
+	 */
 	previous_best_s: number | null;
-	/** previous_best_s - best_time_s; null until 2+ valid results exist. */
+	/** previous_best_s - best_time_s; null until a PB is beaten. */
 	improvement_s: number | null;
 	/** NW 1K/3K/5K/10K only; null otherwise. */
 	performance_level: string | null;
@@ -113,10 +128,15 @@ export interface PersonalBestResult {
 
 /**
  * Pure PB computation over a set of valid activities.
- * - best = fastest valid result ever (ties: earliest activity_date, then
- *   lowest tally_split_num — deterministic).
- * - previous_best = second-fastest valid time (null until 2+ valid results).
- * - improvement = previous_best - best (null until 2+ valid results).
+ *
+ * Replays history chronologically (activity_date asc, then tally_split_num
+ * asc for same-day determinism):
+ * - the first valid result is the baseline (previous_best/improvement null);
+ * - every STRICTLY faster result becomes the new PB, remembering the beaten
+ *   record as previous_best_s;
+ * - slower (or tied) later results change nothing.
+ * Ties for the best keep the earliest achiever (strictly-faster rule), so
+ * best_activity_date is always when the current PB was first achieved.
  * Returns null when there are no valid results (caller should delete the PB row).
  */
 export function computePersonalBest(
@@ -127,22 +147,27 @@ export function computePersonalBest(
 		(a) => Number.isFinite(a.time_s) && a.time_s > 0,
 	);
 	if (valid.length === 0) return null;
-	const sorted = [...valid].sort(
+	const chrono = [...valid].sort(
 		(a, b) =>
-			a.time_s - b.time_s ||
 			(a.activity_date < b.activity_date ? -1 : a.activity_date > b.activity_date ? 1 : 0) ||
 			a.tally_split_num - b.tally_split_num,
 	);
-	const best = sorted[0];
-	const second = sorted[1] ?? null;
+	let best = chrono[0];
+	let previous: PbActivityInput | null = null;
+	for (const a of chrono.slice(1)) {
+		if (a.time_s < best.time_s) {
+			previous = best;
+			best = a;
+		}
+	}
 	return {
 		best_time_s: best.time_s,
 		best_tally_split_num: best.tally_split_num,
 		best_activity_date: best.activity_date,
-		previous_best_s: second ? second.time_s : null,
-		improvement_s: second ? second.time_s - best.time_s : null,
+		previous_best_s: previous ? previous.time_s : null,
+		improvement_s: previous ? previous.time_s - best.time_s : null,
 		performance_level: classifyCharityNwLevel(eventId, best.time_s),
-		total_valid_results: sorted.length,
+		total_valid_results: valid.length,
 	};
 }
 
@@ -205,16 +230,21 @@ export async function recomputePersonalBest(
 	}
 	await db
 		.prepare(
+			// pb_achieved_at is DERIVED: it is always the activity_date of the
+			// activity that set the current best (best_activity_date). Baseline
+			// -> baseline date; new PB -> new PB date; slower result -> best
+			// unchanged so the date is unchanged; delete-recalc -> the
+			// surviving PB's date. Never a stale "first ever" timestamp.
 			`INSERT OR REPLACE INTO challenge_personal_bests
 			 (rsu_user_id, event_id, best_time_s, best_tally_split_num, best_activity_date,
 			  previous_best_s, improvement_s, performance_level, pb_achieved_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT pb_achieved_at FROM challenge_personal_bests WHERE rsu_user_id = ? AND event_id = ?), strftime('%Y-%m-%dT%H:%M:%fZ','now')), strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
 		)
 		.bind(
 			rsuUserId, eventId,
 			pb.best_time_s, pb.best_tally_split_num, pb.best_activity_date,
 			pb.previous_best_s, pb.improvement_s, pb.performance_level,
-			rsuUserId, eventId,
+			pb.best_activity_date,
 		)
 		.run();
 	return {
