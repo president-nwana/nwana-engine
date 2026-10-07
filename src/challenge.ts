@@ -8,6 +8,7 @@
 import { runSignupGetJson } from "./runsignup-client";
 import { resolveRunSignupAccessToken } from "./runsignup-oauth";
 import { syncRunSignupDonations } from "./lib/money-ingestion";
+import { recomputePersonalBest } from "./challenge-personal-best";
 
 export const CHALLENGE_RACE_ID = 216323;
 
@@ -39,7 +40,7 @@ export const CHALLENGE_EVENTS: ChallengeEventDef[] = [
 	{ event_id: 1222845, event_name: "Race Walking — 4×5K Relay", discipline: "Race Walking", format: "relay", distance_label: "4×5K Relay", fixed_distance_m: 5000 },
 	// Running (7)
 	{ event_id: 1222846, event_name: "Running — Weekly Mileage", discipline: "Running", format: "mileage", distance_label: "Weekly Mileage", fixed_distance_m: null },
-	{ event_id: 1222847, event_name: "Running — 1 Mile", discipline: "Running", format: "speed", distance_label: "1 Mile", fixed_distance_m: 1609 },
+	{ event_id: 1222847, event_name: "Running — 1K", discipline: "Running", format: "speed", distance_label: "1K", fixed_distance_m: 1000 },
 	{ event_id: 1222848, event_name: "Running — 5K", discipline: "Running", format: "speed", distance_label: "5K", fixed_distance_m: 5000 },
 	{ event_id: 1222849, event_name: "Running — 10K", discipline: "Running", format: "speed", distance_label: "10K", fixed_distance_m: 10000 },
 	{ event_id: 1222850, event_name: "Running — Half Marathon", discipline: "Running", format: "speed", distance_label: "Half Marathon", fixed_distance_m: 21097 },
@@ -54,7 +55,7 @@ export const CHALLENGE_EVENTS: ChallengeEventDef[] = [
 	{ event_id: 1222858, event_name: "Cycling — Team 100K", discipline: "Cycling", format: "team", distance_label: "Team 100K", fixed_distance_m: null },
 	// Walking (4)
 	{ event_id: 1222897, event_name: "Walking — Weekly Mileage", discipline: "Walking", format: "mileage", distance_label: "Weekly Mileage", fixed_distance_m: null },
-	{ event_id: 1222898, event_name: "Walking — 1 Mile", discipline: "Walking", format: "speed", distance_label: "1 Mile", fixed_distance_m: 1609 },
+	{ event_id: 1222898, event_name: "Walking — 1K", discipline: "Walking", format: "speed", distance_label: "1K", fixed_distance_m: 1000 },
 	{ event_id: 1222899, event_name: "Walking — 5K", discipline: "Walking", format: "speed", distance_label: "5K", fixed_distance_m: 5000 },
 	{ event_id: 1222900, event_name: "Walking — 10K", discipline: "Walking", format: "speed", distance_label: "10K", fixed_distance_m: 10000 },
 	// Open Challenge (1) — participation + fundraising, not a competitive discipline.
@@ -460,6 +461,15 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	} catch (e) {
 		// Mapping failure should not fail the submission; log and continue.
 		console.error("challenge_activities insert failed:", e);
+	}
+
+	// Personal Best (recognition v1): rebuild the derived PB row for this
+	// (participant, event). Non-fatal — never fails the submission.
+	// recomputePersonalBest is a no-op for non-speed events.
+	try {
+		await recomputePersonalBest(env.nwana_engine_db, rsuUserId, eventId);
+	} catch (e) {
+		console.error("personal-best recompute failed (submit):", e);
 	}
 
 	return json({
@@ -1256,6 +1266,15 @@ async function handleDeleteActivity(tallyStr: string, url: URL, env: Env): Promi
 		).bind(rsuUserId, tallySplitNum).run();
 	} catch (e) {
 		console.error("delete cleanup failed", e);
+	}
+
+	// Personal Best (recognition v1): rebuild from the remaining valid
+	// results — deleting the current PB recalculates it automatically.
+	// Non-fatal — never fails the delete.
+	try {
+		await recomputePersonalBest(env.nwana_engine_db, rsuUserId, row.sub_event_id);
+	} catch (e) {
+		console.error("personal-best recompute failed (delete):", e);
 	}
 	return json({ ok: true, deleted: tallySplitNum });
 }
