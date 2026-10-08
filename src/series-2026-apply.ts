@@ -33,11 +33,13 @@
 import {
 	RACE_LIFECYCLE_SERIES,
 	computeSeries2026Levels,
+	flattenEventResults,
 	postRunSignupForm,
 	runSignupGetJson,
 	series2026LevelDisplayName,
 	type ComputedLifecycleResult,
 	type LifecycleEventView,
+	type LifecycleResultRow,
 	type PerformanceLevelName,
 } from "./race-lifecycle";
 import { SERIES_2026_SOURCES, type Series2026Source } from "./series-2026-results";
@@ -1182,4 +1184,183 @@ export async function applySeries2026Levels(
 		steps,
 	);
 	return result;
+}
+
+/**
+ * Targeted single-event apply for the automatic owner-approved path
+ * (autoProcessEvent). Defect 2 fix.
+ *
+ * applySeries2026Levels() rebuilds the whole distance in chunks and can
+ * return ok:true without ever touching the trigger event in the current
+ * invocation (chunk cursor). autoProcessEvent used to mark such an event
+ * levels_computed and publish anyway — with result_count 0 and possibly
+ * no Performance Level written at all.
+ *
+ * This function GUARANTEES the trigger event's levels + level places are
+ * applied before publication continues. It uses the exact same primitives
+ * (ensureScoringTypes, listEventResultSets, applyEventResultSet) and the
+ * same gates (AUTO_APPROVED_CONFIRMATION, write access CONFIRMED,
+ * "verifying" stage) as the rebuild, so when the rebuild's chunk later
+ * reaches this event it rewrites identical values idempotently.
+ *
+ * Also returns the finalized snapshot rows (levels + places, DSQ rows with
+ * empty fields exactly as written to RunSignup) so the caller can refresh
+ * the canonical D1 race_event_results without another API round-trip.
+ */
+export interface TriggerApplyResult extends ApplyLevelsResult {
+	finalizedRows: LifecycleResultRow[];
+}
+
+export async function applyTriggerEventLevels(
+	input: Pick<
+		ApplyLevelsInput,
+		"db" | "accessToken" | "distance" | "eventId" | "confirmation" | "disqualifiedResultIds"
+	>,
+): Promise<TriggerApplyResult> {
+	const base: TriggerApplyResult = {
+		ok: false,
+		distance: input.distance,
+		event_id: input.eventId,
+		result_set_id: null,
+		result_count: 0,
+		computed: [],
+		finalizedRows: [],
+		steps: [],
+	};
+	const push = (step: ApplyStepResult) => {
+		base.steps.push(step);
+	};
+
+	if (input.confirmation !== AUTO_APPROVED_CONFIRMATION) {
+		return fail(base, "confirm", `Trigger-event apply requires confirmation "${AUTO_APPROVED_CONFIRMATION}".`) as TriggerApplyResult;
+	}
+	const source = SERIES_2026_SOURCES.find(
+		(entry: Series2026Source) => entry.distance === input.distance,
+	);
+	if (!source) {
+		return fail(base, "resolve_source", `Unknown Series 2026 distance: ${input.distance}.`) as TriggerApplyResult;
+	}
+	const row = await input.db
+		.prepare(
+			`SELECT write_access, events_json FROM race_lifecycle WHERE series = ? AND distance = ?`,
+		)
+		.bind(RACE_LIFECYCLE_SERIES, input.distance)
+		.first<{ write_access: string | null; events_json: string | null }>();
+	if (!row) {
+		return fail(base, "load_state", `Run a lifecycle sync for ${input.distance} first.`) as TriggerApplyResult;
+	}
+	if (row.write_access !== "CONFIRMED") {
+		return fail(base, "check_write_access", `RunSignup write access is ${row.write_access ?? "UNKNOWN"}.`) as TriggerApplyResult;
+	}
+	const events = row.events_json ? (JSON.parse(row.events_json) as LifecycleEventView[]) : [];
+	const event = events.find((entry) => entry.event_id === input.eventId);
+	if (!event) {
+		return fail(base, "check_stage", `Event ${input.eventId} is not in the last synced state. Run a lifecycle sync first.`) as TriggerApplyResult;
+	}
+	if (event.stage !== "verifying") {
+		return fail(base, "check_stage", `Event ${input.eventId} is in stage "${event.stage}", not "verifying". Nothing to apply.`) as TriggerApplyResult;
+	}
+	push({
+		step: "check_stage",
+		status: "ok",
+		detail: `Trigger event ${input.eventId} is "verifying"; targeted apply proceeds (guaranteed before publish).`,
+	});
+
+	// Disqualifications for THIS event: D1 records + caller-supplied ids.
+	const dsqRows = await input.db
+		.prepare(
+			`SELECT result_id AS resultId FROM series_result_disqualifications
+			 WHERE series = 'SERIES_2026' AND distance = ? AND event_id = ?`,
+		)
+		.bind(input.distance, input.eventId)
+		.all<{ resultId: string }>();
+	const dsq = new Set<string>();
+	for (const dsqRow of dsqRows.results ?? []) dsq.add(String(dsqRow.resultId));
+	for (const id of input.disqualifiedResultIds ?? []) dsq.add(String(id));
+
+	try {
+		const scoring = await ensureScoringTypes(source, allScoringTypeNames(input.distance), input.accessToken);
+		push({
+			step: "ensure_scoring_types",
+			status: scoring.created.length > 0 ? "ok" : "skipped",
+			detail: scoring.created.length > 0
+				? `Created: ${scoring.created.join("; ")}.`
+				: "All ten scoring types already existed; nothing created.",
+		});
+
+		const sets = await listEventResultSets(source, input.eventId, input.accessToken);
+		push({
+			step: "enumerate_sets",
+			status: "ok",
+			detail: `${sets.length} result set(s) for trigger event ${input.eventId}.`,
+		});
+
+		const allComputed: ComputedLifecycleResult[] = [];
+		for (const set of sets) {
+			try {
+				const applied = await applyEventResultSet(
+					source, input.eventId, set.result_set_id, scoring.ids, input.accessToken, push, dsq,
+				);
+				if (base.result_set_id === null) base.result_set_id = set.result_set_id;
+				base.result_count += applied.resultCount;
+				allComputed.push(...applied.computed);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				// Legacy parity: an empty result set is skipped silently.
+				if (/has no result rows to classify/.test(message)) {
+					push({
+						step: "skip_empty_set",
+						status: "skipped",
+						detail: `Event ${input.eventId}, set ${set.result_set_id}: no result rows; skipped.`,
+					});
+					continue;
+				}
+				const failed = fail(base, "apply_event", `Event ${input.eventId}, set ${set.result_set_id}: ${message}.`);
+				await logApply(
+					input.db,
+					{ distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: base.result_set_id, resultCount: base.result_count },
+					"FAILED",
+					failed.steps,
+					failed.error,
+				);
+				return failed as TriggerApplyResult;
+			}
+		}
+		base.computed = allComputed;
+
+		// Finalized snapshot rows: levels + places exactly as written to the
+		// RunSignup custom fields (DSQ rows keep empty fields).
+		const draftRows = allComputed.map((computed) => {
+			const rid = computed.result_id != null ? String(computed.result_id) : null;
+			const isDsq = rid !== null && dsq.has(rid);
+			return {
+				result_id: rid,
+				athlete: computed.athlete,
+				gender: computed.gender,
+				time: computed.time,
+				performance_level: isDsq ? "" : computed.level_display,
+				level_place: isDsq ? "" : String(computed.level_place),
+			};
+		});
+		base.finalizedRows = flattenEventResults([{ content: { results: draftRows } }]);
+
+		const okResult: TriggerApplyResult = { ...base, ok: true };
+		await logApply(
+			input.db,
+			{ distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: base.result_set_id, resultCount: base.result_count },
+			"COMPLETED",
+			okResult.steps,
+		);
+		return okResult;
+	} catch (error) {
+		const failed = fail(base, "apply", error instanceof Error ? error.message : String(error));
+		await logApply(
+			input.db,
+			{ distance: input.distance, raceId: source.raceId, eventId: input.eventId, resultSetId: base.result_set_id, resultCount: base.result_count },
+			"FAILED",
+			failed.steps,
+			failed.error,
+		);
+		return failed as TriggerApplyResult;
+	}
 }

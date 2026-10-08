@@ -87,14 +87,21 @@ export async function getEventApprovals(
 	return map;
 }
 
-/** True when every result_id in the list has a recorded owner approval. */
+/** True when every result_id in the list has a recorded owner approval.
+ * ENGINE approvals are re-read from D1; extraApprovedIds carries approvals
+ * from other owner-controlled sources (e.g. the RUNSIGNUP presence-signal
+ * ids carried by the trigger evaluation) — they are accepted without
+ * inventing D1 rows. */
 export async function allResultsApproved(
 	db: D1Database,
 	distance: string,
 	eventId: number,
 	resultIds: string[],
+	extraApprovedIds?: Set<string>,
 ): Promise<boolean> {
 	if (resultIds.length === 0) return false;
 	const approvals = await getEventApprovals(db, distance, eventId);
-	return resultIds.every((id) => approvals.has(id));
+	return resultIds.every(
+		(id) => approvals.has(id) || extraApprovedIds?.has(id) === true,
+	);
 }
