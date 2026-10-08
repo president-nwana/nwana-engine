@@ -1,0 +1,120 @@
+diff --git a/src/index.ts b/src/index.ts
+index b0ea456..67f81a2 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -60,7 +60,8 @@ import {
+ 	liveAudienceAdapters,
+ 	type AudienceExportEnv,
+ } from "./audience-export";
+-import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
++import { isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
++import { getSeries2026ResultCard } from "./series-2026-result-card";
+ import { rasterizeSvgToPng } from "./svg-raster";
+ import { executeResultPublication } from "./result-publication-core";
+ import {
+@@ -5501,94 +5502,6 @@ async function getSeries2026ResultPublicationPreview(
+ }
+ 
+ 
+-async function getSeries2026ResultCard(
+-	publicationKey: string,
+-	format: "svg" | "jpeg",
+-	env: Env,
+-): Promise<Response> {
+-	if (!isResultCardDesignReady()) {
+-		return json({
+-			ok: false,
+-			status: "VISUAL_DESIGN_NOT_APPROVED",
+-			execution_allowed: false,
+-			error: RESULT_CARD_DESIGN_BLOCKER,
+-		}, 409);
+-	}
+-	const raceId = Number(publicationKey.split(":")[2]);
+-	if (!Number.isInteger(raceId)) {
+-		return json({ ok: false, error: "Invalid result publication key" }, 400);
+-	}
+-	// Architectural rule: use D1 canonical snapshot first (no RunSignup
+-	// needed for finalized events). Fall back to live RunSignup only if
+-	// D1 has no finalized snapshot.
+-	let draft = await buildPublicationDraftFromD1(env.nwana_engine_db, publicationKey);
+-	if (!draft) {
+-		const preview = await previewSeries2026ResultPublications(
+-			env.RUNSIGNUP_ACCESS_TOKEN,
+-			{ raceId },
+-		);
+-		draft = preview.drafts.find(
+-			(value) => value.publication_key === publicationKey,
+-		) ?? null;
+-	}
+-	if (!draft) {
+-		return json({ ok: false, error: "Result publication draft not found" }, 404);
+-	}
+-	if (!draft.ready_for_editorial_review) {
+-		return json({ ok: false, error: "Results are not finalized" }, 409);
+-	}
+-	const winners = draft.content.results
+-		.filter((row) => row.level_place === "1")
+-		.map((row) => ({
+-			athlete: row.athlete,
+-			gender: row.gender === "M"
+-				? "Men"
+-				: row.gender === "F"
+-					? "Women"
+-					: row.gender ?? "Division",
+-			time: row.time,
+-			performance_level: row.performance_level,
+-			series_record: (row as { series_record?: boolean }).series_record ?? false,
+-		}));
+-	let logoUrl: string | undefined;
+-	// Embed logo as data URL for reliable WASM rendering.
+-	{
+-		const logoResponse = await fetch(
+-			"https://d368g9lw5ileu7.cloudfront.net/uploads/generic/genericImage-websiteLogo-281959-1788823407.1047-0.bQN0DV.jpg",
+-		);
+-		if (!logoResponse.ok) {
+-			throw new Error("Official NWANA logo could not be loaded");
+-		}
+-		const logoBytes = new Uint8Array(await logoResponse.arrayBuffer());
+-		logoUrl = `data:image/jpeg;base64,${bytesToBase64(logoBytes)}`;
+-	}
+-	const svg = buildResultCardSvg({
+-		publicationKey: draft.publication_key,
+-		title: draft.editorial_draft.title,
+-		distance: draft.source.distance,
+-		winners,
+-		logoUrl,
+-	});
+-	if (format === "svg") {
+-		return new Response(svg, {
+-			headers: {
+-				"content-type": "image/svg+xml; charset=utf-8",
+-				"cache-control": "public, max-age=3600",
+-			},
+-		});
+-	}
+-	// Root cause of 9412: Cloudflare Images cannot parse SVG input.
+-	// resvg-wasm rasterizes in-process ($0, Worker-compatible).
+-	// PNG is accepted by Meta; no JPEG conversion needed.
+-	const pngBytes = await rasterizeSvgToPng(svg, { width: 1080 });
+-	return new Response(pngBytes, {
+-		headers: {
+-			"content-type": "image/png",
+-			"Cache-Control":
+-				"public, max-age=3600, stale-while-revalidate=86400",
+-		},
+-	});
+-}
+ 
+ async function establishSeries2026ResultPublicationBaseline(
+ 	env: Env,
+@@ -8297,6 +8210,10 @@ export default {
+ 						time: r.time,
+ 						approved: approvals.has(r.result_id),
+ 						approved_at: approvals.get(r.result_id)?.approvedAt ?? null,
++						// Where the approval came from, per the trigger
++						// evaluation: RUNSIGNUP (presence signal) or ENGINE
++						// (explicit D1 approval). Null = not approved.
++						approval_source: trigger.approvalSources[r.result_id] ?? null,
+ 						disqualified: disquals.has(r.result_id),
+ 						disqualification_reason: disquals.get(r.result_id)?.reason ?? null,
+ 					})),
