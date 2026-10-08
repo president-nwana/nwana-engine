@@ -859,6 +859,91 @@ describe("Series 2026 presence-signal approval (RUNSIGNUP)", () => {
 		]);
 	});
 
+	it("mixed sources: one ENGINE D1 approval + one RUNSIGNUP presence approval -> both visible, both approved, trigger fires", async () => {
+		// Deploy-blocker regression (2026-10-07 review): ENGINE and RUNSIGNUP
+		// approvals must MERGE. The old code skipped the live RunSignup fetch
+		// entirely when approvals.size > 0, so a RunSignup-approved result B
+		// disappeared whenever another result A was approved through the
+		// Engine — and with an empty registrations feed the trigger could
+		// fire without ever seeing B.
+		const A_RESULT_ID = 232600101;
+		const B_RESULT_ID = 232600102;
+		const A_ROW: Row = {
+			result_id: A_RESULT_ID,
+			first_name: "Anna",
+			last_name: "Mixed",
+			gender: "F",
+			chip_time: null,
+			clock_time: "1:18:00",
+		};
+		const B_ROW: Row = {
+			result_id: B_RESULT_ID,
+			first_name: "Boris",
+			last_name: "Mixed",
+			gender: "M",
+			chip_time: null,
+			clock_time: "1:12:00",
+		};
+		const capture = newCapture();
+		// A approved through the Engine OC -> D1 row. B has NO D1 row:
+		// approved only by presence in RunSignup get-results.
+		const { db } = makeDb({ approvals: [String(A_RESULT_ID)] });
+		const inner = makeFakeFetch(
+			capture,
+			[
+				{
+					id: TRIGGER_EVENT,
+					name: "2026 NWANA Open 10K Nordic Walking Series - October 4, 2026",
+					startTime: PAST,
+				},
+			],
+			{ requireApproval: "T", rowsForEvent: () => [A_ROW, B_ROW] },
+		);
+		let getResultsCalls = 0;
+		vi.stubGlobal(
+			"fetch",
+			async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+				const url = new URL(
+					typeof input === "string"
+						? input
+						: input instanceof URL
+							? input.href
+							: (input as Request).url,
+				);
+				if (
+					url.hostname === "api.runsignup.com" &&
+					url.pathname.endsWith("/results/get-results")
+				) {
+					getResultsCalls++;
+				}
+				return inner(input, init);
+			},
+		);
+
+		const trigger = await evaluateEventTrigger(susanEnv(db), {
+			distance: "10K",
+			raceId: RACE_ID,
+			eventId: TRIGGER_EVENT,
+		});
+
+		// The live fetch must run even though a D1 approval exists.
+		expect(getResultsCalls).toBeGreaterThan(0);
+		// Both results are visible (B is NOT lost) and both are approved.
+		expect(trigger.results.map((r) => r.result_id).sort()).toEqual(
+			[String(A_RESULT_ID), String(B_RESULT_ID)].sort(),
+		);
+		expect(trigger.approvedResultIds.sort()).toEqual(
+			[String(A_RESULT_ID), String(B_RESULT_ID)].sort(),
+		);
+		expect(trigger.approvalSources).toEqual({
+			[String(A_RESULT_ID)]: "ENGINE",
+			[String(B_RESULT_ID)]: "RUNSIGNUP",
+		});
+		expect(trigger.unapprovedResults).toEqual([]);
+		expect(trigger.fire).toBe(true);
+		expect(trigger.reason).toBe("all_approved");
+	});
+
 	it(
 		"RUNSIGNUP-approved Susan Otto 1:16:41 runs the full pipeline: Competitive level -> finalized snapshot -> card -> news -> four Meta destinations",
 		async () => {

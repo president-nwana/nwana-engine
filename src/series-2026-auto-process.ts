@@ -472,27 +472,27 @@ export async function evaluateEventTrigger(
 	const registrations = await getEventRegistrations(env, input.raceId, input.eventId);
 	const approvals = await getEventApprovals(db, input.distance, input.eventId);
 	let liveResults: LiveEventResult[];
-	if (approvals.size > 0) {
-		// Owner approvals exist in D1 — skip the unreliable RunSignup API entirely.
-		// The owner's approval is the verification; the API adds nothing.
+	try {
+		// Always attempt the live RunSignup fetch. ENGINE (D1) and RUNSIGNUP
+		// (presence signal) approvals are merged below — they are never
+		// mutually exclusive: a D1 approval for one result must not hide a
+		// live result approved in RunSignup.
+		liveResults = await fetchLiveEventResults(env.accessToken, input.raceId, input.eventId);
+	} catch (error) {
+		// RunSignup API failure (e.g. 522 timeout) — fall back to D1 approvals below.
+		console.error("fetchLiveEventResults failed, using D1 approvals fallback:", error instanceof Error ? error.message : error);
 		liveResults = [];
-	} else {
-		try {
-			liveResults = await fetchLiveEventResults(env.accessToken, input.raceId, input.eventId);
-		} catch (error) {
-			// RunSignup API failure (e.g. 522 timeout) — fall back to D1 approvals below.
-			console.error("fetchLiveEventResults failed, using D1 approvals fallback:", error instanceof Error ? error.message : error);
-			liveResults = [];
-		}
 	}
 	// RUNSIGNUP presence signal: when the race requires director approval,
 	// every result returned by get-results is owner-approved by definition
-	// (RunSignup excludes unapproved results from public results). Read-only
-	// and idempotent: identical API data always yields the identical
-	// decision. No D1 rows are written for these approvals — the source is
-	// recorded in approvalSources instead.
+	// (RunSignup excludes unapproved results from public results). This is
+	// independent of D1 approvals: a result approved in RunSignup stays
+	// visible even when another result was approved through the Engine.
+	// Read-only and idempotent: identical API data always yields the
+	// identical decision. No D1 rows are written for these approvals — the
+	// source is recorded in approvalSources instead.
 	const runsignupApprovedIds = new Set<string>();
-	if (approvals.size === 0 && liveResults.length > 0) {
+	if (liveResults.length > 0) {
 		const requireApproval = await fetchResultsRequireApproval(
 			env.accessToken,
 			input.raceId,
