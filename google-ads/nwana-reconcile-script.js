@@ -11,6 +11,10 @@
  *   and enables each campaign in the Ads UI.
  * - Never touches campaigns whose name does not start with "NWANA · ".
  * - Never deletes anything. It only adds missing pieces and updates budgets.
+ * - The hourly inventory pass (collectAccountInventory) is STRICTLY
+ *   read-only across ALL campaigns: it never calls AdsApp.mutate(), never
+ *   sets budgets, never changes statuses. It only reads and POSTs a JSON
+ *   snapshot to the Engine so cleanup decisions are made on real data.
  *
  * HOW IT WRITES
  * Campaign/ad-group/keyword/ad/sitelink creation goes through
@@ -49,12 +53,13 @@
 
 var CONFIG = {
   DESIRED_STATE_URL: 'https://nwana-engine.nwana-engine.workers.dev/api/operating-center/google-ads/desired-state',
+  INVENTORY_URL: 'https://nwana-engine.nwana-engine.workers.dev/api/operating-center/google-ads/inventory',
   OWNER_KEY_PROPERTY: 'NWANA_OWNER_KEY',
   MANAGED_PREFIX: 'NWANA \u00b7 '
 };
 
 // Increment on every behavior change so Preview logs prove which version ran.
-var SCRIPT_VERSION = "2026-09-30g / sitelink-no-desc";
+var SCRIPT_VERSION = "2026-10-10a / inventory-readonly";
 // ── ONE-TIME BOOTSTRAP ──────────────────────────────────────────────
 // Paste the operating center key between the quotes, Preview once
 // (authorize when asked), then DELETE the key from this line and Save.
@@ -109,6 +114,13 @@ function main() {
   }
   Logger.log('Reminder: every new campaign is PAUSED. Review networks, locations, ' +
     'bidding and ads in the UI, then enable only what you approve.');
+  // Read-only inventory pass: strictly reads, never mutates. A failure here
+  // must never affect the reconcile above.
+  try {
+    runInventoryPass(key);
+  } catch (e) {
+    Logger.log('Inventory pass failed (reconcile unaffected): ' + e.message);
+  }
 }
 
 function fetchDesiredState(key) {
@@ -488,4 +500,283 @@ function verifyNetworkSettings(campaign) {
     Logger.log('  Could not verify network settings for ' + campaign.getName() +
       '; confirm manually: Google Search ON, partners OFF, Display OFF.');
   }
+}
+
+// ── READ-ONLY ACCOUNT INVENTORY (2026-10-10) ─────────────────────────
+// Collects a full snapshot of EVERY campaign in the account (including
+// legacy campaigns the Engine did not create) and POSTs it to the Engine.
+// STRICTLY READ-ONLY: no AdsApp.mutate(), no budget/status changes, no
+// deletes. Every subsection is failure-isolated so one unreadable entity
+// degrades to null/empty instead of aborting the pass.
+
+var INVENTORY_LIMITS = {
+  MAX_CAMPAIGNS: 50,
+  MAX_AD_GROUPS_PER_CAMPAIGN: 100,
+  MAX_KEYWORDS_PER_CAMPAIGN: 500,
+  MAX_ADS_PER_CAMPAIGN: 100
+};
+
+function runInventoryPass(key) {
+  Logger.log('Inventory pass: collecting read-only account snapshot…');
+  var snapshot = collectAccountInventory();
+  postInventorySnapshot(key, snapshot);
+}
+
+function postInventorySnapshot(key, snapshot) {
+  var payload = JSON.stringify(snapshot);
+  Logger.log('Inventory pass: ' + snapshot.campaigns.length +
+    ' campaign(s), payload ' + payload.length + ' bytes.');
+  var response = UrlFetchApp.fetch(CONFIG.INVENTORY_URL, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: payload,
+    muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + key }
+  });
+  var code = response.getResponseCode();
+  if (code === 200) {
+    Logger.log('Inventory pass: snapshot stored by Engine (HTTP 200).');
+  } else {
+    Logger.log('Inventory pass: Engine returned HTTP ' + code + ': ' +
+      String(response.getContentText()).slice(0, 300));
+  }
+}
+
+function entityStatus(obj) {
+  // Classic Campaign/AdGroup/Keyword/Ad objects all expose isEnabled/isPaused.
+  try {
+    if (obj.isEnabled()) return 'ENABLED';
+    if (obj.isPaused()) return 'PAUSED';
+  } catch (e) { /* fall through */ }
+  return 'UNKNOWN';
+}
+
+function collectAccountInventory() {
+  var meta = readCampaignMetaBulk(); // id -> {channel_type,start_date,end_date}
+  var conversionActions = readConversionActions();
+  var campaigns = [];
+  var note = null;
+  var it;
+  try {
+    it = AdsApp.campaigns()
+      .withCondition('campaign.status IN [ENABLED, PAUSED]')
+      .get();
+  } catch (e) {
+    // Fallback: unfiltered iterator, skip REMOVED manually.
+    it = AdsApp.campaigns().get();
+  }
+  var count = 0;
+  while (it.hasNext() && count < INVENTORY_LIMITS.MAX_CAMPAIGNS) {
+    var campaign = it.next();
+    try {
+      if (entityStatus(campaign) === 'UNKNOWN') continue; // likely REMOVED
+      campaigns.push(readCampaignInventory(campaign, meta));
+      count++;
+    } catch (e) {
+      Logger.log('Inventory pass: skipped campaign "' +
+        safeName(campaign) + '": ' + e.message);
+    }
+  }
+  if (it.hasNext()) {
+    note = 'Campaign list truncated at ' + INVENTORY_LIMITS.MAX_CAMPAIGNS +
+      '; account has more campaigns.';
+  }
+  return {
+    script_version: SCRIPT_VERSION,
+    customer_id: customerIdDigits(),
+    snapshot_at: new Date().toISOString(),
+    stats_window: 'LAST_30_DAYS',
+    campaigns: campaigns,
+    conversion_actions: conversionActions,
+    note: note
+  };
+}
+
+function safeName(campaign) {
+  try { return campaign.getName(); } catch (e) { return '(unnamed)'; }
+}
+
+// One GAQL query for channel type + start/end dates of all campaigns.
+// Defensive: any failure degrades to an empty map (fields become null).
+function readCampaignMetaBulk() {
+  var meta = {};
+  try {
+    var rows = AdsApp.search(
+      'SELECT campaign.id, campaign.name, campaign.advertising_channel_type, ' +
+      'campaign.start_date, campaign.end_date ' +
+      'FROM campaign WHERE campaign.status != \'REMOVED\' ' +
+      'ORDER BY campaign.name LIMIT 200');
+    while (rows.hasNext()) {
+      var row = rows.next();
+      var c = row.campaign || {};
+      var id = String(c.id || '');
+      if (!id) continue;
+      meta[id] = {
+        channel_type: c.advertisingChannelType || c.advertising_channel_type || null,
+        start_date: c.startDate || c.start_date || null,
+        end_date: c.endDate || c.end_date || null
+      };
+    }
+  } catch (e) {
+    Logger.log('Inventory pass: campaign metadata query failed (' + e.message +
+      '); channel type and dates will be null.');
+  }
+  return meta;
+}
+
+// Account-level conversion actions (best effort; Ads Scripts exposes these
+// read-only via GAQL).
+function readConversionActions() {
+  var actions = [];
+  try {
+    var rows = AdsApp.search(
+      'SELECT conversion_action.id, conversion_action.name, ' +
+      'conversion_action.status, conversion_action.category, conversion_action.type ' +
+      'FROM conversion_action WHERE conversion_action.status != \'REMOVED\' ' +
+      'ORDER BY conversion_action.name LIMIT 100');
+    while (rows.hasNext()) {
+      var row = rows.next();
+      var a = row.conversionAction || row.conversion_action || {};
+      actions.push({
+        id: String(a.id || ''),
+        name: a.name || '',
+        status: a.status || '',
+        category: a.category || '',
+        type: a.type || ''
+      });
+    }
+  } catch (e) {
+    Logger.log('Inventory pass: conversion_action query failed (' + e.message + ').');
+  }
+  return actions;
+}
+
+function readCampaignInventory(campaign, meta) {
+  var id = String(campaign.getId());
+  var m = meta[id] || {};
+  var budgetUsd = 0;
+  try { budgetUsd = campaign.getBudget().getAmount(); } catch (e) { /* null */ }
+  var stats = { impressions: 0, clicks: 0, cost_usd: 0, conversions: 0, ctr: 0, conversion_rate: 0 };
+  try {
+    var s = campaign.getStatsFor('LAST_30_DAYS');
+    stats.impressions = s.getImpressions() || 0;
+    stats.clicks = s.getClicks() || 0;
+    stats.cost_usd = s.getCost() || 0;
+    stats.conversions = s.getConversions() || 0;
+    stats.ctr = s.getCtr() || 0;
+    stats.conversion_rate = s.getConversionRate() || 0;
+  } catch (e) { /* stats stay zero */ }
+  var adGroups = [];
+  var keywordTotal = 0, adTotal = 0;
+  var keywordsTruncated = false, adsTruncated = false;
+  var landingPages = {};
+  var groupIt = campaign.adGroups().get();
+  var groupCount = 0;
+  while (groupIt.hasNext() && groupCount < INVENTORY_LIMITS.MAX_AD_GROUPS_PER_CAMPAIGN) {
+    var adGroup = groupIt.next();
+    try {
+      var gStatus = entityStatus(adGroup);
+      if (gStatus === 'UNKNOWN') continue;
+      var g = {
+        name: adGroup.getName(),
+        status: gStatus,
+        keywords: [],
+        ads: []
+      };
+      try {
+        var kwIt = adGroup.keywords().get();
+        while (kwIt.hasNext() && keywordTotal < INVENTORY_LIMITS.MAX_KEYWORDS_PER_CAMPAIGN) {
+          var kw = kwIt.next();
+          try {
+            g.keywords.push({
+              text: kw.getText(),
+              match_type: String(kw.getMatchType()),
+              status: entityStatus(kw)
+            });
+            keywordTotal++;
+          } catch (ke) { /* skip one bad keyword */ }
+        }
+        if (kwIt.hasNext()) keywordsTruncated = true;
+      } catch (e) { /* keywords unreadable */ }
+      try {
+        var adIt = adGroup.ads().get();
+        while (adIt.hasNext() && adTotal < INVENTORY_LIMITS.MAX_ADS_PER_CAMPAIGN) {
+          var ad = adIt.next();
+          try {
+            var parsed = readResponsiveAd(ad);
+            if (parsed) {
+              g.ads.push(parsed);
+              adTotal++;
+              if (parsed.final_url) landingPages[parsed.final_url] = true;
+            }
+          } catch (ae) { /* skip one bad ad */ }
+        }
+        if (adIt.hasNext()) adsTruncated = true;
+      } catch (e) { /* ads unreadable */ }
+      if (keywordsTruncated) g.keywords_truncated = true;
+      if (adsTruncated) g.ads_truncated = true;
+      adGroups.push(g);
+      groupCount++;
+    } catch (e) { /* skip one bad ad group */ }
+  }
+  var sitelinks = readSitelinkInventory(campaign);
+  return {
+    id: id,
+    name: campaign.getName(),
+    status: entityStatus(campaign),
+    channel_type: m.channel_type || null,
+    daily_budget_usd: budgetUsd,
+    start_date: m.start_date || null,
+    end_date: m.end_date || null,
+    stats_30d: stats,
+    ad_groups: adGroups,
+    landing_pages: Object.keys(landingPages),
+    sitelinks: sitelinks
+  };
+}
+
+function readResponsiveAd(adObj) {
+  // Returns {headlines, descriptions, final_url, status} for responsive
+  // search ads; null for other ad types (read-only, never mutated).
+  var isRsa = false;
+  try { isRsa = !!adObj.isType().responsiveSearchAd; } catch (e) { isRsa = false; }
+  if (!isRsa) return null;
+  var headlines = [], descriptions = [];
+  try {
+    var typed = adObj.asType().responsiveSearchAd();
+    var heads = typed.getHeadlines();
+    for (var i = 0; i < heads.length; i++) headlines.push(heads[i].getText());
+    var descs = typed.getDescriptions();
+    for (var j = 0; j < descs.length; j++) descriptions.push(descs[j].getText());
+  } catch (e) { /* partial read is fine */ }
+  return {
+    headlines: headlines,
+    descriptions: descriptions,
+    final_url: adFinalUrl(adObj) || '',
+    status: entityStatus(adObj)
+  };
+}
+
+function readSitelinkInventory(campaign) {
+  // Read-only: text + final URL of every sitelink attached to the campaign.
+  var out = [];
+  try {
+    var it = campaign.extensions().sitelinks().get();
+    while (it.hasNext()) {
+      var link = it.next();
+      var text = '', url = '';
+      try { text = link.getLinkText(); } catch (e) { /* skip */ }
+      try {
+        if (link.urls && typeof link.urls === 'function') {
+          var urls = link.urls();
+          if (urls && typeof urls.getFinalUrl === 'function') url = urls.getFinalUrl() || '';
+        }
+      } catch (e) { /* URL unreadable */ }
+      if (text) out.push({ text: text, final_url: url });
+    }
+  } catch (e) {
+    Logger.log('Inventory pass: sitelinks unreadable for "' +
+      safeName(campaign) + '": ' + e.message);
+  }
+  return out;
 }
