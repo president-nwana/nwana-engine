@@ -1558,6 +1558,9 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	if (path === "/api/challenge/v1/leaderboard" && request.method === "GET") {
 		return handleLeaderboard(url, env);
 	}
+	if (path === "/api/challenge/v1/winners" && request.method === "GET") {
+		return handleWinners(url, env);
+	}
 	if (path === "/api/challenge/v1/sync-donations" && request.method === "POST") {
 		return handleSyncDonations(env);
 	}
@@ -1970,6 +1973,387 @@ async function handleFundraisingLeaderboard(url: URL, env: Env): Promise<Respons
 }
 
 /**
+ * GET /api/challenge/v1/winners?week=YYYY-MM-DD
+ * Weekly Winners board: official winners of a completed week.
+ * Default (no week param) = last completed week in America/New_York —
+ * the board never zeroes out on Monday.
+ * Sport winners are computed live from challenge_activities (rank 1 of each
+ * event board); fundraising winners from money_events + the RunSignup
+ * fundraisers API. No manual records. Empty board/category => winner: null
+ * (the page renders "—").
+ */
+interface WinnersSportWinner {
+	name: string | null;
+	result: string;
+	level?: string | null;
+	team_name?: string | null;
+	unverified?: boolean;
+}
+
+interface WinnersEventRow {
+	event_id: number;
+	distance_label: string;
+	format: string;
+	winner: WinnersSportWinner | null;
+	leaderboard_url: string;
+}
+
+async function getSportEventWinner(
+	db: D1Database,
+	event: ChallengeEventDef,
+	weekStart: string,
+	weekEnd: string,
+): Promise<WinnersSportWinner | null> {
+	if (event.format === "mileage") {
+		const row = await db.prepare(
+			`SELECT rsu_user_id, user_name, SUM(distance_m) AS total_m, COUNT(*) AS cnt
+			 FROM challenge_activities
+			 WHERE sub_event_id = ? AND distance_m IS NOT NULL
+			   AND activity_date >= ? AND activity_date <= ?
+			 GROUP BY rsu_user_id ORDER BY total_m DESC LIMIT 1`,
+		).bind(event.event_id, weekStart, weekEnd)
+			.first<{ rsu_user_id: number; user_name: string | null; total_m: number; cnt: number }>();
+		if (!row) return null;
+		const km = Math.round((row.total_m / 1000) * 100) / 100;
+		return { name: row.user_name, result: `${km} km` };
+	}
+	if (event.format === "speed") {
+		const row = await db.prepare(
+			`SELECT rsu_user_id, user_name, MIN(time_s) AS best_s
+			 FROM challenge_activities
+			 WHERE sub_event_id = ? AND time_s IS NOT NULL
+			   AND activity_date >= ? AND activity_date <= ?
+			 GROUP BY rsu_user_id ORDER BY best_s ASC LIMIT 1`,
+		).bind(event.event_id, weekStart, weekEnd)
+			.first<{ rsu_user_id: number; user_name: string | null; best_s: number }>();
+		if (!row) return null;
+		const w: WinnersSportWinner = { name: row.user_name, result: formatTime(row.best_s) };
+		if (isNwSpeedEvent(event)) w.level = nwPerfLevel(event.distance_label, row.best_s);
+		return w;
+	}
+	if (event.format === "relay") {
+		const rows = await db.prepare(
+			`SELECT rsu_user_id, user_name, team_id, team_name, MIN(time_s) AS best_s
+			 FROM challenge_activities
+			 WHERE sub_event_id = ? AND time_s IS NOT NULL AND team_id IS NOT NULL
+			   AND activity_date >= ? AND activity_date <= ?
+			 GROUP BY team_id, rsu_user_id`,
+		).bind(event.event_id, weekStart, weekEnd)
+			.all<{ rsu_user_id: number; user_name: string | null; team_id: number; team_name: string | null; best_s: number }>();
+		const byTeam = new Map<number, { name: string | null; total_s: number; members: number }>();
+		const memberBest = new Map<string, number>();
+		for (const r of rows.results || []) {
+			const key = `${r.team_id}:${r.rsu_user_id}`;
+			if (!memberBest.has(key) || r.best_s < memberBest.get(key)!) memberBest.set(key, r.best_s);
+		}
+		const teamMembers = new Map<number, { name: string | null; bests: number[] }>();
+		for (const r of rows.results || []) {
+			const key = `${r.team_id}:${r.rsu_user_id}`;
+			if (memberBest.get(key) !== r.best_s) continue;
+			memberBest.delete(key);
+			let t = teamMembers.get(r.team_id);
+			if (!t) { t = { name: r.team_name, bests: [] }; teamMembers.set(r.team_id, t); }
+			t.bests.push(r.best_s);
+		}
+		let best: { name: string | null; total_s: number } | null = null;
+		for (const t of teamMembers.values()) {
+			if (t.bests.length < 4) continue;
+			const total = t.bests.reduce((s, v) => s + v, 0);
+			if (!best || total < best.total_s) best = { name: t.name, total_s: total };
+		}
+		if (!best) return null;
+		return { name: best.name, result: formatTime(best.total_s), team_name: best.name, unverified: true };
+	}
+	if (event.format === "team") {
+		// Team 100K: earliest date the team's cumulative distance reached 100K.
+		const rows = await db.prepare(
+			`SELECT team_id, team_name, activity_date, SUM(distance_m) AS day_m
+			 FROM challenge_activities
+			 WHERE sub_event_id = ? AND distance_m IS NOT NULL AND team_id IS NOT NULL
+			   AND activity_date >= ? AND activity_date <= ?
+			 GROUP BY team_id, activity_date ORDER BY team_id, activity_date`,
+		).bind(event.event_id, weekStart, weekEnd)
+			.all<{ team_id: number; team_name: string | null; activity_date: string; day_m: number }>();
+		const byTeam = new Map<number, { name: string | null; cum: number; reachDate: string | null; total: number }>();
+		for (const r of rows.results || []) {
+			let t = byTeam.get(r.team_id);
+			if (!t) { t = { name: r.team_name, cum: 0, reachDate: null, total: 0 }; byTeam.set(r.team_id, t); }
+			t.cum += r.day_m;
+			t.total += r.day_m;
+			if (!t.reachDate && t.cum >= 100000) t.reachDate = r.activity_date;
+		}
+		let best: { name: string | null; reachDate: string; total: number } | null = null;
+		for (const t of byTeam.values()) {
+			if (!t.reachDate) continue;
+			if (!best || t.reachDate < best.reachDate || (t.reachDate === best.reachDate && t.total > best.total)) {
+				best = { name: t.name, reachDate: t.reachDate, total: t.total };
+			}
+		}
+		if (!best) return null;
+		const km = Math.round((best.total / 1000) * 100) / 100;
+		return { name: best.name, result: `${km} km (reached ${best.reachDate})`, team_name: best.name, unverified: true };
+	}
+	return null;
+}
+
+interface WinnersFundraising {
+	top_individual: { name: string | null; amount_usd: number; fundraiser_id: string } | null;
+	top_team: { name: string | null; amount_usd: number; team_id: number | null } | null;
+	top_umbrella: {
+		name: string | null;
+		total_usd: number;
+		sub_teams: number;
+		top_sub_team: { name: string | null; amount_usd: number } | null;
+	} | null;
+	most_donations: { name: string | null; count: number } | null;
+	largest_donation: { amount_usd: number; fundraiser_name: string | null } | null;
+	top_sponsored_miles: null;
+}
+
+async function handleWinners(url: URL, env: Env): Promise<Response> {
+	const weekParam = url.searchParams.get("week");
+	let weekStart: string;
+	let isLastCompleted: boolean;
+	if (weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam)) {
+		weekStart = mondayOfWeek(weekParam);
+		isLastCompleted = weekStart === lastCompletedWeekMonday();
+	} else {
+		weekStart = lastCompletedWeekMonday();
+		isLastCompleted = true;
+	}
+	const weekEnd = addDays(weekStart, 6);
+	const db = env.nwana_engine_db;
+
+	// Available weeks: from the earliest week with any activity/donation to last completed.
+	let availableWeeks: string[] = [];
+	try {
+		const minAct = await db.prepare(
+			`SELECT MIN(activity_date) AS d FROM challenge_activities`,
+		).first<{ d: string | null }>();
+		const minDon = await db.prepare(
+			`SELECT MIN(date(occurred_at)) AS d FROM money_events WHERE event_type = 'donation_received'`,
+		).first<{ d: string | null }>();
+		const firstDates = [minAct?.d, minDon?.d].filter((d): d is string => !!d).sort();
+		if (firstDates.length > 0) {
+			let w = mondayOfWeek(firstDates[0]);
+			const last = lastCompletedWeekMonday();
+			while (w <= last) {
+				availableWeeks.push(w);
+				w = addDays(w, 7);
+			}
+			availableWeeks.reverse();
+		}
+	} catch {
+		availableWeeks = [weekStart];
+	}
+
+	// ---- Sport winners ----
+	const disciplines = ["Nordic Walking", "Walking", "Race Walking", "Running", "Cycling"];
+	const sportDisciplines: Array<{ discipline: string; events: WinnersEventRow[] }> = [];
+	for (const disc of disciplines) {
+		const events: WinnersEventRow[] = [];
+		for (const ev of CHALLENGE_EVENTS.filter((e) => e.discipline === disc && e.format !== "open")) {
+			let winner: WinnersSportWinner | null = null;
+			try {
+				winner = await getSportEventWinner(db, ev, weekStart, weekEnd);
+			} catch {
+				winner = null;
+			}
+			events.push({
+				event_id: ev.event_id,
+				distance_label: ev.distance_label,
+				format: ev.format,
+				winner,
+				leaderboard_url: `/results?week=${weekStart}`,
+			});
+		}
+		sportDisciplines.push({ discipline: disc, events });
+	}
+	// Teams / Relays: all relay + team format events across disciplines.
+	const teamRelayEvents: WinnersEventRow[] = [];
+	for (const ev of CHALLENGE_EVENTS.filter((e) => e.format === "relay" || e.format === "team")) {
+		let winner: WinnersSportWinner | null = null;
+		try {
+			winner = await getSportEventWinner(db, ev, weekStart, weekEnd);
+		} catch {
+			winner = null;
+		}
+		teamRelayEvents.push({
+			event_id: ev.event_id,
+			distance_label: `${ev.discipline} — ${ev.distance_label}`,
+			format: ev.format,
+			winner,
+			leaderboard_url: `/results?week=${weekStart}`,
+		});
+	}
+	sportDisciplines.push({ discipline: "Teams / Relays", events: teamRelayEvents });
+
+	// ---- Fundraising winners ----
+	const fundraising: WinnersFundraising = {
+		top_individual: null,
+		top_team: null,
+		top_umbrella: null,
+		most_donations: null,
+		largest_donation: null,
+		top_sponsored_miles: null,
+	};
+	try {
+		const sums = await db.prepare(
+			`SELECT fundraiser_id, SUM(gross_cents) AS total_cents, COUNT(*) AS cnt,
+			        MAX(gross_cents) AS max_cents
+			 FROM money_events
+			 WHERE source_ref LIKE 'race:216323/%'
+			   AND event_type = 'donation_received'
+			   AND gross_cents IS NOT NULL AND gross_cents > 0
+			   AND date(occurred_at) >= ? AND date(occurred_at) <= ?
+			 GROUP BY fundraiser_id`,
+		).bind(weekStart, weekEnd)
+			.all<{ fundraiser_id: string | null; total_cents: number; cnt: number; max_cents: number }>();
+		const rows = sums.results || [];
+		const usd = (c: number) => Math.round((c / 100) * 100) / 100;
+
+		// Resolve fundraiser names + team/umbrella mapping from the live RunSignup API.
+		let token: string | null = null;
+		try {
+			token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+		} catch {
+			token = null;
+		}
+		const nameById = new Map<string, string>();
+		const teamById = new Map<string, number>();
+		const umbrellaById = new Map<string, { id: number; name: string }>();
+		const teamNames = new Map<number, string>();
+		if (token) {
+			try {
+				const apiUrl = new URL("https://api.runsignup.com/rest/v2/race-fundraisers/get-race-fundraisers.json");
+				apiUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
+				apiUrl.searchParams.set("included_fundraiser_types", "any");
+				apiUrl.searchParams.set("include_amount_raised", "T");
+				apiUrl.searchParams.set("num", "500");
+				const res = await runSignupGetJson<{ race_fundraisers?: Array<Record<string, unknown>> }>(apiUrl, token);
+				for (const f of res.data?.race_fundraisers || []) {
+					const fid = f.race_fundraiser_id != null ? String(f.race_fundraiser_id) : null;
+					if (!fid) continue;
+					const nm = typeof f.race_fundraiser_name === "string" && f.race_fundraiser_name.trim()
+						? f.race_fundraiser_name.trim() : null;
+					if (nm) nameById.set(fid, nm);
+					if (f.is_team_fundraiser === "T") teamNames.set(Number(fid), nm || `Team ${fid}`);
+					const parent = f.parent_fundraiser_id != null ? Number(f.parent_fundraiser_id) : 0;
+					if (parent > 0) teamById.set(fid, parent);
+					const umbId = f.umbrella_team_id != null ? Number(f.umbrella_team_id) : 0;
+					if (umbId > 0) {
+						umbrellaById.set(fid, {
+							id: umbId,
+							name: typeof f.umbrella_team_name === "string" && f.umbrella_team_name.trim()
+								? f.umbrella_team_name.trim() : `Umbrella ${umbId}`,
+						});
+					}
+				}
+			} catch {
+				// names stay unresolved; amounts still work
+			}
+		}
+		const fname = (fid: string | null): string | null =>
+			fid == null ? "General donations" : nameById.get(fid) || `Fundraiser ${fid}`;
+
+		// Top individual (by weekly total)
+		let topInd: { fid: string | null; total: number } | null = null;
+		// Most donations (by weekly transaction count)
+		let mostDon: { fid: string | null; cnt: number } | null = null;
+		// Largest single donation
+		let largest: { cents: number; fid: string | null } | null = null;
+		for (const r of rows) {
+			if (!topInd || r.total_cents > topInd.total) topInd = { fid: r.fundraiser_id, total: r.total_cents };
+			if (!mostDon || r.cnt > mostDon.cnt) mostDon = { fid: r.fundraiser_id, cnt: r.cnt };
+			if (!largest || r.max_cents > largest.cents) largest = { cents: r.max_cents, fid: r.fundraiser_id };
+		}
+		if (topInd) {
+			fundraising.top_individual = {
+				name: fname(topInd.fid),
+				amount_usd: usd(topInd.total),
+				fundraiser_id: topInd.fid ?? "__general__",
+			};
+		}
+		if (mostDon) {
+			fundraising.most_donations = { name: fname(mostDon.fid), count: mostDon.cnt };
+		}
+		if (largest) {
+			fundraising.largest_donation = { amount_usd: usd(largest.cents), fundraiser_name: fname(largest.fid) };
+		}
+
+		// Top fundraising team: weekly totals grouped by team via member mapping.
+		const teamTotals = new Map<number, number>();
+		const teamMembers = new Map<number, Set<string>>();
+		for (const r of rows) {
+			if (r.fundraiser_id == null) continue;
+			const tid = teamById.get(r.fundraiser_id);
+			if (!tid) continue;
+			teamTotals.set(tid, (teamTotals.get(tid) ?? 0) + r.total_cents);
+			let s = teamMembers.get(tid);
+			if (!s) { s = new Set(); teamMembers.set(tid, s); }
+			s.add(r.fundraiser_id);
+		}
+		let topTeam: { tid: number; total: number } | null = null;
+		for (const [tid, total] of teamTotals) {
+			if (!topTeam || total > topTeam.total) topTeam = { tid, total };
+		}
+		if (topTeam) {
+			fundraising.top_team = {
+				name: teamNames.get(topTeam.tid) || `Team ${topTeam.tid}`,
+				amount_usd: usd(topTeam.total),
+				team_id: topTeam.tid,
+			};
+		}
+
+		// Top umbrella team: weekly totals grouped by umbrella; sub-team = fundraising team under it.
+		const umbTotals = new Map<number, { name: string; total: number; subTeams: Set<number> }>();
+		for (const r of rows) {
+			if (r.fundraiser_id == null) continue;
+			const umb = umbrellaById.get(r.fundraiser_id);
+			if (!umb) continue;
+			let u = umbTotals.get(umb.id);
+			if (!u) { u = { name: umb.name, total: 0, subTeams: new Set() }; umbTotals.set(umb.id, u); }
+			u.total += r.total_cents;
+			const tid = teamById.get(r.fundraiser_id);
+			if (tid) u.subTeams.add(tid);
+		}
+		let topUmb: { id: number; name: string; total: number; subTeams: Set<number> } | null = null;
+		for (const [id, u] of umbTotals) {
+			if (!topUmb || u.total > topUmb.total) topUmb = { id, ...u };
+		}
+		if (topUmb) {
+			let topSub: { name: string | null; amount_usd: number } | null = null;
+			for (const tid of topUmb.subTeams) {
+				const t = teamTotals.get(tid) ?? 0;
+				if (!topSub || t > topSub.amount_usd * 100) {
+					topSub = { name: teamNames.get(tid) || `Team ${tid}`, amount_usd: usd(t) };
+				}
+			}
+			fundraising.top_umbrella = {
+				name: topUmb.name,
+				total_usd: usd(topUmb.total),
+				sub_teams: topUmb.subTeams.size,
+				top_sub_team: topSub,
+			};
+		}
+	} catch {
+		// fundraising section stays null-filled; sport winners still work
+	}
+
+	return json({
+		ok: true,
+		week_start: weekStart,
+		week_end: weekEnd,
+		week_label: formatWeekLabel(weekStart),
+		is_last_completed: isLastCompleted,
+		available_weeks: availableWeeks,
+		race_id: CHALLENGE_RACE_ID,
+		sport: { disciplines: sportDisciplines },
+		fundraising,
+	});
+}
+
+/**
  * Today's date in the Challenge canonical timezone (America/New_York),
  * as YYYY-MM-DD. Workers run on UTC: using the UTC date directly flips
  * "this week" to next week every day at 20:00 EDT (00:00 UTC), which
@@ -2002,6 +2386,40 @@ function addDays(dateStr: string, days: number): string {
 	const date = new Date(Date.UTC(y, m - 1, d));
 	date.setUTCDate(date.getUTCDate() + days);
 	return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Monday of the last completed week (America/New_York).
+ * A week closes Sunday 11:59:59 PM NY; on Monday the board shows the
+ * finished week — it never zeroes out.
+ */
+function lastCompletedWeekMonday(refDate?: Date): string {
+	const todayNY = refDate
+		? new Intl.DateTimeFormat("en-CA", {
+				timeZone: "America/New_York",
+				year: "numeric",
+				month: "2-digit",
+				day: "2-digit",
+			}).format(refDate)
+		: nyToday();
+	return addDays(mondayOfWeek(todayNY), -7);
+}
+
+/**
+ * Human week label: "October 5–11, 2026".
+ */
+function formatWeekLabel(weekStart: string): string {
+	const months = [
+		"January", "February", "March", "April", "May", "June",
+		"July", "August", "September", "October", "November", "December",
+	];
+	const [sy, sm, sd] = weekStart.split("-").map(Number);
+	const weekEnd = addDays(weekStart, 6);
+	const [ey, em, ed] = weekEnd.split("-").map(Number);
+	const startPart = sm === em ? `${months[sm - 1]} ${sd}` : `${months[sm - 1]} ${sd}`;
+	const endPart = `${months[em - 1]} ${ed}, ${ey}`;
+	// en dash between dates
+	return `${startPart}\u2013${endPart}`;
 }
 
 function formatTime(seconds: number): string {
