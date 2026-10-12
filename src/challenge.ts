@@ -765,41 +765,23 @@ async function handleListTeams(env: Env): Promise<Response> {
 }
 
 /**
- * POST /api/challenge/v1/teams
- * Create a new race team via RunSignup Teams API.
- * Body: { team_name: string, team_type_id: number, team_gender?: "C"|"M"|"F" }
- * Uses POST /rest/v2/teams/manage-teams.json with OAuth Bearer.
+ * Shared team creation: POST /rest/v2/teams/manage-teams.json with OAuth
+ * Bearer, then mirror into the D1 cache. The RunSignup payload carries NO
+ * user/registration id — a race team is a race-level object and can be
+ * created with no captain registration (verified live 2026-10-12: team
+ * created with zero members and no captain). rsuUserId is optional and
+ * only seeds our own D1 captain row (My Teams display).
  */
-async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
-	let body: { team_name?: string; team_type_id?: number; team_gender?: string; rsu_user_id?: number };
-	try {
-		body = await request.json() as typeof body;
-	} catch {
-		return json({ ok: false, error: "Invalid JSON body" }, 400);
-	}
-	const teamName = (body.team_name || "").trim();
-	const teamTypeId = Number(body.team_type_id);
-	const rsuUserId = body.rsu_user_id ? Number(body.rsu_user_id) : null;
-	if (!teamName) return json({ ok: false, error: "team_name is required" }, 400);
-	if (!Number.isInteger(teamTypeId) || teamTypeId <= 0) {
-		return json({ ok: false, error: "valid team_type_id is required" }, 400);
-	}
-	const teamGender = body.team_gender === "M" || body.team_gender === "F" ? body.team_gender : "C";
-
-	let token: string;
-	try {
-		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
-	} catch (e) {
-		return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
-	}
-
-	// RunSignup Teams API: POST /rest/v2/teams/manage-teams.json
-	// Request format: { "race_teams": [{ "team_name", "team_type_id", "team_gender" }] }
-	// The API expects the JSON in a "request" POST parameter.
-	// REQUIRED query params: race_id, event_ids
+async function createRunSignupTeamViaApi(
+	db: D1Database,
+	token: string,
+	teamName: string,
+	teamTypeId: number,
+	teamGender: string,
+	rsuUserId: number | null,
+): Promise<{ ok: true; team_id: number } | { ok: false; error: string }> {
 	const apiUrl = new URL(`https://api.runsignup.com/rest/v2/teams/manage-teams.json`);
 	apiUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
-	// Use the valid_event_ids from the Challenge Team type, or fallback to regular events
 	const challengeTeamEventIds = CHALLENGE_EVENTS
 		.filter(e => e.format === "mileage" || e.format === "speed")
 		.map(e => e.event_id)
@@ -837,22 +819,16 @@ async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
 		try {
 			data = JSON.parse(responseText);
 		} catch {
-			return json({
-				ok: false,
-				error: `RunSignup API returned non-JSON (HTTP ${res.status}): ${responseText.slice(0, 200)}`,
-			}, 502);
+			return { ok: false, error: `RunSignup API returned non-JSON (HTTP ${res.status}): ${responseText.slice(0, 200)}` };
 		}
 
 		if (!res.ok || data.error) {
-			return json({
-				ok: false,
-				error: data.error?.error_msg || `RunSignup API error (${res.status})`,
-			}, 502);
+			return { ok: false, error: data.error?.error_msg || `RunSignup API error (${res.status})` };
 		}
 
 		const teamIds = data.race_team_ids || [];
 		if (teamIds.length === 0) {
-			return json({ ok: false, error: "Team creation returned no ID" }, 502);
+			return { ok: false, error: "Team creation returned no ID" };
 		}
 
 		const newTeamId = teamIds[0];
@@ -860,18 +836,17 @@ async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
 
 		// Write to D1 cache immediately + add creator to My Teams as captain
 		try {
-			const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
 			const teamTypeLabel = teamTypeId === 165480 ? "Challenge Team"
 				: teamTypeId === 165317 ? "Relay Team" : "";
 			await db.prepare(`
 				INSERT INTO challenge_teams (team_id, team_name, team_type_id, team_type, member_count, synced_at)
-				VALUES (?, ?, ?, ?, 1, ?)
+				VALUES (?, ?, ?, ?, ?, ?)
 				ON CONFLICT(team_id) DO UPDATE SET
 					team_name = excluded.team_name,
 					team_type_id = excluded.team_type_id,
 					team_type = excluded.team_type,
 					synced_at = excluded.synced_at
-			`).bind(newTeamId, teamName, teamTypeId, teamTypeLabel, now).run();
+			`).bind(newTeamId, teamName, teamTypeId, teamTypeLabel, rsuUserId ? 1 : 0, now).run();
 
 			if (rsuUserId && Number.isInteger(rsuUserId) && rsuUserId > 0) {
 				await db.prepare(`
@@ -887,14 +862,131 @@ async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
 			console.log("D1 teams cache write failed:", dbErr instanceof Error ? dbErr.message : dbErr);
 		}
 
-		return json({
-			ok: true,
-			team_id: newTeamId,
-			team_name: teamName,
-		});
+		return { ok: true, team_id: newTeamId };
 	} catch (e) {
-		return json({ ok: false, error: e instanceof Error ? e.message : "Request failed" }, 502);
+		return { ok: false, error: e instanceof Error ? e.message : "Request failed" };
 	}
+}
+
+/**
+ * Shared team deletion: manage-teams.json with deleted_team_ids (official
+ * API), then remove the D1 cache rows and un-match any corporate team
+ * registration that pointed at the deleted team (back to awaiting_team),
+ * so no registration is left describing a team that no longer exists.
+ */
+async function deleteRunSignupTeamViaApi(
+	db: D1Database,
+	token: string,
+	teamId: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	const apiUrl = new URL(`https://api.runsignup.com/rest/v2/teams/manage-teams.json`);
+	apiUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
+	const challengeTeamEventIds = CHALLENGE_EVENTS
+		.filter(e => e.format === "mileage" || e.format === "speed")
+		.map(e => e.event_id)
+		.join(",");
+	apiUrl.searchParams.set("event_ids", challengeTeamEventIds);
+	try {
+		const formData = new URLSearchParams();
+		formData.set("request", JSON.stringify({ race_teams: [], deleted_team_ids: [teamId] }));
+		formData.set("format", "json");
+		const res = await fetch(apiUrl.toString(), {
+			method: "POST",
+			headers: {
+				"Authorization": `Bearer ${token}`,
+				"Content-Type": "application/x-www-form-urlencoded",
+			},
+			body: formData.toString(),
+		});
+		const responseText = await res.text();
+		let data: { deleted_team_ids?: number[]; error?: { error_msg?: string } };
+		try {
+			data = JSON.parse(responseText);
+		} catch {
+			return { ok: false, error: `RunSignup API returned non-JSON (HTTP ${res.status}): ${responseText.slice(0, 200)}` };
+		}
+		if (!res.ok || data.error) {
+			return { ok: false, error: data.error?.error_msg || `RunSignup API error (${res.status})` };
+		}
+		try {
+			await db.prepare(`DELETE FROM challenge_team_members WHERE team_id = ?`).bind(teamId).run();
+			await db.prepare(`DELETE FROM challenge_teams WHERE team_id = ?`).bind(teamId).run();
+			await db.prepare(
+				`UPDATE corporate_team_registrations
+				 SET team_id = NULL, team_status = 'awaiting_team', team_url = NULL, member_count = 0,
+				     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+				 WHERE team_id = ?`
+			).bind(teamId).run();
+		} catch (dbErr) {
+			console.log("D1 team delete cleanup failed:", dbErr instanceof Error ? dbErr.message : dbErr);
+		}
+		return { ok: true };
+	} catch (e) {
+		return { ok: false, error: e instanceof Error ? e.message : "Request failed" };
+	}
+}
+
+/**
+ * DELETE /api/challenge/v1/teams/<team_id>
+ * Delete a race team via the RunSignup Teams API. Key-gated like the rest
+ * of challenge v1. Admin/cleanup capability (e.g. removing test teams).
+ */
+async function handleDeleteTeam(teamIdRaw: string, env: Env): Promise<Response> {
+	const teamId = Number(teamIdRaw);
+	if (!Number.isInteger(teamId) || teamId <= 0) {
+		return json({ ok: false, error: "valid team_id is required" }, 400);
+	}
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+	}
+	const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+	const result = await deleteRunSignupTeamViaApi(db, token, teamId);
+	if (!result.ok) return json({ ok: false, error: result.error }, 502);
+	return json({ ok: true, team_id: teamId, deleted: true });
+}
+
+/**
+ * POST /api/challenge/v1/teams
+ * Create a new race team via RunSignup Teams API.
+ * Body: { team_name: string, team_type_id: number, team_gender?: "C"|"M"|"F" }
+ * Uses POST /rest/v2/teams/manage-teams.json with OAuth Bearer.
+ */
+async function handleCreateTeam(request: Request, env: Env): Promise<Response> {
+	let body: { team_name?: string; team_type_id?: number; team_gender?: string; rsu_user_id?: number };
+	try {
+		body = await request.json() as typeof body;
+	} catch {
+		return json({ ok: false, error: "Invalid JSON body" }, 400);
+	}
+	const teamName = (body.team_name || "").trim();
+	const teamTypeId = Number(body.team_type_id);
+	const rsuUserId = body.rsu_user_id ? Number(body.rsu_user_id) : null;
+	if (!teamName) return json({ ok: false, error: "team_name is required" }, 400);
+	if (!Number.isInteger(teamTypeId) || teamTypeId <= 0) {
+		return json({ ok: false, error: "valid team_type_id is required" }, 400);
+	}
+	const teamGender = body.team_gender === "M" || body.team_gender === "F" ? body.team_gender : "C";
+
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+	}
+
+	const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+	const result = await createRunSignupTeamViaApi(db, token, teamName, teamTypeId, teamGender, rsuUserId);
+	if (!result.ok) {
+		return json({ ok: false, error: result.error }, 502);
+	}
+	return json({
+		ok: true,
+		team_id: result.team_id,
+		team_name: teamName,
+	});
 }
 
 /**
@@ -1185,6 +1277,86 @@ async function handleSearchTeams(url: URL, env: Env): Promise<Response> {
 }
 
 /**
+ * Shared race-team sync: fetch all race 216323 teams (RaceGroups) from
+ * RunSignup and upsert challenge_teams. Used by POST /teams/sync and by
+ * refreshTeamEntities (the team-count cache). Returns how many teams were
+ * synced and the first API error encountered, if any.
+ */
+async function syncChallengeTeamsFromRunSignup(
+	db: D1Database,
+	token: string,
+): Promise<{ synced: number; error: string | null }> {
+	const now = Math.floor(Date.now() / 1000);
+	// Fetch from RunSignup (paginated)
+	const regularEvents = CHALLENGE_EVENTS.filter(e => e.format === "mileage" || e.format === "speed");
+	const relayEvents = CHALLENGE_EVENTS.filter(e => e.format === "relay");
+	const allEventIds = [...regularEvents, ...relayEvents].map(e => e.event_id).join(",");
+
+	let synced = 0;
+	let page = 1;
+	let teamsApiError: string | null = null;
+
+	while (true) {
+		const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams`);
+		url.searchParams.set("format", "json");
+		url.searchParams.set("event_id", allEventIds);
+		url.searchParams.set("include_group_sizes", "T");
+		url.searchParams.set("page", String(page));
+		url.searchParams.set("results_per_page", "100");
+
+		const res = await runSignupGetJson<{
+			race_teams?: Array<{
+				team_id: number;
+				team_name: string;
+				team_type_id: number;
+				team_member_current_count?: number;
+				last_modified_ts?: number;
+			}>;
+		}>(url, token);
+
+		if (!res.ok) {
+			teamsApiError = res.api_error_msg || (res.http_status ? `HTTP ${res.http_status}` : "request failed");
+			break;
+		}
+		if (!res.data?.race_teams || res.data.race_teams.length === 0) {
+			break;
+		}
+
+		for (const t of res.data.race_teams) {
+			const teamType = t.team_type_id === 165480 ? "Challenge Team"
+				: t.team_type_id === 165317 ? "Relay Team"
+				: "";
+			await db.prepare(`
+				INSERT INTO challenge_teams (team_id, team_name, team_type_id, team_type, member_count, last_modified_ts, synced_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(team_id) DO UPDATE SET
+					team_name = excluded.team_name,
+					team_type_id = excluded.team_type_id,
+					team_type = excluded.team_type,
+					member_count = excluded.member_count,
+					last_modified_ts = excluded.last_modified_ts,
+					synced_at = excluded.synced_at
+			`).bind(
+				t.team_id,
+				t.team_name,
+				t.team_type_id,
+				teamType,
+				t.team_member_current_count || 0,
+				t.last_modified_ts || null,
+				now
+			).run();
+			synced++;
+		}
+
+		if (res.data.race_teams.length < 100) break;
+		page++;
+		if (page > 100) break; // safety limit
+	}
+
+	return { synced, error: teamsApiError };
+}
+
+/**
  * POST /api/challenge/v1/teams/sync
  * Sync teams from RunSignup (source of truth) into D1 cache.
  * On-demand only (no polling). Called after team creation or manually.
@@ -1201,71 +1373,8 @@ async function handleSyncTeams(env: Env): Promise<Response> {
 		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
 		const now = Math.floor(Date.now() / 1000);
 
-		// Fetch from RunSignup (paginated)
-		const regularEvents = CHALLENGE_EVENTS.filter(e => e.format === "mileage" || e.format === "speed");
-		const relayEvents = CHALLENGE_EVENTS.filter(e => e.format === "relay");
-		const allEventIds = [...regularEvents, ...relayEvents].map(e => e.event_id).join(",");
-
-		let synced = 0;
-		let page = 1;
-		let teamsApiError: string | null = null;
-
-		while (true) {
-			const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams`);
-			url.searchParams.set("format", "json");
-			url.searchParams.set("event_id", allEventIds);
-			url.searchParams.set("include_group_sizes", "T");
-			url.searchParams.set("page", String(page));
-			url.searchParams.set("results_per_page", "100");
-
-			const res = await runSignupGetJson<{
-				race_teams?: Array<{
-					team_id: number;
-					team_name: string;
-					team_type_id: number;
-					team_member_current_count?: number;
-					last_modified_ts?: number;
-				}>;
-			}>(url, token);
-
-			if (!res.ok) {
-				teamsApiError = res.api_error_msg || (res.http_status ? `HTTP ${res.http_status}` : "request failed");
-				break;
-			}
-			if (!res.data?.race_teams || res.data.race_teams.length === 0) {
-				break;
-			}
-
-			for (const t of res.data.race_teams) {
-				const teamType = t.team_type_id === 165480 ? "Challenge Team"
-					: t.team_type_id === 165317 ? "Relay Team"
-					: "";
-				await db.prepare(`
-					INSERT INTO challenge_teams (team_id, team_name, team_type_id, team_type, member_count, last_modified_ts, synced_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?)
-					ON CONFLICT(team_id) DO UPDATE SET
-						team_name = excluded.team_name,
-						team_type_id = excluded.team_type_id,
-						team_type = excluded.team_type,
-						member_count = excluded.member_count,
-						last_modified_ts = excluded.last_modified_ts,
-						synced_at = excluded.synced_at
-				`).bind(
-					t.team_id,
-					t.team_name,
-					t.team_type_id,
-					teamType,
-					t.team_member_current_count || 0,
-					t.last_modified_ts || null,
-					now
-				).run();
-				synced++;
-			}
-
-			if (res.data.race_teams.length < 100) break;
-			page++;
-			if (page > 100) break; // safety limit
-		}
+		// Race-team fetch/upsert lives in syncChallengeTeamsFromRunSignup (shared).
+		const { synced, error: teamsApiError } = await syncChallengeTeamsFromRunSignup(db, token);
 
 		// Memberships: the teams-list API carries no rosters, so resolve
 		// "who is on which team" from the participants API (real identifiers).
@@ -1277,6 +1386,14 @@ async function handleSyncTeams(env: Env): Promise<Response> {
 			if (!mr.ok) membershipsError = mr.error || "membership sync failed";
 		} catch (e) {
 			membershipsError = e instanceof Error ? e.message : "membership sync failed";
+		}
+
+		// Corporate Umbrella Teams: refresh registration statuses against
+		// the freshly synced race teams (exact company-name match).
+		try {
+			await matchCorporateTeamRegistrations(db);
+		} catch {
+			// Best-effort: the sync result stands on its own.
 		}
 
 		return json({ ok: true, synced, synced_at: now, memberships, memberships_error: membershipsError, teams_api_error: teamsApiError });
@@ -1346,6 +1463,11 @@ async function handleTeamCount(env: Env): Promise<Response> {
 async function refreshTeamEntities(db: D1Database, token: string, now: number): Promise<void> {
 	// 1. Race teams (Challenge + Relay) via the shared sync.
 	await syncChallengeTeamsFromRunSignup(db, token);
+	try {
+		await matchCorporateTeamRegistrations(db);
+	} catch {
+		// Best-effort: team-entity refresh continues regardless.
+	}
 	const raceTeams = await db.prepare(
 		`SELECT team_id, team_name, team_type FROM challenge_teams WHERE team_type IN ('Challenge Team', 'Relay Team')`
 	).all<{ team_id: number; team_name: string; team_type: string }>();
@@ -1684,6 +1806,10 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL, c
 	if (path === "/api/challenge/v1/teams" && request.method === "POST") {
 		return handleCreateTeam(request, env);
 	}
+	if (path.startsWith("/api/challenge/v1/teams/") && request.method === "DELETE") {
+		const tid = path.slice("/api/challenge/v1/teams/".length);
+		return handleDeleteTeam(tid, env);
+	}
 	if (path === "/api/challenge/v1/setup-challenge-team-type" && request.method === "POST") {
 		return handleSetupChallengeTeamType(env);
 	}
@@ -1706,6 +1832,17 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL, c
 		const formType = path.slice("/api/challenge/v1/forms/".length);
 		return handleFormSubmit(formType, request, env);
 	}
+	if (path.startsWith("/api/challenge/v1/sponsor-commitments/") && request.method === "GET") {
+		const code = path.slice("/api/challenge/v1/sponsor-commitments/".length);
+		return handleSponsorCommitment(code, env);
+	}
+	if (path.startsWith("/api/challenge/v1/outreach/prospect-by-token/") && request.method === "GET") {
+		const token = path.slice("/api/challenge/v1/outreach/prospect-by-token/".length);
+		return handleOutreachProspectByToken(token, env);
+	}
+	if (path === "/api/challenge/v1/outreach/unsubscribe" && request.method === "POST") {
+		return handleOutreachUnsubscribe(request, env);
+	}
 	if (path === "/api/challenge/v1/form-submissions" && request.method === "GET") {
 		return handleFormList(url, env);
 	}
@@ -1720,6 +1857,248 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL, c
 }
 
 import { VALID_FORM_TYPES } from "./form-types";
+
+
+// ---------------------------------------------------------------------------
+// Corporate tracks: sponsorship commitments (Track 1) + umbrella team
+// registration matching (Track 2). Added 2026-10-12 (migrations 0090/0091).
+// ---------------------------------------------------------------------------
+
+function escHtml(s: string): string {
+	return s
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
+const SPONSOR_SCOPES = ["all_kilometers", "discipline_event", "season"] as const;
+const SPONSOR_SCOPE_LABELS: Record<string, string> = {
+	all_kilometers: "All participant kilometers",
+	discipline_event: "A specific discipline or event",
+	season: "Across the season",
+};
+
+const SPONSOR_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no ambiguous glyphs
+
+function genSponsorRefCode(): string {
+	let s = "";
+	for (let i = 0; i < 4; i++) {
+		s += SPONSOR_CODE_CHARS[Math.floor(Math.random() * SPONSOR_CODE_CHARS.length)];
+	}
+	return `SPN-2026-${s}`;
+}
+
+function normalizeFundraiserUrl(raw: string): string {
+	return raw
+		.trim()
+		.replace(/^https?:\/\//i, "")
+		.replace(/^www\./i, "")
+		.replace(/\/+$/, "")
+		.toLowerCase();
+}
+
+/**
+ * Resolve a RunSignup fundraiser page URL to its race_fundraiser_id by
+ * EXACT URL match against the race fundraisers API (the same source the
+ * fundraising-teams endpoint reads). The URL slug is opaque, so parsing
+ * the URL cannot yield the id. Returns null when no reliable match
+ * exists — the caller stores the URL and leaves fundraiser_id NULL
+ * (received stays 0; never matched by name).
+ */
+async function resolveFundraiserIdByUrl(env: Env, fundraiserUrl: string): Promise<number | null> {
+	const target = normalizeFundraiserUrl(fundraiserUrl);
+	if (!target.includes("runsignup.com")) return null;
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch {
+		return null;
+	}
+	const apiUrl = new URL("https://api.runsignup.com/rest/v2/race-fundraisers/get-race-fundraisers.json");
+	apiUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
+	apiUrl.searchParams.set("included_fundraiser_types", "any");
+	apiUrl.searchParams.set("num", "500");
+	const res = await runSignupGetJson<{ race_fundraisers?: Array<Record<string, unknown>> }>(apiUrl, token);
+	if (!res.ok) return null;
+	const list = Array.isArray(res.data?.race_fundraisers) ? res.data!.race_fundraisers! : [];
+	for (const f of list) {
+		const u = typeof f.fundraiser_url === "string" ? f.fundraiser_url : "";
+		if (u && normalizeFundraiserUrl(u) === target && f.race_fundraiser_id != null) {
+			const n = Number(f.race_fundraiser_id);
+			return Number.isFinite(n) ? n : null;
+		}
+	}
+	return null;
+}
+
+function normalizeTeamName(name: string): string {
+	return name.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+/**
+ * Refresh corporate_team_registrations against synced race teams
+ * (challenge_teams). A registration is team_live when a synced team's
+ * normalized name equals the registered company name exactly — the name
+ * the registrant is instructed to give the team. Organization-name
+ * matching for a self-chosen team name; never person identity matching.
+ * Deterministic pick: Challenge Team first, then lowest team_id.
+ */
+async function matchCorporateTeamRegistrations(db: D1Database): Promise<void> {
+	const teams = await db.prepare(
+		`SELECT team_id, team_name, team_type, member_count FROM challenge_teams`
+	).all<{ team_id: number; team_name: string; team_type: string; member_count: number }>();
+	const byName = new Map<string, { team_id: number; team_type: string; member_count: number }>();
+	for (const t of teams.results || []) {
+		const key = normalizeTeamName(t.team_name);
+		const cur = byName.get(key);
+		if (
+			!cur ||
+			(t.team_type === "Challenge Team" && cur.team_type !== "Challenge Team") ||
+			(t.team_type === cur.team_type && t.team_id < cur.team_id)
+		) {
+			byName.set(key, { team_id: t.team_id, team_type: t.team_type, member_count: t.member_count });
+		}
+	}
+	const regs = await db.prepare(
+		`SELECT id, company_name FROM corporate_team_registrations`
+	).all<{ id: number; company_name: string }>();
+	for (const reg of regs.results || []) {
+		if (!reg.company_name) continue;
+		const match = byName.get(normalizeTeamName(reg.company_name));
+		if (!match) continue;
+		const teamUrl = `https://runsignup.com/RaceGroups/216323/Groups/${match.team_id}`;
+		await db.prepare(
+			`UPDATE corporate_team_registrations
+			 SET team_id = ?, team_status = 'team_live', team_url = ?, member_count = ?,
+			     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+			 WHERE id = ?`
+		).bind(match.team_id, teamUrl, match.member_count, reg.id).run();
+	}
+}
+
+/**
+ * GET /api/challenge/v1/sponsor-commitments/<reference_code>
+ * One confirmed sponsorship commitment + its REAL received total.
+ * Received is computed at read time from canonical money_events
+ * (donation_received rows for race 216323 attributed by fundraiser_id);
+ * nothing is ever stored or estimated here. Unlinked fundraiser =>
+ * received_cents 0.
+ */
+async function handleSponsorCommitment(code: string, env: Env): Promise<Response> {
+	if (!/^SPN-\d{4}-[A-Z0-9]{4}$/.test(code)) {
+		return json({ ok: false, error: "invalid reference code" }, 400);
+	}
+	interface CommitmentRow {
+		company_name: string | null;
+		scope: string | null;
+		committed_amount_cents: number | null;
+		period_note: string | null;
+		status: string;
+		fundraiser_url: string | null;
+		fundraiser_id: number | null;
+		reference_code: string;
+		created_at: string | null;
+		updated_at: string | null;
+	}
+	let row: CommitmentRow | null;
+	try {
+		row = await env.nwana_engine_db.prepare(
+			`SELECT company_name, scope, committed_amount_cents, period_note, status,
+			        fundraiser_url, fundraiser_id, reference_code, created_at, updated_at
+			 FROM sponsor_commitments WHERE reference_code = ?`
+		).bind(code).first<CommitmentRow>();
+	} catch (e) {
+		return json({ ok: false, error: "d1 query failed" }, 500);
+	}
+	if (!row) return json({ ok: false, error: "commitment not found" }, 404);
+	let receivedCents = 0;
+	let receivedDonations = 0;
+	if (row.fundraiser_id != null) {
+		try {
+			const agg = await env.nwana_engine_db.prepare(
+				`SELECT COALESCE(SUM(gross_cents), 0) AS received_cents, COUNT(*) AS donations
+				 FROM money_events
+				 WHERE event_type = 'donation_received'
+				   AND source_ref LIKE 'race:216323/%'
+				   AND fundraiser_id = ?
+				   AND gross_cents IS NOT NULL AND gross_cents > 0`
+			).bind(String(row.fundraiser_id)).first<{ received_cents: number; donations: number }>();
+			receivedCents = agg?.received_cents ?? 0;
+			receivedDonations = agg?.donations ?? 0;
+		} catch {
+			// Received stays 0 on read failure — never estimated.
+		}
+	}
+	return json({
+		ok: true,
+		commitment: {
+			reference_code: row.reference_code,
+			company_name: row.company_name,
+			scope: row.scope,
+			committed_amount_cents: row.committed_amount_cents,
+			period_note: row.period_note,
+			status: row.status,
+			fundraiser_url: row.fundraiser_url,
+			fundraiser_linked: row.fundraiser_id != null,
+			received_cents: receivedCents,
+			received_donations: receivedDonations,
+			created_at: row.created_at,
+			updated_at: row.updated_at,
+		},
+	});
+}
+
+/**
+ * GET /api/challenge/v1/outreach/prospect-by-token/<token>
+ * Resolve an outreach unsubscribe token to its organization (for the
+ * public confirmation page). The token is the credential; the endpoint
+ * itself stays key-gated and is only reached server-side via the charity
+ * worker. Exposes the organization name only — never the email.
+ */
+async function handleOutreachProspectByToken(tokenRaw: string, env: Env): Promise<Response> {
+	const token = tokenRaw.trim();
+	if (!/^[a-f0-9]{32}$/.test(token)) return json({ ok: false, error: "invalid token" }, 400);
+	const row = await env.nwana_engine_db.prepare(
+		`SELECT org_name, stage FROM outreach_prospects WHERE unsubscribe_token = ?`
+	).bind(token).first<{ org_name: string | null; stage: string }>();
+	if (!row) return json({ ok: false, error: "unknown token" }, 404);
+	return json({ ok: true, org_name: row.org_name, already_unsubscribed: row.stage === "unsubscribed" });
+}
+
+/**
+ * POST /api/challenge/v1/outreach/unsubscribe  { token }
+ * Record an unsubscribe: suppression row (reason 'unsubscribe') + the
+ * prospect's stage becomes 'unsubscribed', which stops every sequence.
+ * Idempotent: repeating the call changes nothing further.
+ */
+async function handleOutreachUnsubscribe(request: Request, env: Env): Promise<Response> {
+	let body: { token?: string };
+	try {
+		body = await request.json() as typeof body;
+	} catch {
+		return json({ ok: false, error: "Invalid JSON body" }, 400);
+	}
+	const token = (body.token || "").trim();
+	if (!/^[a-f0-9]{32}$/.test(token)) return json({ ok: false, error: "invalid token" }, 400);
+	const db = env.nwana_engine_db;
+	const row = await db.prepare(
+		`SELECT id, org_name, contact_email FROM outreach_prospects WHERE unsubscribe_token = ?`
+	).bind(token).first<{ id: number; org_name: string | null; contact_email: string | null }>();
+	if (!row) return json({ ok: false, error: "unknown token" }, 404);
+	if (row.contact_email) {
+		await db.prepare(
+			`INSERT INTO outreach_suppressions (email, reason, source, created_at)
+			 VALUES (?, 'unsubscribe', 'unsubscribe-link', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+			 ON CONFLICT(email) DO NOTHING`
+		).bind(row.contact_email.toLowerCase()).run();
+	}
+	await db.prepare(
+		`UPDATE outreach_prospects SET stage = 'unsubscribed', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
+	).bind(row.id).run();
+	return json({ ok: true, org_name: row.org_name, unsubscribed: true });
+}
 
 /**
  * POST /api/challenge/v1/forms/<type>
@@ -1748,6 +2127,37 @@ async function handleFormSubmit(formType: string, request: Request, env: Env): P
 		if (typeof v === "string" && v.length > 5000) continue; // Truncate abuse.
 		clean[k] = typeof v === "string" ? v.slice(0, 5000) : v;
 	}
+	// Sponsor Every Kilometer: an optional CONFIRMED commitment rides along
+	// with the registration. Commitment intent = any commitment field is
+	// present; then checkbox + sponsor-chosen amount + valid scope are all
+	// required. Validated BEFORE storage so a bad commitment never leaves a
+	// half-recorded registration behind.
+	let sponsorAmountCents = 0;
+	let sponsorScope: string | null = null;
+	if (formType === "sponsor-kilometers") {
+		const hasAny = ["confirm_commitment", "commitment_amount_usd", "commitment_scope"].some(
+			(k) => clean[k] != null && String(clean[k]).trim() !== "",
+		);
+		if (hasAny) {
+			const confirmed = ["yes", "on", "true", "1"].includes(
+				String(clean.confirm_commitment || "").trim().toLowerCase(),
+			);
+			const amt = Number(String(clean.commitment_amount_usd || "").replace(/[$,\s]/g, ""));
+			const scope = String(clean.commitment_scope || "").trim();
+			if (
+				!confirmed ||
+				!Number.isFinite(amt) || amt <= 0 || amt > 100000000 ||
+				!(SPONSOR_SCOPES as readonly string[]).includes(scope)
+			) {
+				return json({
+					ok: false,
+					error: "To confirm a sponsorship, please enter your amount, choose a scope, and check the confirmation box.",
+				}, 400);
+			}
+			sponsorAmountCents = Math.round(amt * 100);
+			sponsorScope = scope;
+		}
+	}
 	try {
 		await env.nwana_engine_db.prepare(
 			`INSERT INTO challenge_form_submissions (id, form_type, status, payload_json, source)
@@ -1756,7 +2166,213 @@ async function handleFormSubmit(formType: string, request: Request, env: Env): P
 	} catch (e) {
 		return json({ ok: false, error: "storage failed" }, 500);
 	}
-	return json({ ok: true, id, message: "Thank you! We received your submission and will be in touch." });
+	// Instructor Training Organizations: mirror the submission into the
+	// pipeline table so the agent-side processor can create the Moodle
+	// group + enrolment key and email the code to the contact.
+	if (formType === "instructor-training-org") {
+		const str = (v: unknown): string | null => {
+			const s = typeof v === "string" ? v.trim() : "";
+			return s ? s : null;
+		};
+		const headcountRaw = Number(clean.headcount);
+		try {
+			await env.nwana_engine_db.prepare(
+				`INSERT INTO instructor_training_orgs
+					(submission_id, org_name, org_type, contact_name, contact_email, phone, city_state, headcount, notes, moodle_status, enrolled_count, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+			).bind(
+				id,
+				str(clean.org_name),
+				str(clean.org_type),
+				str(clean.contact_name),
+				str(clean.contact_email),
+				str(clean.phone),
+				str(clean.city_state),
+				Number.isFinite(headcountRaw) && headcountRaw > 0 ? Math.floor(headcountRaw) : null,
+				str(clean.notes)
+			).run();
+		} catch (e) {
+			return json({ ok: false, error: "storage failed" }, 500);
+		}
+	}
+	// Sponsor Every Kilometer: mirror a CONFIRMED commitment into
+	// sponsor_commitments with its own reference code. The commitment is
+	// the sponsor's own figure — no preset rate exists anywhere in this
+	// path. Receipts are never written here; they are computed from
+	// canonical money_events at read time (handleSponsorCommitment).
+	let sponsorCommitment: { reference_code: string; fundraiser_linked: boolean } | null = null;
+	if (formType === "sponsor-kilometers" && sponsorScope) {
+		const str = (v: unknown): string | null => {
+			const s = typeof v === "string" ? v.trim() : "";
+			return s ? s : null;
+		};
+		const fundraiserUrl = str(clean.fundraiser_url);
+		let fundraiserId: number | null = null;
+		if (fundraiserUrl) {
+			try {
+				fundraiserId = await resolveFundraiserIdByUrl(env, fundraiserUrl);
+			} catch {
+				fundraiserId = null; // URL is stored; received stays 0 until linked.
+			}
+		}
+		try {
+			for (let attempt = 0; attempt < 6 && !sponsorCommitment; attempt++) {
+				const candidate = genSponsorRefCode();
+				try {
+					await env.nwana_engine_db.prepare(
+						`INSERT INTO sponsor_commitments
+							(submission_id, company_name, contact_name, contact_email, scope, committed_amount_cents, period_note, status, fundraiser_url, fundraiser_id, reference_code, created_at, updated_at)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+					).bind(
+						id,
+						str(clean.company_name),
+						str(clean.contact_name),
+						str(clean.contact_email),
+						sponsorScope,
+						sponsorAmountCents,
+						str(clean.commitment_period),
+						fundraiserUrl,
+						fundraiserId,
+						candidate
+					).run();
+					sponsorCommitment = { reference_code: candidate, fundraiser_linked: fundraiserId != null };
+				} catch (e) {
+					if (!String(e).includes("UNIQUE")) throw e; // else: code collision — retry with a fresh code.
+				}
+			}
+		} catch (e) {
+			return json({ ok: false, error: "storage failed" }, 500);
+		}
+		if (!sponsorCommitment) {
+			return json({ ok: false, error: "storage failed" }, 500);
+		}
+	}
+	// Corporate Umbrella Teams: mirror the registration, match it to a
+	// synced race team by exact company name, and — per the approved
+	// model (register once → receive a ready team) — CREATE the company's
+	// Challenge Team automatically when none exists. RunSignup's
+	// manage-teams API creates race-level teams with no captain
+	// registration (verified live 2026-10-12), so creation happens right
+	// here. Later matches also happen after every teams sync.
+	let corporateReg: { team_live: boolean; team_url: string | null; team_created: boolean } | null = null;
+	if (formType === "corporate-teams") {
+		const str = (v: unknown): string | null => {
+			const s = typeof v === "string" ? v.trim() : "";
+			return s ? s : null;
+		};
+		try {
+			await env.nwana_engine_db.prepare(
+				`INSERT INTO corporate_team_registrations
+					(submission_id, company_name, contact_email, team_status, member_count, created_at, updated_at)
+				 VALUES (?, ?, ?, 'awaiting_team', 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+			).bind(id, str(clean.company_name), str(clean.contact_email)).run();
+			await matchCorporateTeamRegistrations(env.nwana_engine_db);
+			let teamCreated = false;
+			const before = await env.nwana_engine_db.prepare(
+				`SELECT team_status FROM corporate_team_registrations WHERE submission_id = ?`
+			).bind(id).first<{ team_status: string }>();
+			if (before?.team_status !== "team_live") {
+				// Best-effort auto-creation: any failure leaves the
+				// registration in awaiting_team, where the manual fallback
+				// steps in the thank-you remain the truthful description.
+				try {
+					const companyName = str(clean.company_name);
+					if (companyName) {
+						const db = env.nwana_engine_db;
+						const token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+						// Resolve the Challenge Team type id (fallback: known id).
+						let teamTypeId = 165480;
+						try {
+							const ev = CHALLENGE_EVENTS.find(e => e.format === "mileage" || e.format === "speed");
+							if (ev) {
+								const turl = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams/team-types`);
+								turl.searchParams.set("format", "json");
+								turl.searchParams.set("event_id", String(ev.event_id));
+								const tres = await runSignupGetJson<{ race_team_types?: Array<{ team_type_id: number; team_type: string }> }>(turl, token);
+								const found = tres.data?.race_team_types?.find(t => t.team_type.toLowerCase().includes("challenge team"));
+								if (found) teamTypeId = found.team_type_id;
+							}
+						} catch { /* fallback id stands */ }
+						const created = await createRunSignupTeamViaApi(db, token, companyName, teamTypeId, "C", null);
+						if (created.ok) {
+							teamCreated = true;
+							await matchCorporateTeamRegistrations(db);
+						} else {
+							// The team may exist in RunSignup but not in our
+							// cache yet (e.g. created directly on RunSignup):
+							// one fresh sync + match before giving up.
+							await syncChallengeTeamsFromRunSignup(db, token);
+							await matchCorporateTeamRegistrations(db);
+						}
+					}
+				} catch { /* awaiting_team stands */ }
+			}
+			const row = await env.nwana_engine_db.prepare(
+				`SELECT team_status, team_url FROM corporate_team_registrations WHERE submission_id = ?`
+			).bind(id).first<{ team_status: string; team_url: string | null }>();
+			corporateReg = {
+				team_live: row?.team_status === "team_live",
+				team_url: row?.team_url ?? null,
+				team_created: teamCreated,
+			};
+		} catch (e) {
+			return json({ ok: false, error: "storage failed" }, 500);
+		}
+	}
+	if (formType === "sponsor-kilometers" && sponsorCommitment) {
+		const company = String(clean.company_name || "your company");
+		const amount = `$${(sponsorAmountCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+		const scopeLabel = SPONSOR_SCOPE_LABELS[sponsorScope as string] || sponsorScope;
+		const period = typeof clean.commitment_period === "string" && clean.commitment_period.trim()
+			? clean.commitment_period.trim()
+			: null;
+		const message = `Thank you! Your sponsorship commitment for ${company} is confirmed. Reference code: ${sponsorCommitment.reference_code}. Amount: ${amount} (${scopeLabel}${period ? `, ${period}` : ""}). Sponsorship funds are received through your company's RunSignup fundraiser page for the Charity Challenge; donations received there sync automatically and count toward this commitment.`;
+		const message_html =
+			`<strong>Sponsorship confirmed — thank you!</strong><br>` +
+			`Company: ${escHtml(company)}<br>` +
+			`Amount: ${escHtml(amount)}<br>` +
+			`Scope: ${escHtml(scopeLabel)}` +
+			(period ? `<br>Period: ${escHtml(period)}` : "") +
+			`<br>Reference code: <strong>${sponsorCommitment.reference_code}</strong><br><br>` +
+			`How sponsorship funds are received: create your company's fundraiser page for the Charity Challenge on RunSignup — ` +
+			`<a href="https://runsignup.com/Race/Donate/216323/BecomeFundraiser" target="_blank" rel="noopener">Become a Fundraiser</a>. ` +
+			`Donations received on that page are real, received money: they sync into NWANA's system automatically and count toward your commitment` +
+			(sponsorCommitment.fundraiser_linked ? ` (the fundraiser page you provided is linked to this commitment)` : "") +
+			`. No payment is taken by this form and no invoice is issued from it.`;
+		return json({ ok: true, id, message, message_html });
+	}
+	if (formType === "corporate-teams" && corporateReg) {
+		const company = String(clean.company_name || "your company");
+		if (corporateReg.team_live && corporateReg.team_url) {
+			// Approved model achieved: one registration → a ready team and
+			// a ready invite link. No captain setup step exists or is needed.
+			const createdPhrase = corporateReg.team_created
+				? `We created your corporate team &ldquo;${escHtml(company)}&rdquo; for you`
+				: `Your corporate team &ldquo;${escHtml(company)}&rdquo; is matched to this registration`;
+			const message = `Thank you! ${company} is registered and your corporate team is ready: ${corporateReg.team_url} — share this team link with your employees. They register free in the Charity Challenge and join the team from their own registration (or choose the team while registering). Their activities count toward your company automatically. Taking part yourself? Register free and join the team the same way — there is no separate captain setup step.`;
+			const message_html =
+				`<strong>${escHtml(company)} is registered — your corporate team is ready.</strong>` +
+				`<p style="margin:8px 0 0">${createdPhrase}: <a href="${corporateReg.team_url}" target="_blank" rel="noopener">your team page on RunSignup</a>.</p>` +
+				`<p style="margin:8px 0 0"><strong>Invite employees with that link.</strong> They register free in the Charity Challenge, then join the team from their own registration (RunSignup &rarr; Profile &rarr; Manage Registration &rarr; Group/Team) or choose the team while registering. Their activities count toward your company automatically.</p>` +
+				`<p style="margin:8px 0 0">Taking part yourself? Register free and join the team the same way — there is no separate captain setup step.</p>`;
+			return json({ ok: true, id, message, message_html });
+		}
+		// Fallback (team could not be created or matched automatically):
+		// the truthful manual sequence.
+		const message = `Thank you! ${company} is registered. Next steps: 1) The future team captain registers free in the Charity Challenge on RunSignup. 2) Create your team on the Teams page (challenges.nwaofna.org/teams) named exactly "${company}" — we match it to this registration automatically. 3) Invite employees with your team link: once the team exists it is listed on the Teams page and has its own RunSignup team page. Employees register free, join the team from their registration, and their activities count toward your company automatically.`;
+		const message_html =
+			`<strong>${escHtml(company)} is registered — here is how to launch your team:</strong>` +
+			`<ol style="margin:8px 0 0 18px;padding:0;text-align:left">` +
+			`<li><strong>Register free.</strong> The person who will captain the team registers in the Charity Challenge: <a href="https://runsignup.com/Race/Register/?raceId=216323" target="_blank" rel="noopener">RunSignup registration</a> (participation is free).</li>` +
+			`<li><strong>Create your team.</strong> On the <a href="/teams#create-team">Teams page</a>, create a Challenge Team named exactly &ldquo;${escHtml(company)}&rdquo;. We match it to this registration automatically — no extra step with NWANA.</li>` +
+			`<li><strong>Invite employees with your team link.</strong> Once the team exists, it is listed on the <a href="/teams">Teams page</a> and has its own RunSignup team page (runsignup.com/RaceGroups/216323/Groups/&hellip;) — share that link. Employees register free, then join the team from their own registration (RunSignup &rarr; Profile &rarr; Manage Registration &rarr; Group/Team). Their activities count toward your company automatically.</li>` +
+			`</ol>`;
+		return json({ ok: true, id, message, message_html });
+	}
+	const message = formType === "instructor-training-org" && typeof clean.contact_email === "string" && clean.contact_email.trim()
+		? `Thank you! Your organization's enrolment code is on its way to ${String(clean.contact_email).trim()}.`
+		: "Thank you! We received your submission and will be in touch.";
+	return json({ ok: true, id, message });
 }
 
 /**
