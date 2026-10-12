@@ -14,4 +14,7 @@ export const VALID_FORM_TYPES = [
 	"individual-instructor-application",
 	"instructor-story",
 	"board-listing",
+	"instructor-training-org",
+	"corporate-teams",
+	"sponsor-kilometers",
 ] as const;
