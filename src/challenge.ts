@@ -511,6 +511,11 @@ async function handleWeekStats(url: URL, env: Env): Promise<Response> {
 			 FROM challenge_activities
 			 WHERE activity_date >= ? AND activity_date <= ?`
 		).bind(weekStart, weekEnd).first<{ active_count: number; total_count: number }>();
+		// All-time totals for the home stats bar (cumulative, never reset).
+		const allTime = await env.nwana_engine_db.prepare(
+			`SELECT COUNT(*) as total_activities, COUNT(DISTINCT rsu_user_id) as total_participants
+			 FROM challenge_activities`
+		).first<{ total_activities: number; total_participants: number }>();
 
 		return json({
 			ok: true,
@@ -518,6 +523,8 @@ async function handleWeekStats(url: URL, env: Env): Promise<Response> {
 			week_end: weekEnd,
 			active_participants: result?.active_count ?? 0,
 			total_results: result?.total_count ?? 0,
+			total_activities_all_time: allTime?.total_activities ?? 0,
+			total_participants_all_time: allTime?.total_participants ?? 0,
 		});
 	} catch (e) {
 		return json({ ok: false, error: e instanceof Error ? e.message : "DB error" }, 500);
