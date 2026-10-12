@@ -2416,9 +2416,9 @@ function formatWeekLabel(weekStart: string): string {
 	const [sy, sm, sd] = weekStart.split("-").map(Number);
 	const weekEnd = addDays(weekStart, 6);
 	const [ey, em, ed] = weekEnd.split("-").map(Number);
-	const startPart = sm === em ? `${months[sm - 1]} ${sd}` : `${months[sm - 1]} ${sd}`;
-	const endPart = `${months[em - 1]} ${ed}, ${ey}`;
-	// en dash between dates
+	const startPart = `${months[sm - 1]} ${sd}`;
+	const endPart = sm === em ? `${ed}, ${ey}` : `${months[em - 1]} ${ed}, ${ey}`;
+	// en dash between dates: "October 5–11, 2026"
 	return `${startPart}\u2013${endPart}`;
 }
 
