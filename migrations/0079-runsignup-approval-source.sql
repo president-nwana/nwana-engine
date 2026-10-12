@@ -1,0 +1,23 @@
+-- Migration 0079: RUNSIGNUP as a durable approval source in series_result_approvals.
+--
+-- Architectural fix (2026-10-08): the RunSignup presence signal (a result
+-- observed in public get-results while results_require_approval=T) is now
+-- persisted to D1 the moment it is observed, instead of being a transient
+-- per-run check. From that point the Machine works from the stored fact;
+-- a later RunSignup 5xx/522 never revokes it or blocks processing.
+--
+-- No schema change is required: the `source` column has no CHECK
+-- constraint, so 'runsignup' is storable. Source values and their meaning:
+--   'oc'       — explicit owner approval via Operating Center button
+--   'chat'     — owner approval stated in chat, recorded by the agent
+--   'import'   — bulk import of owner approvals
+--   'runsignup'— owner's approval inside the RunSignup dashboard, observed
+--                once via the presence signal and persisted (approved_by is
+--                likewise 'runsignup'). Idempotent writes; an existing row
+--                is never downgraded or deleted. An explicit later owner
+--                approval (oc/chat/import) upgrades a 'runsignup' row —
+--                ENGINE/owner remains the stronger display label, while
+--                either source authorizes downstream processing.
+--
+-- This migration is documentation-only; the table definition is unchanged.
+SELECT 1;
