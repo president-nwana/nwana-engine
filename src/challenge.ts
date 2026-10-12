@@ -9,16 +9,72 @@ import { runSignupGetJson } from "./runsignup-client";
 import { resolveRunSignupAccessToken } from "./runsignup-oauth";
 import { syncRunSignupDonations } from "./lib/money-ingestion";
 import { fetchFundraiserMineState } from "./fundraiser-mine";
-import { recomputePersonalBest } from "./challenge-personal-best";
-import {
-	CHALLENGE_EVENTS,
-	CHALLENGE_EVENT_IDS,
-	CHALLENGE_RACE_ID,
-	BUNDLE_TO_EVENTS,
-	BUNDLE_EVENT_IDS,
-} from "./challenge-events";
 
+export const CHALLENGE_RACE_ID = 216323;
+
+export interface ChallengeEventDef {
+	event_id: number;
+	event_name: string;
+	discipline: "Nordic Walking" | "Race Walking" | "Running" | "Cycling" | "Walking" | "Open Challenge";
+	format: "mileage" | "speed" | "relay" | "team" | "open";
+	distance_label: string;
+	fixed_distance_m: number | null;
+}
+
+// Production truth — mirrors RUNSIGNUP_FACTUAL_MAP.md (race 216323).
+export const CHALLENGE_EVENTS: ChallengeEventDef[] = [
+	// Nordic Walking (7)
+	{ event_id: 1222833, event_name: "Nordic Walking — Weekly Mileage", discipline: "Nordic Walking", format: "mileage", distance_label: "Weekly Mileage", fixed_distance_m: null },
+	{ event_id: 1222834, event_name: "Nordic Walking — 1K", discipline: "Nordic Walking", format: "speed", distance_label: "1K", fixed_distance_m: 1000 },
+	{ event_id: 1222835, event_name: "Nordic Walking — 3K", discipline: "Nordic Walking", format: "speed", distance_label: "3K", fixed_distance_m: 3000 },
+	{ event_id: 1222836, event_name: "Nordic Walking — 5K", discipline: "Nordic Walking", format: "speed", distance_label: "5K", fixed_distance_m: 5000 },
+	{ event_id: 1222837, event_name: "Nordic Walking — 10K", discipline: "Nordic Walking", format: "speed", distance_label: "10K", fixed_distance_m: 10000 },
+	{ event_id: 1222838, event_name: "Nordic Walking — 4×1K Relay", discipline: "Nordic Walking", format: "relay", distance_label: "4×1K Relay", fixed_distance_m: 1000 },
+	{ event_id: 1222839, event_name: "Nordic Walking — 4×5K Relay", discipline: "Nordic Walking", format: "relay", distance_label: "4×5K Relay", fixed_distance_m: 5000 },
+	// Race Walking (6)
+	{ event_id: 1222840, event_name: "Race Walking — Weekly Mileage", discipline: "Race Walking", format: "mileage", distance_label: "Weekly Mileage", fixed_distance_m: null },
+	{ event_id: 1222841, event_name: "Race Walking — 3K", discipline: "Race Walking", format: "speed", distance_label: "3K", fixed_distance_m: 3000 },
+	{ event_id: 1222842, event_name: "Race Walking — 5K", discipline: "Race Walking", format: "speed", distance_label: "5K", fixed_distance_m: 5000 },
+	{ event_id: 1222843, event_name: "Race Walking — 10K", discipline: "Race Walking", format: "speed", distance_label: "10K", fixed_distance_m: 10000 },
+	{ event_id: 1222844, event_name: "Race Walking — 20K", discipline: "Race Walking", format: "speed", distance_label: "20K", fixed_distance_m: 20000 },
+	{ event_id: 1222845, event_name: "Race Walking — 4×5K Relay", discipline: "Race Walking", format: "relay", distance_label: "4×5K Relay", fixed_distance_m: 5000 },
+	// Running (7)
+	{ event_id: 1222846, event_name: "Running — Weekly Mileage", discipline: "Running", format: "mileage", distance_label: "Weekly Mileage", fixed_distance_m: null },
+	{ event_id: 1222847, event_name: "Running — 1 Mile", discipline: "Running", format: "speed", distance_label: "1 Mile", fixed_distance_m: 1609 },
+	{ event_id: 1222848, event_name: "Running — 5K", discipline: "Running", format: "speed", distance_label: "5K", fixed_distance_m: 5000 },
+	{ event_id: 1222849, event_name: "Running — 10K", discipline: "Running", format: "speed", distance_label: "10K", fixed_distance_m: 10000 },
+	{ event_id: 1222850, event_name: "Running — Half Marathon", discipline: "Running", format: "speed", distance_label: "Half Marathon", fixed_distance_m: 21097 },
+	{ event_id: 1222851, event_name: "Running — 4×1M Relay", discipline: "Running", format: "relay", distance_label: "4×1M Relay", fixed_distance_m: 1609 },
+	{ event_id: 1222852, event_name: "Running — 4×5K Relay", discipline: "Running", format: "relay", distance_label: "4×5K Relay", fixed_distance_m: 5000 },
+	// Cycling (6)
+	{ event_id: 1222853, event_name: "Cycling — Weekly Mileage", discipline: "Cycling", format: "mileage", distance_label: "Weekly Mileage", fixed_distance_m: null },
+	{ event_id: 1222854, event_name: "Cycling — 10K", discipline: "Cycling", format: "speed", distance_label: "10K", fixed_distance_m: 10000 },
+	{ event_id: 1222855, event_name: "Cycling — 20K", discipline: "Cycling", format: "speed", distance_label: "20K", fixed_distance_m: 20000 },
+	{ event_id: 1222856, event_name: "Cycling — 40K", discipline: "Cycling", format: "speed", distance_label: "40K", fixed_distance_m: 40000 },
+	{ event_id: 1222857, event_name: "Cycling — 100K", discipline: "Cycling", format: "speed", distance_label: "100K", fixed_distance_m: 100000 },
+	{ event_id: 1222858, event_name: "Cycling — Team 100K", discipline: "Cycling", format: "team", distance_label: "Team 100K", fixed_distance_m: null },
+	// Walking (4)
+	{ event_id: 1222897, event_name: "Walking — Weekly Mileage", discipline: "Walking", format: "mileage", distance_label: "Weekly Mileage", fixed_distance_m: null },
+	{ event_id: 1222898, event_name: "Walking — 1 Mile", discipline: "Walking", format: "speed", distance_label: "1 Mile", fixed_distance_m: 1609 },
+	{ event_id: 1222899, event_name: "Walking — 5K", discipline: "Walking", format: "speed", distance_label: "5K", fixed_distance_m: 5000 },
+	{ event_id: 1222900, event_name: "Walking — 10K", discipline: "Walking", format: "speed", distance_label: "10K", fixed_distance_m: 10000 },
+	// Open Challenge (1) — participation + fundraising, not a competitive discipline.
+	// Activity type is selected at logging time and stored in D1 for personal history.
+	{ event_id: 1222924, event_name: "Open Challenge — Move for NWANA", discipline: "Open Challenge", format: "open", distance_label: "Any Activity", fixed_distance_m: null },
+];
+
+export const CHALLENGE_EVENT_IDS = CHALLENGE_EVENTS.map((e) => e.event_id);
 const EVENT_BY_ID = new Map(CHALLENGE_EVENTS.map((e) => [e.event_id, e]));
+
+// Super Event bundles → their sub-event IDs (production truth, race 216323).
+export const BUNDLE_TO_EVENTS: Record<number, number[]> = {
+	1222859: [1222833, 1222834, 1222835, 1222836, 1222837, 1222838, 1222839], // NW All Events
+	1222860: [1222840, 1222841, 1222842, 1222843, 1222844, 1222845], // RW All Events
+	1222861: [1222846, 1222847, 1222848, 1222849, 1222850, 1222851, 1222852], // Running All Events
+	1222862: [1222853, 1222854, 1222855, 1222856, 1222857, 1222858], // Cycling All Events
+	1222905: [1222897, 1222898, 1222899, 1222900], // Walking All Events
+};
+export const BUNDLE_EVENT_IDS = Object.keys(BUNDLE_TO_EVENTS).map(Number);
 const ALL_QUERY_EVENT_IDS = [...CHALLENGE_EVENT_IDS, ...BUNDLE_EVENT_IDS];
 
 function json(data: unknown, status = 200): Response {
@@ -409,15 +465,6 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 		console.error("challenge_activities insert failed:", e);
 	}
 
-	// Personal Best (recognition v1): rebuild the derived PB row for this
-	// (participant, event). Non-fatal — never fails the submission.
-	// recomputePersonalBest is a no-op for non-speed events.
-	try {
-		await recomputePersonalBest(env.nwana_engine_db, rsuUserId, eventId);
-	} catch (e) {
-		console.error("personal-best recompute failed (submit):", e);
-	}
-
 	return json({
 		ok: true,
 		event_id: eventId,
@@ -454,9 +501,7 @@ async function handleWeekStats(url: URL, env: Env): Promise<Response> {
 	if (weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam)) {
 		weekStart = mondayOfWeek(weekParam);
 	} else {
-		const now = new Date();
-		const today = now.toISOString().slice(0, 10);
-		weekStart = mondayOfWeek(today);
+		weekStart = mondayOfWeek(nyToday());
 	}
 	const weekEnd = addDays(weekStart, 6);
 
@@ -1037,17 +1082,21 @@ async function handleSearchTeams(url: URL, env: Env): Promise<Response> {
 }
 
 /**
- * Sync race teams from RunSignup (source of truth) into the D1 challenge_teams cache.
- * Shared by the on-demand sync endpoint and the live Challenge Team count stats endpoint.
- * Team types are mapped from RunSignup team_type_id: 165480 = "Challenge Team",
- * 165317 = "Relay Team"; anything else is stored with an empty team_type.
- * Returns the number of team rows upserted.
+ * POST /api/challenge/v1/teams/sync
+ * Sync teams from RunSignup (source of truth) into D1 cache.
+ * On-demand only (no polling). Called after team creation or manually.
  */
-async function syncChallengeTeamsFromRunSignup(
-	db: D1Database,
-	token: string,
-): Promise<number> {
-	const now = Math.floor(Date.now() / 1000);
+async function handleSyncTeams(env: Env): Promise<Response> {
+	try {
+		let token: string;
+		try {
+			token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+		} catch (e) {
+			return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
+		}
+
+		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+		const now = Math.floor(Date.now() / 1000);
 
 		// Fetch from RunSignup (paginated)
 		const regularEvents = CHALLENGE_EVENTS.filter(e => e.format === "mileage" || e.format === "speed");
@@ -1115,7 +1164,22 @@ async function syncChallengeTeamsFromRunSignup(
 			if (page > 100) break; // safety limit
 		}
 
-	return synced;
+		// Memberships: the teams-list API carries no rosters, so resolve
+		// "who is on which team" from the participants API (real identifiers).
+		let memberships = 0;
+		let membershipsError: string | null = null;
+		try {
+			const mr = await upsertTeamMembershipsFromParticipants(db, env, now);
+			memberships = mr.memberships;
+			if (!mr.ok) membershipsError = mr.error || "membership sync failed";
+		} catch (e) {
+			membershipsError = e instanceof Error ? e.message : "membership sync failed";
+		}
+
+		return json({ ok: true, synced, synced_at: now, memberships, memberships_error: membershipsError, teams_api_error: teamsApiError });
+	} catch (e) {
+		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
+	}
 }
 
 /**
@@ -1170,7 +1234,6 @@ async function handleTeamCount(env: Env): Promise<Response> {
 		return json({ ok: false, error: e instanceof Error ? e.message : "DB error" }, 500);
 	}
 }
-
 /**
  * Refresh the D1 team_entities cache from RunSignup (source of truth).
  * Race teams come through the shared challenge_teams sync; fundraising and
@@ -1245,42 +1308,6 @@ async function refreshTeamEntities(db: D1Database, token: string, now: number): 
 				`INSERT INTO team_entities (system, entity_id, name, synced_at) VALUES (?, ?, ?, ?)`
 			).bind(system, e.entity_id, e.name, now).run();
 		}
-	}
-}
-
-/**
- * POST /api/challenge/v1/teams/sync
- * Sync teams from RunSignup (source of truth) into D1 cache.
- * On-demand only (no polling). Called after team creation or manually.
- */
-async function handleSyncTeams(env: Env): Promise<Response> {
-	try {
-		let token: string;
-		try {
-			token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
-		} catch (e) {
-			return json({ ok: false, error: e instanceof Error ? e.message : "OAuth token unavailable" }, 502);
-		}
-
-		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
-		const synced = await syncChallengeTeamsFromRunSignup(db, token);
-		const now = Math.floor(Date.now() / 1000);
-
-		// Memberships: the teams-list API carries no rosters, so resolve
-		// "who is on which team" from the participants API (real identifiers).
-		let memberships = 0;
-		let membershipsError: string | null = null;
-		try {
-			const mr = await upsertTeamMembershipsFromParticipants(db, env, now);
-			memberships = mr.memberships;
-			if (!mr.ok) membershipsError = mr.error || "membership sync failed";
-		} catch (e) {
-			membershipsError = e instanceof Error ? e.message : "membership sync failed";
-		}
-
-		return json({ ok: true, synced, synced_at: now, memberships, memberships_error: membershipsError });
-	} catch (e) {
-		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
 	}
 }
 
@@ -1494,15 +1521,6 @@ async function handleDeleteActivity(tallyStr: string, url: URL, env: Env): Promi
 		).bind(rsuUserId, tallySplitNum).run();
 	} catch (e) {
 		console.error("delete cleanup failed", e);
-	}
-
-	// Personal Best (recognition v1): rebuild from the remaining valid
-	// results — deleting the current PB recalculates it automatically.
-	// Non-fatal — never fails the delete.
-	try {
-		await recomputePersonalBest(env.nwana_engine_db, rsuUserId, row.sub_event_id);
-	} catch (e) {
-		console.error("personal-best recompute failed (delete):", e);
 	}
 	return json({ ok: true, deleted: tallySplitNum });
 }
@@ -1866,9 +1884,29 @@ async function handleFundraisingLeaderboard(url: URL, env: Env): Promise<Respons
 	if (weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam)) {
 		weekStart = mondayOfWeek(weekParam);
 	} else {
-		weekStart = mondayOfWeek(new Date().toISOString().slice(0, 10));
+		weekStart = mondayOfWeek(nyToday());
 	}
 	const weekEnd = addDays(weekStart, 6);
+
+	// All-time verified total for race 216323. The public "Total Raised" stat
+	// must be durable: a weekly sum would reset to $0 every Monday morning.
+	// fundraiser_donation_received rows are excluded (same amount as the
+	// donation_received row — summing both would double-count).
+	let allTimeCents = 0;
+	let allTimeCount = 0;
+	try {
+		const allTime = await env.nwana_engine_db.prepare(
+			`SELECT COALESCE(SUM(gross_cents), 0) AS total_cents, COUNT(*) AS n
+			 FROM money_events
+			 WHERE source_ref LIKE 'race:216323/%'
+			   AND event_type = 'donation_received'
+			   AND gross_cents IS NOT NULL AND gross_cents > 0`
+		).first<{ total_cents: number; n: number }>();
+		allTimeCents = allTime?.total_cents ?? 0;
+		allTimeCount = allTime?.n ?? 0;
+	} catch {
+		// all-time total stays 0; weekly rows below still work.
+	}
 
 	// Query canonical money_events for race 216323 donations in the week.
 	// source_ref format: "race:216323/donation:XXXX"
@@ -1918,8 +1956,25 @@ async function handleFundraisingLeaderboard(url: URL, env: Env): Promise<Respons
 		week_end: weekEnd,
 		race_id: CHALLENGE_RACE_ID,
 		leaderboard: ranked,
+		total_raised_usd: Math.round((allTimeCents / 100) * 100) / 100,
+		donations_count: allTimeCount,
 		note: ranked.length === 0 ? "No donations for race 216323 in this week yet. Sync donations to update." : undefined,
 	});
+}
+
+/**
+ * Today's date in the Challenge canonical timezone (America/New_York),
+ * as YYYY-MM-DD. Workers run on UTC: using the UTC date directly flips
+ * "this week" to next week every day at 20:00 EDT (00:00 UTC), which
+ * zeroes Sunday-evening stats (donations, activities, results).
+ */
+function nyToday(): string {
+	return new Intl.DateTimeFormat("en-CA", {
+		timeZone: "America/New_York",
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	}).format(new Date());
 }
 
 /**
