@@ -1,5 +1,12 @@
 # NWANA Engine Changelog
 
+## 2026-10-11 — Owner decision: Google Workspace / Gmail allowed for B2B outreach automation
+
+- Owner decision 2026-10-11 supersedes the 2026-09-19 email integration restriction: Google Workspace / Gmail integration with the NWANA Engine is allowed for corporate B2B outreach automation and reply handling (three tracks: Sponsor Every Kilometer, Corporate Umbrella Teams, Instructor Training Organizations) via the dedicated outreach mailbox (`partnerships@nwaofna.org`).
+- Verified gap: RunSignup's consent policy blocks cold B2B prospecting, which RunSignup/TicketSignup cannot perform. RunSignup remains the mass-email layer for existing marketing mailings.
+- Constraints recorded: no duplicate Google Workspace contact database (Engine D1 `sellers`/`partners` tables stay the system of record); sending volumes are operational settings, not architecture; no Engine rebuild, no new CRM.
+- Docs updated: AGENTS.md (Email Integration Boundary), OPERATING_PLAN.md (Email boundary), SYSTEM_STATE.md (Email integration boundary section). Docs-only change, no code.
+
 ## 2026-09-23 — Meetings operating-center screen with downloadable report (ADR-0028)
 
 - New screen: Meetings (`/operating-center/meetings`). Two sections, both real: external meetings (Integrity 9 call Fri 2026-09-25 2:00-3:00pm CT, confirmed; Zubie Five intro call proposed Tue-Thu week of Sep 28, awaiting scheduling) and board meetings read live from the D1 `board_meetings` table (upcoming DRAFT/OPEN with date/time, title, agenda count; past CLOSED with date, minutes recorded/absent, decision count; honest "No board meetings recorded yet" on an empty table).
