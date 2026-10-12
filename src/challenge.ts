@@ -2082,10 +2082,8 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 	if (weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam)) {
 		weekStart = mondayOfWeek(weekParam);
 	} else {
-		// Current week.
-		const now = new Date();
-		const today = now.toISOString().slice(0, 10);
-		weekStart = mondayOfWeek(today);
+		// Current week (Challenge canonical timezone: America/New_York).
+		weekStart = mondayOfWeek(nyToday());
 	}
 	const weekEnd = addDays(weekStart, 6);
 
