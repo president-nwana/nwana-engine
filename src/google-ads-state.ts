@@ -128,6 +128,10 @@ export const AD_GRANTS_POLICY = {
 	min_descriptions_per_ad: 2,
 	/** Ad Grants forbids single-word and overly generic keywords. */
 	min_keyword_words: 2,
+	/** RSA limits (2026-10-10: a 31-char headline slipped through and the
+	 * in-account script failed to create that ad — catch it here instead). */
+	max_headline_chars: 30,
+	max_description_chars: 90,
 } as const;
 
 const NWANA_PREFIX = "NWANA \u00b7 ";
@@ -200,8 +204,18 @@ export function validateCampaignSpec(spec: CampaignSpec): string[] {
 			if (ad.headlines.length < AD_GRANTS_POLICY.min_headlines_per_ad) {
 				violations.push(`ad in "${group.name}": at least ${AD_GRANTS_POLICY.min_headlines_per_ad} headlines required`);
 			}
+			for (const h of ad.headlines) {
+				if (h.length > AD_GRANTS_POLICY.max_headline_chars) {
+					violations.push(`ad in "${group.name}": headline "${h}" is ${h.length} chars (max ${AD_GRANTS_POLICY.max_headline_chars})`);
+				}
+			}
 			if (ad.descriptions.length < AD_GRANTS_POLICY.min_descriptions_per_ad) {
 				violations.push(`ad in "${group.name}": at least ${AD_GRANTS_POLICY.min_descriptions_per_ad} descriptions required`);
+			}
+			for (const d of ad.descriptions) {
+				if (d.length > AD_GRANTS_POLICY.max_description_chars) {
+					violations.push(`ad in "${group.name}": description is ${d.length} chars (max ${AD_GRANTS_POLICY.max_description_chars})`);
+				}
 			}
 			if (!ad.final_url.startsWith("https://")) {
 				violations.push(`ad in "${group.name}": final_url must be https`);

@@ -12,6 +12,7 @@ import { nwanaWorkspaceMenu, type OperatingCenterPageId } from "./operating-cent
 import { getFundView } from "./fund";
 import { validateCampaignSpec, type CampaignSpec, type DesiredState, type DistributionLink, type ProposalOrigin, type SourceObjectLink } from "./google-ads-state";
 import { buildDesiredState } from "./google-ads-current";
+import { getLatestInventorySnapshot } from "./google-ads-inventory";
 import { currentProposalIntents } from "./google-ads-current";
 import { buildProposals, type ProposalRecord } from "./google-ads-proposals";
 import type { NormalizedCampaignIntent } from "./google-ads-intent";
@@ -253,6 +254,45 @@ export function renderSitesHtml(): string {
 export interface AdsOverview {
 	ok: true;
 	generated_at: string;
+	// Read-only account inventory snapshot collected hourly by the in-account
+	// Ads Script (ADR-0016 extension 2026-10-10). Null when no snapshot has
+	// landed yet. This is the source for cleanup audits (KEEP/PAUSE/MERGE/
+	// REBUILD/RETIRE) — real account data, never invented.
+	account_inventory: {
+		snapshot_at: string;
+		script_version: string | null;
+		customer_id: string | null;
+		campaign_count: number;
+		stats_window: string | null;
+		note: string | null;
+		conversion_actions: Array<{
+			id: string; name: string; status: string; category: string; type: string;
+		}>;
+		campaigns: Array<{
+			id: string;
+			name: string;
+			status: string;
+			channel_type: string;
+			daily_budget_usd: number;
+			start_date: string;
+			end_date: string;
+			stats_30d: {
+				impressions: number; clicks: number; cost_usd: number;
+				conversions: number; ctr: number; conversion_rate: number;
+			};
+			ad_group_count: number;
+			keyword_count: number;
+			landing_pages: string[];
+			sitelinks: string[];
+			ad_groups: Array<{
+				name: string;
+				status: string;
+				keywords: string[];
+				keywords_truncated: boolean;
+				ads: Array<{ headlines: string[]; final_url: string }>;
+			}>;
+		}>;
+	} | null;
 	google_ads: {
 		connected: boolean;
 		configured: boolean;
@@ -481,9 +521,56 @@ export async function getAdsOverview(
 				? `Google Analytics connection error: ${gaStatus.error}`
 				: "Google Analytics is not connected. Open /integrations/google-analytics/connect as the owner to connect.",
 		};
+	// Read-only account inventory snapshot (collected hourly by the in-account
+	// Ads Script). Never throws into the overview: no snapshot yet (or a read
+	// error) just renders as "not yet collected".
+	let accountInventory = null;
+	try {
+		const snap = await getLatestInventorySnapshot(env.nwana_engine_db);
+		if (snap) {
+			accountInventory = {
+				snapshot_at: snap.snapshot_at,
+				script_version: snap.script_version,
+				customer_id: snap.customer_id,
+				campaign_count: snap.campaign_count,
+				stats_window: snap.payload.stats_window ?? null,
+				note: snap.payload.note ?? null,
+				conversion_actions: snap.payload.conversion_actions ?? [],
+				campaigns: (snap.payload.campaigns ?? []).map((c) => ({
+					id: c.id,
+					name: c.name,
+					status: c.status,
+					channel_type: c.channel_type,
+					daily_budget_usd: c.daily_budget_usd,
+					start_date: c.start_date,
+					end_date: c.end_date,
+					stats_30d: c.stats_30d,
+					ad_group_count: (c.ad_groups ?? []).length,
+					keyword_count: (c.ad_groups ?? []).reduce(
+						(n, g) => n + (g.keywords ?? []).length, 0),
+					landing_pages: c.landing_pages ?? [],
+					sitelinks: (c.sitelinks ?? []).map((s) => s.text),
+					ad_groups: (c.ad_groups ?? []).map((g) => ({
+						name: g.name,
+						status: g.status,
+						keywords: (g.keywords ?? []).map(
+							(k) => k.text + " [" + k.match_type + "]"),
+						keywords_truncated: !!g.keywords_truncated,
+						ads: (g.ads ?? []).map((a) => ({
+							headlines: a.headlines,
+							final_url: a.final_url,
+						})),
+					})),
+				})),
+			};
+		}
+	} catch {
+		accountInventory = null;
+	}
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
+		account_inventory: accountInventory,
 		google_ads: {
 			connected: status.connected,
 			configured: status.configured,

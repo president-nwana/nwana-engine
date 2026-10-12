@@ -8,6 +8,7 @@
 import { runSignupGetJson } from "./runsignup-client";
 import { resolveRunSignupAccessToken } from "./runsignup-oauth";
 import { syncRunSignupDonations } from "./lib/money-ingestion";
+import { fetchFundraiserMineState } from "./fundraiser-mine";
 import { recomputePersonalBest } from "./challenge-personal-best";
 import {
 	CHALLENGE_EVENTS,
@@ -91,11 +92,13 @@ function participantName(p: UnknownRecord): string | null {
 	return full || null;
 }
 
-function participantTeam(p: UnknownRecord): { team_id: number | null; team_name: string | null } {
+function participantTeam(p: UnknownRecord): { team_id: number | null; team_name: string | null; team_type_id: number | null; team_type: string | null } {
 	// RunSignup participant team linkage: team_id, team_name, team_type.
 	const teamId = int(p.team_id);
 	const teamName = typeof p.team_name === "string" ? p.team_name.trim().slice(0, 100) : null;
-	return { team_id: teamId, team_name: teamName || null };
+	const teamTypeId = int(p.team_type_id);
+	const teamType = typeof p.team_type === "string" ? p.team_type.trim().slice(0, 50) : null;
+	return { team_id: teamId, team_name: teamName || null, team_type_id: teamTypeId, team_type: teamType || null };
 }
 
 /**
@@ -1053,6 +1056,7 @@ async function syncChallengeTeamsFromRunSignup(
 
 		let synced = 0;
 		let page = 1;
+		let teamsApiError: string | null = null;
 
 		while (true) {
 			const url = new URL(`https://api.runsignup.com/rest/race/${CHALLENGE_RACE_ID}/teams`);
@@ -1072,7 +1076,11 @@ async function syncChallengeTeamsFromRunSignup(
 				}>;
 			}>(url, token);
 
-			if (!res.ok || !res.data?.race_teams || res.data.race_teams.length === 0) {
+			if (!res.ok) {
+				teamsApiError = res.api_error_msg || (res.http_status ? `HTTP ${res.http_status}` : "request failed");
+				break;
+			}
+			if (!res.data?.race_teams || res.data.race_teams.length === 0) {
 				break;
 			}
 
@@ -1256,16 +1264,92 @@ async function handleSyncTeams(env: Env): Promise<Response> {
 
 		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
 		const synced = await syncChallengeTeamsFromRunSignup(db, token);
+		const now = Math.floor(Date.now() / 1000);
 
-		return json({ ok: true, synced, synced_at: Math.floor(Date.now() / 1000) });
+		// Memberships: the teams-list API carries no rosters, so resolve
+		// "who is on which team" from the participants API (real identifiers).
+		let memberships = 0;
+		let membershipsError: string | null = null;
+		try {
+			const mr = await upsertTeamMembershipsFromParticipants(db, env, now);
+			memberships = mr.memberships;
+			if (!mr.ok) membershipsError = mr.error || "membership sync failed";
+		} catch (e) {
+			membershipsError = e instanceof Error ? e.message : "membership sync failed";
+		}
+
+		return json({ ok: true, synced, synced_at: now, memberships, memberships_error: membershipsError });
 	} catch (e) {
 		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
 	}
 }
 
 /**
+ * Upsert team memberships from RunSignup participants into D1.
+ * The participants API is the source of truth for "who is on which team":
+ * each participant record links a real rsu_user_id to a real team_id —
+ * membership is never matched by name.
+ * - challenge_team_members: INSERT ... ON CONFLICT DO NOTHING, so an
+ *   is_captain flag set by our own create-team flow is never overwritten.
+ * - challenge_teams: stub rows (INSERT OR IGNORE) for teams the teams-list
+ *   sync missed, so type info can be backfilled later.
+ * - member_count is raised to the D1-known member floor, never lowered.
+ * When onlyRsuUserId is set, only that user's memberships are upserted
+ * (the participants fetch itself is unchanged).
+ */
+async function upsertTeamMembershipsFromParticipants(
+	db: D1Database, env: Env, now: number, onlyRsuUserId?: number
+): Promise<{ ok: boolean; memberships: number; error?: string }> {
+	const fetched = await fetchParticipants(env);
+	if (!fetched.ok) return { ok: false, memberships: 0, error: fetched.error };
+	const teams = new Map<number, { name: string; type_id: number | null; type: string | null; users: Set<number> }>();
+	for (const p of fetched.participants || []) {
+		const uid = participantUserId(p);
+		if (!uid || (onlyRsuUserId !== undefined && uid !== onlyRsuUserId)) continue;
+		const t = participantTeam(p);
+		if (!t.team_id) continue;
+		let e = teams.get(t.team_id);
+		if (!e) {
+			e = { name: t.team_name || `Team ${t.team_id}`, type_id: t.team_type_id, type: t.team_type, users: new Set<number>() };
+			teams.set(t.team_id, e);
+		}
+		e.users.add(uid);
+	}
+	let memberships = 0;
+	for (const [teamId, e] of teams) {
+		await db.prepare(`
+			INSERT INTO challenge_teams (team_id, team_name, team_type_id, team_type, member_count, synced_at)
+			VALUES (?, ?, ?, ?, 0, ?)
+			ON CONFLICT(team_id) DO NOTHING
+		`).bind(teamId, e.name, e.type_id, e.type, now).run();
+		for (const uid of e.users) {
+			const r = await db.prepare(`
+				INSERT INTO challenge_team_members (team_id, rsu_user_id, is_captain, synced_at)
+				VALUES (?, ?, 0, ?)
+				ON CONFLICT(team_id, rsu_user_id) DO NOTHING
+			`).bind(teamId, uid, now).run();
+			const changes = (r as unknown as { meta?: { changes?: number } })?.meta?.changes;
+			if (changes === 1) memberships++;
+		}
+		await db.prepare(`
+			UPDATE challenge_teams SET member_count = (
+				SELECT COUNT(*) FROM challenge_team_members WHERE team_id = ?
+			) WHERE team_id = ? AND member_count < (
+				SELECT COUNT(*) FROM challenge_team_members WHERE team_id = ?
+			)
+		`).bind(teamId, teamId, teamId).run();
+	}
+	return { ok: true, memberships };
+}
+
+/**
  * GET /api/challenge/v1/teams/mine?rsu_user_id=...
- * Teams the current user belongs to or manages (from D1).
+ * Teams the current user belongs to or manages.
+ * Membership is resolved from RunSignup participant records (real
+ * rsu_user_id <-> team_id linkage, never name matching):
+ * D1 cache first, then a best-effort live refresh with write-through so a
+ * newly joined team appears immediately even if the last sync predates it.
+ * A failed live refresh never blocks the D1 answer.
  */
 async function handleMyTeams(url: URL, env: Env): Promise<Response> {
 	try {
@@ -1273,20 +1357,49 @@ async function handleMyTeams(url: URL, env: Env): Promise<Response> {
 		if (!rsuUserId) {
 			return json({ ok: false, error: "rsu_user_id is required" }, 400);
 		}
+		const uid = parseInt(rsuUserId, 10);
+		if (!Number.isInteger(uid) || uid <= 0) {
+			return json({ ok: false, error: "invalid rsu_user_id" }, 400);
+		}
 
 		const db = (env as unknown as { nwana_engine_db: D1Database }).nwana_engine_db;
+		const now = Math.floor(Date.now() / 1000);
+
+		// Best-effort live membership refresh (write-through); never blocks.
+		try {
+			await upsertTeamMembershipsFromParticipants(db, env, now, uid);
+		} catch (e) {
+			console.error("teams/mine live membership refresh failed:", e instanceof Error ? e.message : e);
+		}
+
 		const result = await db.prepare(`
 			SELECT t.team_id, t.team_name, t.team_type_id, t.team_type, t.member_count, m.is_captain
 			FROM challenge_teams t
 			JOIN challenge_team_members m ON m.team_id = t.team_id
 			WHERE m.rsu_user_id = ?
 			ORDER BY t.team_name ASC
-		`).bind(parseInt(rsuUserId, 10)).all();
+		`).bind(uid).all();
 
 		return json({ ok: true, teams: result.results || [] });
 	} catch (e) {
 		return json({ ok: false, error: e instanceof Error ? e.message : "Internal error" }, 500);
 	}
+}
+
+/**
+ * GET /api/challenge/v1/fundraiser/mine?rsu_user_id=...
+ * The current participant's fundraising state for race 216323 via the
+ * canonical RunSignup OAuth path. Three honest states: no fundraiser,
+ * fundraiser without team, fundraiser with team. Amounts are money
+ * actually received (RunSignup amount_raised excludes unpaid pledges);
+ * team totals are never merged into personal totals.
+ */
+async function handleMyFundraiser(url: URL, env: Env): Promise<Response> {
+	const rsuUserId = int(url.searchParams.get("rsu_user_id"));
+	if (!rsuUserId) return json({ ok: false, error: "rsu_user_id required" }, 400);
+	const result = await fetchFundraiserMineState(env, rsuUserId);
+	if (!result.ok) return json({ ok: false, error: result.error }, 502);
+	return json({ ok: true, rsu_user_id: rsuUserId, ...result.state });
 }
 
 /**
@@ -1426,6 +1539,9 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	if (path === "/api/challenge/v1/fundraising-leaderboard" && request.method === "GET") {
 		return handleFundraisingLeaderboard(url, env);
 	}
+	if (path === "/api/challenge/v1/fundraising-teams" && request.method === "GET") {
+		return handleFundraisingTeams(url, env);
+	}
 	if (path === "/api/challenge/v1/week-stats" && request.method === "GET") {
 		return handleWeekStats(url, env);
 	}
@@ -1456,6 +1572,9 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	if (path === "/api/challenge/v1/teams/mine" && request.method === "GET") {
 		return handleMyTeams(url, env);
 	}
+	if (path === "/api/challenge/v1/fundraiser/mine" && request.method === "GET") {
+		return handleMyFundraiser(url, env);
+	}
 	if (path === "/api/challenge/v1/debug-race-info" && request.method === "GET") {
 		return handleDebugRaceInfo(env);
 	}
@@ -1466,10 +1585,17 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL): 
 	if (path === "/api/challenge/v1/form-submissions" && request.method === "GET") {
 		return handleFormList(url, env);
 	}
+	if (path === "/api/challenge/v1/board-listings" && request.method === "GET") {
+		return handleBoardListings(env);
+	}
+	if (path.startsWith("/api/challenge/v1/form-submissions/") && path.endsWith("/status") && request.method === "POST") {
+		const sid = path.slice("/api/challenge/v1/form-submissions/".length, -"/status".length);
+		return handleFormStatusUpdate(sid, request, env);
+	}
 	return json({ ok: false, error: "unknown challenge endpoint" }, 404);
 }
 
-const VALID_FORM_TYPES = ["contact", "organization", "sponsor", "partner"] as const;
+import { VALID_FORM_TYPES } from "./form-types";
 
 /**
  * POST /api/challenge/v1/forms/<type>
@@ -1537,6 +1663,72 @@ async function handleFormList(url: URL, env: Env): Promise<Response> {
 }
 
 /**
+ * GET /api/challenge/v1/board-listings
+ * Public board content: APPROVED board-listing submissions, sanitized.
+ * Auth via X-Challenge-Key (charity worker proxies server-side).
+ */
+async function handleBoardListings(env: Env): Promise<Response> {
+	try {
+		const result = await env.nwana_engine_db.prepare(
+			`SELECT id, payload_json, created_at FROM challenge_form_submissions
+			 WHERE form_type = 'board-listing' AND status = 'APPROVED'
+			 ORDER BY created_at DESC LIMIT 100`
+		).all();
+		const listings = (result.results || []).map((row: Record<string, unknown>) => {
+			let p: Record<string, unknown> = {};
+			try { p = JSON.parse(String(row.payload_json)); } catch { /* keep empty */ }
+			// Sanitize: never expose the private contact email.
+			return {
+				id: row.id,
+				kind: p.listing_kind || null,
+				display_name: p.display_name || null,
+				location: p.location || null,
+				description: p.description || null,
+				public_contact: p.public_contact || null,
+				instructor_status: p.instructor_status || null,
+				created_at: row.created_at,
+			};
+		});
+		return json({ ok: true, listings });
+	} catch (e) {
+		return json({ ok: false, error: "d1 query failed" }, 500);
+	}
+}
+
+/**
+ * POST /api/challenge/v1/form-submissions/<id>/status
+ * Set a submission's status (NEW/REVIEWED/CONTACTED/APPROVED/DECLINED/ARCHIVED).
+ * Auth via X-Challenge-Key. Used by board moderation.
+ */
+async function handleFormStatusUpdate(id: string, request: Request, env: Env): Promise<Response> {
+	const ALLOWED = ["NEW", "REVIEWED", "CONTACTED", "APPROVED", "DECLINED", "ARCHIVED"];
+	let body: Record<string, unknown>;
+	try {
+		body = (await request.json()) as Record<string, unknown>;
+	} catch {
+		return json({ ok: false, error: "invalid JSON" }, 400);
+	}
+	const status = String(body.status || "").toUpperCase();
+	if (!ALLOWED.includes(status)) {
+		return json({ ok: false, error: "invalid status" }, 400);
+	}
+	if (!/^frm_[a-z0-9_]+$/.test(id)) {
+		return json({ ok: false, error: "invalid id" }, 400);
+	}
+	try {
+		const res = await env.nwana_engine_db.prepare(
+			`UPDATE challenge_form_submissions SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
+		).bind(status, id).run();
+		if ((res.meta?.changes || 0) === 0) {
+			return json({ ok: false, error: "not found" }, 404);
+		}
+		return json({ ok: true, id, status });
+	} catch (e) {
+		return json({ ok: false, error: "storage failed" }, 500);
+	}
+}
+
+/**
  * POST /api/challenge/v1/sync-donations
  * Owner-triggered sync of race 216323 donations into canonical money_events.
  * Uses the existing money pipeline; 216323 is NOT in RACE_TO_FUND_ID so no
@@ -1568,6 +1760,95 @@ interface DonationRow {
 	gross_cents: number | null;
 	source_ref: string;
 	fundraiser_id: string | null;
+}
+
+/**
+ * GET /api/challenge/v1/fundraising-teams[?id=<race_fundraiser_id>]
+ * Public read-only list of RunSignup fundraising teams (is_team_fundraiser = "T")
+ * for race 216323, with amounts actually received, goals, and member counts.
+ * ?id= returns a single team with its member fundraisers.
+ * No writes. Amounts are received-only (same semantics as fundraiser/mine).
+ */
+interface FundraisingTeamRow {
+	id: number;
+	name: string;
+	url: string | null;
+	amount_raised: number | null;
+	goal: number | null;
+	donations: number | null;
+	members: number;
+	description: string | null;
+}
+
+async function handleFundraisingTeams(url: URL, env: Env): Promise<Response> {
+	const idParam = url.searchParams.get("id");
+	let token: string;
+	try {
+		token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+	} catch (e) {
+		return json({ ok: false, error: "OAuth token unavailable" }, 502);
+	}
+	const apiUrl = new URL("https://api.runsignup.com/rest/v2/race-fundraisers/get-race-fundraisers.json");
+	apiUrl.searchParams.set("race_id", String(CHALLENGE_RACE_ID));
+	apiUrl.searchParams.set("included_fundraiser_types", "any");
+	apiUrl.searchParams.set("include_amount_raised", "T");
+	apiUrl.searchParams.set("include_number_of_donations", "T");
+	apiUrl.searchParams.set("num", "500");
+	const res = await runSignupGetJson<{ race_fundraisers?: Array<Record<string, unknown>> }>(apiUrl, token);
+	if (!res.ok) {
+		return json({ ok: false, error: "RunSignup API error" }, 502);
+	}
+	const list = Array.isArray(res.data?.race_fundraisers) ? res.data!.race_fundraisers! : [];
+	const teams = list.filter((f) => f.is_team_fundraiser === "T" && f.race_fundraiser_id != null);
+	const toNum = (v: unknown): number | null => {
+		if (v == null) return null;
+		const n = Number(String(v).replace(/[$,\s]/g, ""));
+		return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+	};
+	const toInt = (v: unknown): number | null => {
+		if (v == null) return null;
+		const n = Number(v);
+		return Number.isInteger(n) && n >= 0 ? n : null;
+	};
+	const str = (v: unknown): string | null => {
+		if (v == null) return null;
+		const s = String(v).trim();
+		return s === "" ? null : s;
+	};
+	const buildRow = (f: Record<string, unknown>): FundraisingTeamRow => {
+		const tid = Number(f.race_fundraiser_id);
+		const memberCount = list.filter(
+			(m) => m.is_team_fundraiser !== "T" && Number(m.parent_fundraiser_id) === tid,
+		).length;
+		return {
+			id: tid,
+			name: str(f.race_fundraiser_name) || `Team ${tid}`,
+			url: str(f.fundraiser_url),
+			amount_raised: toNum(f.amount_raised),
+			goal: toNum(f.fundraising_goal),
+			donations: toInt(f.number_of_donations),
+			members: memberCount,
+			description: str(f.fundraiser_description) || str(f.description),
+		};
+	};
+	if (idParam) {
+		const tid = Number(idParam);
+		if (!Number.isFinite(tid)) return json({ ok: false, error: "invalid id" }, 400);
+		const team = teams.find((f) => Number(f.race_fundraiser_id) === tid);
+		if (!team) return json({ ok: false, error: "team not found" }, 404);
+		const members = list
+			.filter((m) => m.is_team_fundraiser !== "T" && Number(m.parent_fundraiser_id) === tid)
+			.map((m) => ({
+				id: m.race_fundraiser_id != null ? Number(m.race_fundraiser_id) : null,
+				name: str(m.race_fundraiser_name),
+				url: str(m.fundraiser_url),
+				amount_raised: toNum(m.amount_raised),
+				goal: toNum(m.fundraising_goal),
+			}));
+		return json({ ok: true, team: buildRow(team), members });
+	}
+	const rows = teams.map(buildRow).sort((a, b) => (b.amount_raised ?? 0) - (a.amount_raised ?? 0));
+	return json({ ok: true, teams: rows, count: rows.length });
 }
 
 /**
@@ -1682,17 +1963,64 @@ interface ActivityRow {
 }
 
 /**
+ * NWANA Performance Levels — Nordic Walking speed events ONLY (1K/3K/5K/10K).
+ * Values are EXCLUSIVE upper bounds in seconds: time < bound => that level.
+ * Open = at/above the Competitive bound.
+ * Level is ALWAYS derived from the athlete's PB in the selected period —
+ * weekly PB for period=week, lifetime PB for period=all. Never stored/reused.
+ */
+const NW_PERF_LEVELS: Record<string, { elite: number; high_performance: number; performance: number; competitive: number }> = {
+	"1K":  { elite: 360,  high_performance: 390,  performance: 420,  competitive: 450  },
+	"3K":  { elite: 1200, high_performance: 1260, performance: 1320, competitive: 1380 },
+	"5K":  { elite: 1980, high_performance: 2100, performance: 2220, competitive: 2400 },
+	"10K": { elite: 3900, high_performance: 4200, performance: 4500, competitive: 4800 },
+};
+type NwPerfLevel = "elite" | "high_performance" | "performance" | "competitive" | "open";
+function nwPerfLevel(distanceLabel: string, timeS: number): NwPerfLevel | null {
+	const t = NW_PERF_LEVELS[distanceLabel];
+	if (!t) return null;
+	if (timeS < t.elite) return "elite";
+	if (timeS < t.high_performance) return "high_performance";
+	if (timeS < t.performance) return "performance";
+	if (timeS < t.competitive) return "competitive";
+	return "open";
+}
+function isNwSpeedEvent(e: { discipline: string; format: string; distance_label: string }): boolean {
+	return e.discipline === "Nordic Walking" && e.format === "speed" && !!NW_PERF_LEVELS[e.distance_label];
+}
+
+/**
  * GET /api/challenge/v1/leaderboard?week=YYYY-MM-DD&discipline=X&event_id=Y&type=mileage|speed
  * Weekly leaderboards from canonical D1. Week = Monday–Sunday.
  * - mileage: SUM(distance) per participant per week (per discipline's mileage event)
  * - speed: MIN(time) per participant per event per week
  * Open Challenge is excluded (participation + fundraising only, no sport ranking).
+ *
+ * Extended read-model (all optional, backward compatible):
+ * - period=week|all — week (default): date-filtered; all: cumulative, no date filter.
+ * - ranking_mode=overall|level — level filters NW speed boards to one Performance Level.
+ * - level=elite|high_performance|performance|competitive|open (with ranking_mode=level).
+ *   Each NW speed row carries level + level_place (rank within level); rank stays overall.
+ * - limit=N&offset=M — server-side pagination per board; response adds totals {boardKey: fullCount}.
+ * - search=query — case-insensitive name match; response adds search_results[].
+ * - rsu_user_id=N — response adds user_position {boardKey: row|null}.
  */
 async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 	const weekParam = url.searchParams.get("week");
 	const disciplineFilter = url.searchParams.get("discipline");
 	const eventIdFilter = url.searchParams.get("event_id");
 	const typeFilter = url.searchParams.get("type"); // mileage | speed | null (both)
+	const periodParam = url.searchParams.get("period");
+	const period = periodParam === "all" ? "all" : "week";
+	const rankingMode = url.searchParams.get("ranking_mode") === "level" ? "level" : "overall";
+	const levelFilter = url.searchParams.get("level"); // elite|high_performance|performance|competitive|open
+	const limitRaw = url.searchParams.get("limit");
+	const offsetRaw = url.searchParams.get("offset");
+	const limit = limitRaw ? Math.max(1, Math.min(500, parseInt(limitRaw, 10) || 0)) : 0; // 0 = no pagination
+	const offset = offsetRaw ? Math.max(0, parseInt(offsetRaw, 10) || 0) : 0;
+	const searchParam = (url.searchParams.get("search") || "").trim().toLowerCase();
+	const rsuIdParam = url.searchParams.get("rsu_user_id");
+	const rsuIdFilter = rsuIdParam ? parseInt(rsuIdParam, 10) : 0;
 
 	// Determine week range.
 	let weekStart: string;
@@ -1706,15 +2034,19 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 	}
 	const weekEnd = addDays(weekStart, 6);
 
-	// Fetch week's activities from D1.
+	// Fetch activities from D1. period=all => no date filter (cumulative).
 	let rows: ActivityRow[] = [];
 	try {
-		const result = await env.nwana_engine_db.prepare(
-			`SELECT rsu_user_id, user_name, sub_event_id, activity_date, distance_m, time_s, activity_type, team_id, team_name
-			FROM challenge_activities
-			WHERE activity_date >= ? AND activity_date <= ?
-			ORDER BY activity_date`
-		).bind(weekStart, weekEnd).all<ActivityRow>();
+		const sql = period === "all"
+			? `SELECT rsu_user_id, user_name, sub_event_id, activity_date, distance_m, time_s, activity_type, team_id, team_name
+				FROM challenge_activities
+				ORDER BY activity_date`
+			: `SELECT rsu_user_id, user_name, sub_event_id, activity_date, distance_m, time_s, activity_type, team_id, team_name
+				FROM challenge_activities
+				WHERE activity_date >= ? AND activity_date <= ?
+				ORDER BY activity_date`;
+		const stmt = env.nwana_engine_db.prepare(sql);
+		const result = period === "all" ? await stmt.all<ActivityRow>() : await stmt.bind(weekStart, weekEnd).all<ActivityRow>();
 		rows = result.results || [];
 	} catch (e) {
 		return json({ ok: false, error: "d1 query failed" }, 500);
@@ -1722,7 +2054,10 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 
 	// Build lookup: event_id → def.
 	const mileageBoards: Record<string, Array<{ rank: number; rsu_user_id: number; name: string | null; total_km: number; activities: number }>> = {};
-	const speedBoards: Record<string, Array<{ rank: number; rsu_user_id: number; name: string | null; best_time_s: number; best_time: string }>> = {};
+	const speedBoards: Record<string, Array<{ rank: number; rsu_user_id: number; name: string | null; best_time_s: number; best_time: string; level?: NwPerfLevel | null; level_place?: number | null }>> = {};
+	const boardTotals: Record<string, number> = {};
+	// Full (unpaginated) rankings, used for user_position lookup.
+	const fullBoards: Record<string, Array<{ rank: number; rsu_user_id: number } & Record<string, unknown>>> = {};
 
 	// Group mileage: by discipline (each discipline has one mileage event).
 	const mileageEvents = CHALLENGE_EVENTS.filter((e) => e.format === "mileage");
@@ -1748,7 +2083,9 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 			}))
 			.sort((a, b) => b.total_km - a.total_km)
 			.map((r, i) => ({ rank: i + 1, ...r }));
-		mileageBoards[mev.discipline] = ranked;
+		boardTotals[mev.discipline] = ranked.length;
+		fullBoards["mileage:" + mev.discipline] = ranked as Array<{ rank: number; rsu_user_id: number } & Record<string, unknown>>;
+		mileageBoards[mev.discipline] = limit > 0 ? ranked.slice(offset, offset + limit) : ranked;
 	}
 
 	// Group speed: by event (MIN time per participant per event).
@@ -1774,7 +2111,32 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 			}))
 			.sort((a, b) => a.best_time_s - b.best_time_s)
 			.map((r, i) => ({ rank: i + 1, ...r }));
-		speedBoards[String(sev.event_id)] = ranked;
+		// Performance Levels (Nordic Walking speed only). Level is derived from
+		// the athlete's PB in THIS period — weekly PB for period=week, lifetime
+		// PB for period=all. rank stays the overall place; level_place is the
+		// rank within the athlete's level.
+		let finalRows: typeof ranked = ranked;
+		if (isNwSpeedEvent(sev)) {
+			for (const r of ranked) {
+				(r as { level?: NwPerfLevel | null }).level = nwPerfLevel(sev.distance_label, r.best_time_s);
+			}
+			const byLevel = new Map<NwPerfLevel, typeof ranked>();
+			for (const r of ranked) {
+				const lv = (r as { level?: NwPerfLevel | null }).level as NwPerfLevel;
+				if (!byLevel.has(lv)) byLevel.set(lv, []);
+				byLevel.get(lv)!.push(r);
+			}
+			for (const arr of byLevel.values()) {
+				arr.forEach((r, i) => { (r as { level_place?: number }).level_place = i + 1; });
+			}
+			if (rankingMode === "level" && levelFilter) {
+				finalRows = ranked.filter((r) => (r as { level?: NwPerfLevel | null }).level === levelFilter);
+			}
+		}
+		const boardKey = String(sev.event_id);
+		boardTotals[boardKey] = finalRows.length;
+		fullBoards["speed:" + boardKey] = finalRows as Array<{ rank: number; rsu_user_id: number } & Record<string, unknown>>;
+		speedBoards[boardKey] = limit > 0 ? finalRows.slice(offset, offset + limit) : finalRows;
 	}
 
 	// Team/relay boards — UNVERIFIED until a real 4-person team exists in production.
@@ -1863,12 +2225,53 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 		teamBoards["1222858"] = { unverified: true, ranked };
 	}
 
+	// Athlete search (case-insensitive name match across all built boards).
+	// Returns matches with their ranks — a USER search function only, never identity.
+	let searchResults: Array<Record<string, unknown>> | undefined;
+	if (searchParam) {
+		searchResults = [];
+		for (const [key, board] of Object.entries(mileageBoards)) {
+			for (const r of board) {
+				if ((r.name || "").toLowerCase().includes(searchParam)) {
+					searchResults.push({ board: "mileage", board_key: key, ...r });
+				}
+			}
+		}
+		for (const [key, board] of Object.entries(speedBoards)) {
+			for (const r of board) {
+				if ((r.name || "").toLowerCase().includes(searchParam)) {
+					searchResults.push({ board: "speed", board_key: key, ...r });
+				}
+			}
+		}
+		searchResults.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+		searchResults = searchResults.slice(0, 50);
+	}
+
+	// Current-user position lookup by rsu_user_id (the SOLE identity mechanism;
+	// /api/me supplies the ID frontend-side). Computed on the FULL ranking,
+	// independent of pagination offset.
+	let userPosition: Record<string, Record<string, unknown> | null> | undefined;
+	if (rsuIdFilter) {
+		userPosition = {};
+		for (const [key, board] of Object.entries(fullBoards)) {
+			const found = board.find((r) => r.rsu_user_id === rsuIdFilter) || null;
+			userPosition[key] = found as Record<string, unknown> | null;
+		}
+	}
+
 	return json({
 		ok: true,
-		week_start: weekStart,
-		week_end: weekEnd,
+		period,
+		week_start: period === "all" ? null : weekStart,
+		week_end: period === "all" ? null : weekEnd,
+		ranking_mode: rankingMode,
+		level: levelFilter || null,
 		mileage: mileageBoards,
 		speed: speedBoards,
 		teams: teamBoards,
+		...(limit > 0 ? { totals: boardTotals, limit, offset } : {}),
+		...(searchResults ? { search_results: searchResults } : {}),
+		...(userPosition ? { user_position: userPosition } : {}),
 	});
 }

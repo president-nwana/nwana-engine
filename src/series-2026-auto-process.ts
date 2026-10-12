@@ -10,27 +10,37 @@
 //   3. derives the per-athlete pipeline view (Registered -> Submitted ->
 //      Approved -> Processed -> Published).
 //
-// Human boundary (hard): this module NEVER creates an approval. Approvals
-// come only from series_result_approvals, written by the owner's explicit
-// action (OC button or recorded owner statement). Any real blocker becomes
-// an exception for the owner, never a silent skip.
+// Human boundary (hard): this module NEVER invents an approval. Approvals
+// come only from two owner-controlled sources:
+//   ENGINE   — series_result_approvals, written by the owner's explicit
+//              action (OC button or recorded owner statement);
+//   RUNSIGNUP — the owner's approval inside the RunSignup dashboard
+//              (RaceDay Tools -> Virtual/Challenge Results -> Approve
+//              Results). RunSignup exposes no approval-status field on any
+//              read API; but with "Require race director approval" enabled,
+//              unapproved results are excluded from public results, so
+//              presence in get-results IS the approval (presence signal).
+// The presence signal is persisted to D1 the moment it is observed: from
+// that point the approval is a durable fact and the Machine works from D1
+// only. Persisting an observed RunSignup approval is recording — not
+// inventing — and a later RunSignup 5xx/522 never revokes it.
+// Any real blocker becomes an exception for the owner, never a silent skip.
 
 import {
 	allResultsApproved,
 	getEventApprovals,
+	recordRunsignupApproval,
 } from "./series-2026-approvals";
 import { getEventDisqualifications } from "./series-2026-decisions";
 import {
-	applySeries2026Levels,
-	AUTO_APPROVED_CONFIRMATION,
-} from "./series-2026-apply";
-import {
 	RACE_LIFECYCLE_SERIES,
-	syncRaceLifecycleDistance,
-	testSeries2026WriteAccess,
+	flattenEventResults,
+	normalizeRunSignupDate,
+	type LifecycleResultRow,
 } from "./race-lifecycle";
 import { syncSeries2026Registrations } from "./series-2026-registrations";
-import { previewSeries2026ResultPublications } from "./series-2026-results";
+import { detectLegacyScoring, previewSeries2026ResultPublications } from "./series-2026-results";
+import { getSeries2026ResultCard } from "./series-2026-result-card";
 import { executeResultPublication } from "./result-publication-core";
 import { refreshAllAthleteStats } from "./athletes";
 
@@ -64,6 +74,18 @@ interface UnknownRecord {
 
 function text(value: unknown): string | null {
 	return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+/**
+ * RunSignup returns result_id as a JSON number in get-results; the Engine
+ * uses string ids everywhere (D1, approvals, comparisons). Normalize at
+ * ingestion so live ids match D1 approval ids. Without this, every live
+ * row is silently dropped and the presence signal can never fire.
+ */
+function resultIdText(value: unknown): string | null {
+	const s = text(value);
+	if (s) return s;
+	return typeof value === "number" && Number.isInteger(value) ? String(value) : null;
 }
 
 async function runSignupGet(
@@ -152,7 +174,7 @@ export async function fetchLiveEventResults(
 			? (resultSets[0]?.results as UnknownRecord[])
 			: [];
 		for (const row of rows) {
-			const resultId = text(row.result_id);
+			const resultId = resultIdText(row.result_id);
 			if (!resultId) continue;
 			out.push({
 				result_id: resultId,
@@ -165,6 +187,49 @@ export async function fetchLiveEventResults(
 		}
 	}
 	return out;
+}
+
+/**
+ * Where an approval came from. ENGINE = explicit owner approval recorded
+ * in D1 series_result_approvals (OC button / recorded owner statement).
+ * RUNSIGNUP = the owner's approval inside the RunSignup dashboard, seen
+ * via the presence signal (see fetchResultsRequireApproval).
+ */
+export type ApprovalSource = "RUNSIGNUP" | "ENGINE";
+
+/**
+ * Read the race's "Require race director approval" virtual-results setting
+ * (vr-settings.json, same endpoint family fetchSubmissionDeadline uses).
+ *
+ * Returns true/false, or null when the API is unreachable or the field is
+ * absent — fail closed: callers must then rely on Engine D1 approvals only.
+ *
+ * Why this matters: RunSignup exposes the approval status of a virtual
+ * result on NO read API (result_approval_ts exists only in a POST response
+ * example). But with this setting enabled, unapproved results are excluded
+ * from public results — so a result returned by get-results is
+ * owner-approved by definition (presence signal).
+ */
+export async function fetchResultsRequireApproval(
+	accessToken: string,
+	raceId: number,
+	eventId: number,
+): Promise<boolean | null> {
+	const url = new URL("https://api.runsignup.com/rest/v2/vr-settings.json");
+	url.searchParams.set("format", "json");
+	url.searchParams.set("race_id", String(raceId));
+	url.searchParams.set("event_id", String(eventId));
+	try {
+		const data = await runSignupGet(url, accessToken);
+		const settings = data.virtual_result_settings as UnknownRecord | undefined;
+		const raw = settings?.results_require_approval;
+		if (raw === "T" || raw === "1" || raw === 1 || raw === true) return true;
+		if (raw === "F" || raw === "0" || raw === 0 || raw === false) return false;
+		return null;
+	} catch {
+		// 522 flakiness etc. — fail closed to D1 approvals only.
+		return null;
+	}
 }
 
 /**
@@ -384,6 +449,8 @@ export interface TriggerEvaluation {
 	registrations: EventRegistration[];
 	results: LiveEventResult[];
 	approvedResultIds: string[];
+	/** Per-result approval source: RUNSIGNUP (presence signal) or ENGINE (D1). */
+	approvalSources: Record<string, ApprovalSource>;
 	disqualifiedResultIds: string[];
 	missingSubmissions: string[];
 	unapprovedResults: LiveEventResult[];
@@ -418,6 +485,37 @@ export async function evaluateEventTrigger(
 			liveResults = [];
 		}
 	}
+	// RUNSIGNUP presence signal: when the race requires director approval,
+	// every result returned by get-results is owner-approved by definition
+	// (RunSignup excludes unapproved results from public results).
+	//
+	// Durable-fact architecture: the observed approval is persisted to D1
+	// immediately (idempotent; never downgrades an existing ENGINE/owner
+	// row). From this point the Machine works from the stored fact —
+	// RunSignup is never re-queried merely to reconfirm this approval, and
+	// a later 5xx/522 cannot revoke it or block processing.
+	const runsignupApprovedIds = new Set<string>();
+	if (approvals.size === 0 && liveResults.length > 0) {
+		const requireApproval = await fetchResultsRequireApproval(
+			env.accessToken,
+			input.raceId,
+			input.eventId,
+		);
+		if (requireApproval === true) {
+			for (const r of liveResults) {
+				runsignupApprovedIds.add(r.result_id);
+				await recordRunsignupApproval(db, {
+					distance: input.distance,
+					raceId: input.raceId,
+					eventId: input.eventId,
+					resultId: r.result_id,
+					athlete: r.athlete,
+					time: r.time,
+				});
+			}
+		}
+		// requireApproval false/null -> old behavior: D1 approvals only.
+	}
 	// If the authenticated RunSignup API returns no results but the
 	// owner has recorded approvals in D1 (verified against the public API at
 	// approval time), use the D1 approvals as the results list. The owner's
@@ -432,8 +530,13 @@ export async function evaluateEventTrigger(
 			time: a.time ?? null,
 		}));
 	const approvedResultIds = results
-		.filter((r) => approvals.has(r.result_id))
+		.filter((r) => approvals.has(r.result_id) || runsignupApprovedIds.has(r.result_id))
 		.map((r) => r.result_id);
+	const approvalSources: Record<string, ApprovalSource> = {};
+	for (const r of results) {
+		if (approvals.has(r.result_id)) approvalSources[r.result_id] = "ENGINE";
+		else if (runsignupApprovedIds.has(r.result_id)) approvalSources[r.result_id] = "RUNSIGNUP";
+	}
 	const disqualifications = await getEventDisqualifications(db, input.distance, input.eventId);
 	const disqualifiedResultIds = results
 		.filter((r) => disqualifications.has(r.result_id))
@@ -460,6 +563,7 @@ export async function evaluateEventTrigger(
 		registrations,
 		results,
 		approvedResultIds,
+		approvalSources,
 		disqualifiedResultIds,
 		deadline,
 		deadlineSource: source,
@@ -508,6 +612,121 @@ async function logAutoStep(
 }
 
 /**
+ * D1-only: mark the event stage "levels_computed" in
+ * race_lifecycle.events_json. Shared by the standard path and the legacy
+ * completion path.
+ */
+async function markEventLevelsComputed(
+	db: D1Database,
+	distance: string,
+	eventId: number,
+): Promise<boolean> {
+	const lifecycleRow = await db
+		.prepare(`SELECT events_json FROM race_lifecycle WHERE series = ? AND distance = ?`)
+		.bind(RACE_LIFECYCLE_SERIES, distance)
+		.first<{ events_json: string | null }>();
+	if (!lifecycleRow?.events_json) return false;
+	const events = JSON.parse(lifecycleRow.events_json) as Array<{ event_id: number; stage: string }>;
+	let updated = false;
+	for (const e of events) {
+		if (e.event_id === eventId && e.stage === "verifying") {
+			e.stage = "levels_computed";
+			updated = true;
+		}
+	}
+	if (updated) {
+		await db
+			.prepare(`UPDATE race_lifecycle SET events_json = ?, updated_at = ? WHERE series = ? AND distance = ?`)
+			.bind(JSON.stringify(events), new Date().toISOString(), RACE_LIFECYCLE_SERIES, distance)
+			.run();
+	}
+	return updated;
+}
+
+/**
+ * TEMPORARY — Series 2026 completion only; Series 2027 will use incremental
+ * cloud processing.
+ *
+ * Legacy-mode canonical snapshot: the NWANA-FINAL.ps1 laptop script already
+ * wrote Performance Level + Level Place to RunSignup; persist the per-event
+ * rows as the canonical D1 snapshot (finalized=1) and mark the event
+ * levels_computed. Read-only toward RunSignup except one lightweight race
+ * metadata fetch for the event name/date.
+ */
+async function upsertLegacyEventSnapshot(
+	db: D1Database,
+	accessToken: string,
+	input: { distance: string; raceId: number; eventId: number },
+	rows: LifecycleResultRow[],
+	/** Real RunSignup results URL (from the per-event preview drafts);
+	 * falls back to the existing row value, then null. */
+	resultsUrl: string | null,
+): Promise<void> {
+	let eventName: string | null = null;
+	let eventDate: string | null = null;
+	const raceUrl = new URL(`https://api.runsignup.com/rest/race/${input.raceId}`);
+	raceUrl.searchParams.set("format", "json");
+	raceUrl.searchParams.set("events", "T");
+	const raceData = await runSignupGet(raceUrl, accessToken);
+	const race = raceData.race as Record<string, unknown> | undefined;
+	const events = race && Array.isArray(race.events) ? race.events : [];
+	for (const rawEvent of events) {
+		const event = rawEvent as Record<string, unknown>;
+		if (Number(event.event_id) !== input.eventId) continue;
+		eventName = typeof event.name === "string" ? event.name : null;
+		const startTime = [event.start_time, event.event_start_time].find(
+			(value): value is string => typeof value === "string" && value.length >= 4,
+		);
+		eventDate = normalizeRunSignupDate(startTime ?? null);
+		break;
+	}
+	// Prefer the real RunSignup results URL from the preview drafts; keep
+	// an existing row value (e.g. from an earlier sync) as fallback.
+	const existing = await db
+		.prepare(`SELECT results_url FROM race_event_results WHERE series = ? AND distance = ? AND event_id = ?`)
+		.bind(RACE_LIFECYCLE_SERIES, input.distance, input.eventId)
+		.first<{ results_url: string | null }>();
+	const finalResultsUrl = resultsUrl ?? existing?.results_url ?? null;
+	// Same 13-column shape as the lifecycle sync upsert. publication_status
+	// is intentionally NOT overwritten on conflict (a re-run must not reset
+	// PUBLISHED back to PENDING).
+	await db
+		.prepare(
+			`INSERT INTO race_event_results (
+				series, distance, race_id, event_id, event_name, event_date,
+				result_count, finalized, results_json, results_url,
+				publication_status, registration_url, synced_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(series, distance, event_id) DO UPDATE SET
+				event_name = excluded.event_name,
+				event_date = excluded.event_date,
+				result_count = excluded.result_count,
+				finalized = excluded.finalized,
+				results_json = excluded.results_json,
+				results_url = excluded.results_url,
+				registration_url = excluded.registration_url,
+				synced_at = excluded.synced_at`,
+		)
+		.bind(
+			RACE_LIFECYCLE_SERIES,
+			input.distance,
+			input.raceId,
+			input.eventId,
+			eventName,
+			eventDate,
+			rows.length,
+			1,
+			JSON.stringify(rows),
+			finalResultsUrl,
+			"PENDING",
+			null,
+			new Date().toISOString(),
+		)
+		.run();
+	await markEventLevelsComputed(db, input.distance, input.eventId);
+}
+
+/**
  * Run the full standard downstream lifecycle for one event after the
  * trigger fired. Every step is audit-logged; any failure stops the chain
  * and is reported as an owner exception.
@@ -533,105 +752,96 @@ export async function autoProcessEvent(
 		return { ok: false, distance: input.distance, eventId: input.eventId, trigger: input.trigger.reason, steps, error: detail };
 	};
 
-	// Pre-flight: RunSignup write access (automatic probe, was an owner action).
-	const lifecycleRow = await db
-		.prepare(`SELECT write_access FROM race_lifecycle WHERE series = ? AND distance = ?`)
-		.bind(RACE_LIFECYCLE_SERIES, input.distance)
-		.first<{ write_access: string | null }>();
-	if (lifecycleRow?.write_access !== "CONFIRMED") {
-		const probe = await testSeries2026WriteAccess({
-			db,
-			accessToken: env.accessToken,
-			distance: input.distance,
-		});
-		if (probe.write_access !== "CONFIRMED") {
-			return fail("write_access_probe", `RunSignup write access is ${probe.write_access}: ${probe.detail}`);
-		}
-		await push("write_access_probe", "ok", probe.detail);
-	} else {
-		await push("write_access_probe", "skipped", "Write access already CONFIRMED.");
-	}
+	// Step 0: trigger authorization audit. Records WHY this run may proceed:
+	// the trigger reason plus the approval source of every authorizing
+	// result (RUNSIGNUP = presence in get-results with
+	// results_require_approval=T; ENGINE = explicit owner approval in D1
+	// series_result_approvals). This is the audit trail for the approval
+	// decision — no approval rows are invented here.
+	const approvalSourceDetail = Object.entries(input.trigger.approvalSources ?? {})
+		.map(([resultId, source]) => `${resultId}:${source}`)
+		.join(", ");
+	await push(
+		"trigger",
+		"ok",
+		`reason=${input.trigger.reason}; approvals={${approvalSourceDetail || "none"}}; ${input.trigger.detail}`,
+	);
 
-	// Step 1: fresh results snapshot.
+	// TEMPORARY — Series 2026 completion only; Series 2027 will use
+	// incremental cloud processing.
+	//
+	// Legacy completion mode detection: for the rest of Series 2026 the
+	// NWANA-FINAL.ps1 laptop script is the scoring/writeback engine
+	// (Performance Level, Level Place, points written back to RunSignup as
+	// custom fields). A cheap per-event fetch (~3-5 RunSignup calls)
+	// detects whether this event was already scored there, with an
+	// explicit two-part verification (see detectLegacyScoring). There is
+	// NO heavy Worker fallback: if the check fails, the run stops with
+	// WAITING_FOR_LEGACY_SCORING and the next cron re-checks.
+	let legacyPreview: Awaited<ReturnType<typeof previewSeries2026ResultPublications>>;
 	try {
-		await syncRaceLifecycleDistance({
-			db,
-			accessToken: env.accessToken,
-			apiCallerToken: env.apiCallerToken,
-			apiCallerSecret: env.apiCallerSecret,
-			distance: input.distance,
+		legacyPreview = await previewSeries2026ResultPublications(env.accessToken, {
+			raceId: input.raceId,
+			eventId: input.eventId,
 		});
-		await push("sync_results", "ok", "Lifecycle sync completed.");
 	} catch (error) {
-		return fail("sync_results", error instanceof Error ? error.message : "Sync failed");
+		// Fail fast: a failed detection (e.g. RunSignup 522) must NOT fall
+		// through to any scoring path on a guess.
+		return fail("detect_scoring", `Legacy scoring detection failed: ${error instanceof Error ? error.message : "unknown"}; refusing to guess.`);
 	}
+	const legacyRows = flattenEventResults(legacyPreview.drafts);
+	const detection = detectLegacyScoring(legacyRows, input.trigger.disqualifiedResultIds);
+	if (!detection.fieldsComplete) {
+		const waiting = `WAITING_FOR_LEGACY_SCORING: ${detection.detail}`;
+		await push("legacy_scoring", "skipped", waiting);
+		return { ok: false, distance: input.distance, eventId: input.eventId, trigger: input.trigger.reason, steps, error: waiting };
+	}
+	await push("detect_scoring", "ok", `Legacy completion mode: ${detection.detail}`);
 
-	// Step 2: levels / level places / points / standings (full-distance rebuild).
-	// Disqualified results need no approval; they are excluded from the
-	// approval check and from scoring (0 points).
+	// No RunSignup writes in legacy mode — the laptop script owns scoring.
+	await push("write_access_probe", "skipped", "Legacy mode: zero RunSignup writes.");
+
+	// Approval re-verification: approvals must not have changed mid-run.
+	// Cheap D1 read; publishing without a complete approval set would be
+	// wrong. Disqualified results need no approval; they are excluded from
+	// the approval check and from scoring (0 points).
 	const decidableResultIds = input.trigger.results
 		.map((r) => r.result_id)
 		.filter((id) => !input.trigger.disqualifiedResultIds.includes(id));
+	// The trigger may be authorized by the RUNSIGNUP presence signal (no D1
+	// rows). Pass those ids so the re-verification accepts them; ENGINE
+	// approvals are still re-read from D1 inside allResultsApproved, so a
+	// mid-run revocation there still blocks the run.
+	const runsignupApprovedNow = new Set(
+		Object.entries(input.trigger.approvalSources ?? {})
+			.filter(([, source]) => source === "RUNSIGNUP")
+			.map(([resultId]) => resultId),
+	);
 	const approvedNow = await allResultsApproved(
 		db,
 		input.distance,
 		input.eventId,
 		decidableResultIds,
+		runsignupApprovedNow,
 	);
 	if (!approvedNow) {
-		return fail("verify_approvals", "Approvals changed mid-run; refusing to apply without a complete approval set.");
-	}
-	const applyResult = await applySeries2026Levels({
-		db,
-		accessToken: env.accessToken,
-		distance: input.distance,
-		eventId: input.eventId,
-		confirmation: AUTO_APPROVED_CONFIRMATION,
-		disqualifiedResultIds: input.trigger.disqualifiedResultIds,
-	});
-	if (!applyResult.ok) {
-		// Idempotent retry: if levels were already applied (event in
-		// "levels_computed" stage), skip the apply and continue to publish.
-		// The D1 data is already correct; no need to re-apply.
-		const alreadyApplied = (applyResult.error ?? "").includes('stage "levels_computed"');
-		if (alreadyApplied) {
-			await push("apply_levels", "ok", "Levels already applied (idempotent skip); continuing to publish.");
-		} else {
-			return fail("apply_levels", applyResult.error ?? "Levels apply failed");
-		}
-	} else {
-		await push("apply_levels", "ok", `Applied to ${applyResult.result_count} results; standings rebuilt.`);
+		return fail("verify_approvals", "Approvals changed mid-run; refusing to publish without a complete approval set.");
 	}
 
-	// Step 3: mark the event as levels_computed in the lifecycle state.
-	// A full syncRaceLifecycleDistance would exceed Cloudflare's subrequest
-	// limit (it previews publications for every event via the RunSignup API).
-	// We already synced in Step 1; the only change is that this event's
-	// results are now finalized with levels applied. Update D1 directly.
+	// Canonical D1 snapshot from the already-scored RunSignup rows +
+	// lifecycle stage, D1-only.
 	try {
-		const lifecycleRow = await db
-			.prepare(`SELECT events_json FROM race_lifecycle WHERE series = ? AND distance = ?`)
-			.bind(RACE_LIFECYCLE_SERIES, input.distance)
-			.first<{ events_json: string | null }>();
-		if (lifecycleRow?.events_json) {
-			const events = JSON.parse(lifecycleRow.events_json) as Array<{ event_id: number; stage: string }>;
-			let updated = false;
-			for (const e of events) {
-				if (e.event_id === input.eventId && e.stage === "verifying") {
-					e.stage = "levels_computed";
-					updated = true;
-				}
-			}
-			if (updated) {
-				await db
-					.prepare(`UPDATE race_lifecycle SET events_json = ?, updated_at = ? WHERE series = ? AND distance = ?`)
-					.bind(JSON.stringify(events), new Date().toISOString(), RACE_LIFECYCLE_SERIES, input.distance)
-					.run();
-			}
-		}
-		await push("sync_finalized", "ok", "Event marked levels_computed in lifecycle (D1-only, no API calls).");
+		const legacyResultsUrl = legacyPreview.drafts
+			.map((d) => d.editorial_draft.link_url)
+			.find((u): u is string => typeof u === "string" && u.length > 0) ?? null;
+		await upsertLegacyEventSnapshot(db, env.accessToken, {
+			distance: input.distance,
+			raceId: input.raceId,
+			eventId: input.eventId,
+		}, legacyRows, legacyResultsUrl);
+		await push("sync_finalized", "ok", `Legacy mode: canonical snapshot upserted with ${legacyRows.length} finalized row(s); event marked levels_computed.`);
 	} catch (error) {
-		return fail("sync_finalized", error instanceof Error ? error.message : "Lifecycle update failed");
+		return fail("sync_finalized", error instanceof Error ? error.message : "Legacy snapshot upsert failed");
 	}
 
 	// Step 3b: refresh canonical athlete stats (dynamic victories / podiums /
@@ -659,14 +869,36 @@ export async function autoProcessEvent(
 	// Validate image is actually available before publication.
 	// If the card cannot be generated, fail fast with IMAGE_GENERATION_FAILED
 	// instead of publishing a text-only post and marking it PUBLISHED.
+	// Preflight calls getSeries2026ResultCard DIRECTLY — never fetch() our
+	// own public URL. A Worker cannot reliably self-fetch (Cloudflare
+	// edge/bot protection answers 404 to self-fetch), and the card route
+	// only serves GET, so the old HEAD probe guaranteed
+	// IMAGE_GENERATION_FAILED. Same direct preflight as the manual publish
+	// path: verify the actual generated PNG bytes and content-type.
 	const cardUrl = `${env.publicBaseUrl}/result-publications/card/${encodeURIComponent(draft.publication_key)}.png`;
 	try {
-		const cardCheck = await fetch(cardUrl, { method: "HEAD" });
-		if (!cardCheck.ok) {
-			return fail("publish", `IMAGE_GENERATION_FAILED: card returned HTTP ${cardCheck.status} for ${draft.publication_key}`);
+		const cardResponse = await getSeries2026ResultCard(draft.publication_key, "jpeg", {
+			nwana_engine_db: env.db,
+			RUNSIGNUP_ACCESS_TOKEN: env.accessToken,
+			RUNSIGNUP_API_REG: env.apiCallerToken,
+			RUNSIGNUP_API_REG_SECRET: env.apiCallerSecret,
+		});
+		if (!cardResponse.ok) {
+			return fail("publish", `IMAGE_GENERATION_FAILED: card generation failed (HTTP ${cardResponse.status}) for ${draft.publication_key}`);
 		}
+		const contentType = cardResponse.headers.get("content-type") ?? "";
+		if (!contentType.includes("image/png")) {
+			return fail("publish", `IMAGE_GENERATION_FAILED: card has wrong content-type "${contentType}" for ${draft.publication_key}`);
+		}
+		const cardBytes = new Uint8Array(await cardResponse.arrayBuffer());
+		const isPng = cardBytes.length > 8 &&
+			cardBytes[0] === 0x89 && cardBytes[1] === 0x50 && cardBytes[2] === 0x4E && cardBytes[3] === 0x47;
+		if (!isPng) {
+			return fail("publish", `IMAGE_GENERATION_FAILED: card bytes are not valid PNG for ${draft.publication_key}`);
+		}
+		await push("card_preflight", "ok", `Card generated directly (${cardBytes.length} PNG bytes) for ${draft.publication_key}.`);
 	} catch (error) {
-		return fail("publish", `IMAGE_GENERATION_FAILED: card unreachable: ${error instanceof Error ? error.message : "unknown"}`);
+		return fail("publish", `IMAGE_GENERATION_FAILED: card generation threw: ${error instanceof Error ? error.message : "unknown"}`);
 	}
 	try {
 		const published = await executeResultPublication({
@@ -730,6 +962,10 @@ export async function getAthletePipeline(
 	const registrations = await getEventRegistrations(env, input.raceId, input.eventId);
 	const approvals = await getEventApprovals(db, input.distance, input.eventId);
 	const live = liveResults ?? await fetchLiveEventResults(env.accessToken, input.raceId, input.eventId);
+	// RUNSIGNUP presence signal: same semantics as the trigger — when the
+	// race requires director approval, live results are owner-approved.
+	const requireApproval = await fetchResultsRequireApproval(env.accessToken, input.raceId, input.eventId);
+	const runsignupApproved = requireApproval === true;
 
 	const snapshot = await db
 		.prepare(`SELECT results_json FROM race_event_results WHERE series = ? AND distance = ? AND event_id = ?`)
@@ -771,7 +1007,7 @@ export async function getAthletePipeline(
 		const row = ensure(liveRow.athlete);
 		row.submitted = true;
 		if (!row.result) row.result = liveRow.time;
-		if (approvals.has(liveRow.result_id)) row.approved = true;
+		if (approvals.has(liveRow.result_id) || runsignupApproved) row.approved = true;
 		const snap = byResultId.get(liveRow.result_id);
 		if (snap) {
 			row.result = snap.time ?? row.result;

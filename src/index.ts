@@ -60,7 +60,8 @@ import {
 	liveAudienceAdapters,
 	type AudienceExportEnv,
 } from "./audience-export";
-import { buildResultCardSvg, isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
+import { isResultCardDesignReady, RESULT_CARD_DESIGN_BLOCKER } from "./result-card";
+import { getSeries2026ResultCard } from "./series-2026-result-card";
 import { rasterizeSvgToPng } from "./svg-raster";
 import { executeResultPublication } from "./result-publication-core";
 import {
@@ -88,6 +89,7 @@ import {
         type Ga4DatePreset,
 } from "./google-analytics";
 import { buildDesiredState } from "./google-ads-current";
+import { storeInventorySnapshot, getLatestInventorySnapshot } from "./google-ads-inventory";
 import {
 	advanceFundProspect,
 	getFundView,
@@ -284,6 +286,7 @@ import {
 	getBoardCadence,
 } from "./board-protocol";
 import { handleChallengeApi } from "./challenge";
+import { handleNewsList, handleNewsItem } from "./news";
 
 interface Env {
         nwana_engine_db: D1Database;
@@ -5465,7 +5468,7 @@ async function getSeries2026ResultPublicationPreview(
 	distance?: string,
 ): Promise<Response> {
 	const preview = await previewSeries2026ResultPublications(
-		env.RUNSIGNUP_ACCESS_TOKEN,
+		await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 		{ distance },
 	);
 	const history = await env.nwana_engine_db
@@ -5501,101 +5504,13 @@ async function getSeries2026ResultPublicationPreview(
 }
 
 
-async function getSeries2026ResultCard(
-	publicationKey: string,
-	format: "svg" | "jpeg",
-	env: Env,
-): Promise<Response> {
-	if (!isResultCardDesignReady()) {
-		return json({
-			ok: false,
-			status: "VISUAL_DESIGN_NOT_APPROVED",
-			execution_allowed: false,
-			error: RESULT_CARD_DESIGN_BLOCKER,
-		}, 409);
-	}
-	const raceId = Number(publicationKey.split(":")[2]);
-	if (!Number.isInteger(raceId)) {
-		return json({ ok: false, error: "Invalid result publication key" }, 400);
-	}
-	// Architectural rule: use D1 canonical snapshot first (no RunSignup
-	// needed for finalized events). Fall back to live RunSignup only if
-	// D1 has no finalized snapshot.
-	let draft = await buildPublicationDraftFromD1(env.nwana_engine_db, publicationKey);
-	if (!draft) {
-		const preview = await previewSeries2026ResultPublications(
-			env.RUNSIGNUP_ACCESS_TOKEN,
-			{ raceId },
-		);
-		draft = preview.drafts.find(
-			(value) => value.publication_key === publicationKey,
-		) ?? null;
-	}
-	if (!draft) {
-		return json({ ok: false, error: "Result publication draft not found" }, 404);
-	}
-	if (!draft.ready_for_editorial_review) {
-		return json({ ok: false, error: "Results are not finalized" }, 409);
-	}
-	const winners = draft.content.results
-		.filter((row) => row.level_place === "1")
-		.map((row) => ({
-			athlete: row.athlete,
-			gender: row.gender === "M"
-				? "Men"
-				: row.gender === "F"
-					? "Women"
-					: row.gender ?? "Division",
-			time: row.time,
-			performance_level: row.performance_level,
-			series_record: (row as { series_record?: boolean }).series_record ?? false,
-		}));
-	let logoUrl: string | undefined;
-	// Embed logo as data URL for reliable WASM rendering.
-	{
-		const logoResponse = await fetch(
-			"https://d368g9lw5ileu7.cloudfront.net/uploads/generic/genericImage-websiteLogo-281959-1788823407.1047-0.bQN0DV.jpg",
-		);
-		if (!logoResponse.ok) {
-			throw new Error("Official NWANA logo could not be loaded");
-		}
-		const logoBytes = new Uint8Array(await logoResponse.arrayBuffer());
-		logoUrl = `data:image/jpeg;base64,${bytesToBase64(logoBytes)}`;
-	}
-	const svg = buildResultCardSvg({
-		publicationKey: draft.publication_key,
-		title: draft.editorial_draft.title,
-		distance: draft.source.distance,
-		winners,
-		logoUrl,
-	});
-	if (format === "svg") {
-		return new Response(svg, {
-			headers: {
-				"content-type": "image/svg+xml; charset=utf-8",
-				"cache-control": "public, max-age=3600",
-			},
-		});
-	}
-	// Root cause of 9412: Cloudflare Images cannot parse SVG input.
-	// resvg-wasm rasterizes in-process ($0, Worker-compatible).
-	// PNG is accepted by Meta; no JPEG conversion needed.
-	const pngBytes = await rasterizeSvgToPng(svg, { width: 1080 });
-	return new Response(pngBytes, {
-		headers: {
-			"content-type": "image/png",
-			"Cache-Control":
-				"public, max-age=3600, stale-while-revalidate=86400",
-		},
-	});
-}
 
 async function establishSeries2026ResultPublicationBaseline(
 	env: Env,
 	distance?: string,
 ): Promise<Response> {
 	const preview = await previewSeries2026ResultPublications(
-		env.RUNSIGNUP_ACCESS_TOKEN,
+		await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 		{ distance, apiCallerToken: env.RUNSIGNUP_API_REG, apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET },
 	);
 	const readyDrafts = preview.drafts.filter(
@@ -5739,9 +5654,6 @@ async function publishSeries2026Result(
 	if (!env.NWANA_META_TOKEN) {
 		return json({ ok: false, error: "NWANA_META_TOKEN is not configured" }, 503);
 	}
-	if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-		return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-	}
 
 	const raceId = Number(body.publication_key.split(":")[2]);
 	if (!Number.isInteger(raceId)) {
@@ -5813,7 +5725,7 @@ async function publishSeries2026Result(
 	try {
 		const published = await executeResultPublication({
 			db: env.nwana_engine_db,
-			runSignupToken: env.RUNSIGNUP_ACCESS_TOKEN,
+			runSignupToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
 			metaToken: env.NWANA_META_TOKEN,
 			publicationKey: body.publication_key,
 			imageUrl: imageUrl.toString(),
@@ -6091,6 +6003,16 @@ export default {
 					"cache-control": "public, max-age=86400",
 				},
 			});
+		}
+		// Canonical news API (public, read-only). ONE store (news_articles) feeds
+		// both nwaofna.org and challenges.nwaofna.org; the audience flag decides
+		// where each article renders. See src/news.ts.
+		if (request.method === "GET" && url.pathname === "/api/news") {
+			return handleNewsList(url, env);
+		}
+		const newsSlugMatch = url.pathname.match(/^\/api\/news\/([A-Za-z0-9-]+)$/);
+		if (request.method === "GET" && newsSlugMatch) {
+			return handleNewsItem(newsSlugMatch[1].toLowerCase(), url, env);
 		}
 		if (request.method === "GET" && url.pathname === "/operating-center/marketing") return htmlPage(renderMarketingSectionHtml);
 		if (request.method === "GET" && url.pathname === "/operating-center/growth") return htmlPage(renderGrowthSectionHtml);
@@ -7979,9 +7901,6 @@ export default {
 				if (!distance) {
 					return json({ ok: false, error: "A distance query parameter is required (one distance per sync keeps each request inside the Worker limit)" }, 400);
 				}
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
 				const state = await syncRaceLifecycleDistance({
 					db: env.nwana_engine_db,
 					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
@@ -8016,9 +7935,6 @@ export default {
 				}
 				if (body.confirm !== "TEST_WRITE") {
 					return json({ ok: false, error: 'Explicit confirm: "TEST_WRITE" is required before any RunSignup write attempt' }, 400);
-				}
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
 				}
 				const result = await testSeries2026WriteAccess({
 					db: env.nwana_engine_db,
@@ -8249,9 +8165,6 @@ export default {
 				if (!source || !Number.isInteger(eventId)) {
 					return json({ ok: false, error: "distance and event_id are required" }, 400);
 				}
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
 					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
@@ -8297,6 +8210,10 @@ export default {
 						time: r.time,
 						approved: approvals.has(r.result_id),
 						approved_at: approvals.get(r.result_id)?.approvedAt ?? null,
+						// Where the approval came from, per the trigger
+						// evaluation: RUNSIGNUP (presence signal) or ENGINE
+						// (explicit D1 approval). Null = not approved.
+						approval_source: trigger.approvalSources[r.result_id] ?? null,
 						disqualified: disquals.has(r.result_id),
 						disqualification_reason: disquals.get(r.result_id)?.reason ?? null,
 					})),
@@ -8434,9 +8351,6 @@ export default {
 				if (!source || !Number.isInteger(eventId) || resultIds.length === 0) {
 					return json({ ok: false, error: "distance, event_id and result_ids[] are required" }, 400);
 				}
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
 					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
@@ -8530,9 +8444,6 @@ export default {
 				if (!reason) {
 					return json({ ok: false, error: "A disqualification reason is required (owner audit)" }, 400);
 				}
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
 					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
@@ -8606,9 +8517,6 @@ export default {
 				if (!source || !Number.isInteger(eventId)) {
 					return json({ ok: false, error: "distance and event_id are required" }, 400);
 				}
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
 					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
@@ -8637,9 +8545,6 @@ export default {
 				if (!source || !Number.isInteger(eventId)) {
 					return json({ ok: false, error: "distance and event_id are required" }, 400);
 				}
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
 				const autoEnv = {
 					db: env.nwana_engine_db,
 					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
@@ -8647,7 +8552,7 @@ export default {
 					apiCallerSecret: env.RUNSIGNUP_API_REG_SECRET,
 					publicBaseUrl: new URL(request.url).origin,
 				};
-				const live = await fetchLiveEventResults(env.RUNSIGNUP_ACCESS_TOKEN, source.raceId, eventId);
+				const live = await fetchLiveEventResults(await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]), source.raceId, eventId);
 				const rows = await getAthletePipeline(autoEnv, { distance, raceId: source.raceId, eventId }, live);
 				return json({ ok: true, distance, event_id: eventId, athletes: rows });
 			} catch (error) {
@@ -8667,10 +8572,7 @@ export default {
 				if (!source) {
 					return json({ ok: false, error: "distance is required" }, 400);
 				}
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
-				const result = await getDistanceProgression(env.nwana_engine_db, env.RUNSIGNUP_ACCESS_TOKEN, {
+				const result = await getDistanceProgression(env.nwana_engine_db, await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]), {
 					distance,
 					search: url.searchParams.get("search") ?? undefined,
 					page: Number(url.searchParams.get("page") ?? "1"),
@@ -8694,9 +8596,6 @@ export default {
 				}
 				if (!Number.isInteger(body.event_id)) {
 					return json({ ok: false, error: "event_id is required" }, 400);
-				}
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
 				}
 				if (body.confirmation === AUTO_APPROVED_CONFIRMATION) {
 					return json({ ok: false, error: "AUTO:OWNER_APPROVED_RESULTS is internal-only; use the approvals flow" }, 400);
@@ -8811,9 +8710,6 @@ export default {
 		if (request.method === "POST" && url.pathname === "/api/operating-center/object-creation/link") {
 			try {
 				const body = (await request.json()) as { packet_id?: string; race_id?: number; event_id?: number };
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
 				const result = await linkRunSignupRace({
 					db: env.nwana_engine_db,
 					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
@@ -8878,9 +8774,6 @@ export default {
 		if (request.method === "POST" && url.pathname === "/api/operating-center/object-creation/apply") {
 			try {
 				const body = (await request.json()) as { packet_id?: string; step_id?: string; confirm?: string };
-				if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-					return json({ ok: false, error: "RUNSIGNUP_ACCESS_TOKEN is not configured" }, 503);
-				}
 				const result = await applyCreationStep({
 					db: env.nwana_engine_db,
 					accessToken: await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]),
@@ -8982,6 +8875,32 @@ export default {
 				return json({ ok: true, ...(await buildDesiredState(env.nwana_engine_db)) });
 			} catch (error) {
 				return json({ ok: false, error: error instanceof Error ? error.message : "Desired state failed" }, 500);
+			}
+		}
+
+		// ADR-0016 extension (2026-10-10): read-only account inventory.
+		// The in-account Google Ads Script POSTs a full inventory snapshot
+		// once an hour with the owner key (same gate as every other
+		// /api/operating-center/* route). The Engine never writes to Google
+		// Ads; this only stores what the script observed. GET returns the
+		// latest snapshot for the Operating Center inventory view.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/google-ads/inventory") {
+			try {
+				const body = await request.json();
+				const result = await storeInventorySnapshot(env.nwana_engine_db, body);
+				if (!result.ok) return json(result, 400);
+				return json(result);
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Inventory store failed" }, 500);
+			}
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/operating-center/google-ads/inventory") {
+			try {
+				const snapshot = await getLatestInventorySnapshot(env.nwana_engine_db);
+				return json({ ok: true, snapshot });
+			} catch (error) {
+				return json({ ok: false, error: error instanceof Error ? error.message : "Inventory read failed" }, 500);
 			}
 		}
 
@@ -9836,10 +9755,6 @@ if (
 		// by design.
 		if (controller.cron !== "17 6 * * *") {
 			console.log(`[series-2026-cron] ignoring unexpected schedule ${controller.cron}`);
-			return;
-		}
-		if (!env.RUNSIGNUP_ACCESS_TOKEN) {
-			console.log("[series-2026-cron] skipped: RUNSIGNUP_ACCESS_TOKEN not configured");
 			return;
 		}
 		const autoEnv = {

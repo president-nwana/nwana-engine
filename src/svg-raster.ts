@@ -7,30 +7,43 @@
  *
  * WASM is initialized lazily once per isolate (~93ms), subsequent renders
  * ~56-82ms for card-sized images.
+ *
+ * The WASM module arrives as a pre-compiled WebAssembly.Module via ES module
+ * import. The deployment uploads resvg.wasm as a SEPARATE module (not bundled
+ * by esbuild — see --external:*.wasm in the build); Cloudflare resolves the
+ * import at deploy time and pre-compiles it. No runtime compilation happens,
+ * which Workers forbids ("Wasm code generation disallowed by embedder").
+ * There is deliberately NO bundled-bytes path: esbuild inlining .wasm as
+ * bytes and compiling at runtime always fails in production.
  */
 
 import { initWasm, Resvg } from "@resvg/resvg-wasm";
-// WASM module imported as ES module (Cloudflare Workers CompiledWasm).
-// Wrangler handles this via [[rules]] type="CompiledWasm".
-// For script-upload API, the .wasm file must be uploaded as a separate module.
+import { getFontBuffers } from "./assets/fonts";
+// WASM import: resolved at deploy time to a pre-compiled WebAssembly.Module.
+// The build MUST mark *.wasm as external; the deploy MUST upload resvg.wasm
+// as a separate part named "resvg.wasm".
 // @ts-expect-error - WASM module import
 import resvgWasm from "./resvg.wasm";
-import { getFontBuffers } from "./assets/fonts";
 
 let wasmInitialized = false;
-let wasmModule: WebAssembly.Module | null = null;
+let wasmOverride: WebAssembly.Module | null = null;
 
 /**
- * Set a pre-compiled WASM module (from Workers wasm_module binding).
- * Call this before rasterizeSvgToPng if using the binding approach.
- * If not set, falls back to the bundled import (which may fail on Workers
- * if the bundle embedded raw bytes instead of a pre-compiled module).
+ * Override the WASM module (e.g. in tests, or if a binding provides it).
+ * If not called, the ES module import above is used.
  */
+export function setWasmModule(mod: WebAssembly.Module): void {
+	wasmOverride = mod;
+	wasmInitialized = false;
+}
+
 async function ensureWasmInitialized(): Promise<void> {
 	if (wasmInitialized) return;
-	// resvgWasm is a pre-compiled WebAssembly.Module (via CompiledWasm rule).
-	// No runtime compilation needed.
-	await initWasm(resvgWasm as unknown as WebAssembly.Module);
+	// Prefer an explicitly provided module; otherwise use the deploy-time
+	// import (pre-compiled WebAssembly.Module). initWasm accepts the module
+	// directly — no compilation happens here.
+	const mod = (wasmOverride ?? resvgWasm) as WebAssembly.Module;
+	await initWasm(mod);
 	wasmInitialized = true;
 }
 

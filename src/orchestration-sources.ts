@@ -153,27 +153,39 @@ export const NWANA_RUNSIGNUP_DONATION_URL =
 	"https://sport.nwaofna.org/Race/Donate/FL/SaintPetersburg/NWANANordicWalkingSPORT";
 
 export const OWNER_DIRECTIVES: readonly OwnerDirectiveConfig[] = [
+	// 2026-10-10: DIR-FOUNDING-CIRCLE-2026 REMOVED from desired state.
+	// Owner architecture decision: Founding Circle / major gifts are excluded
+	// from Search (relationship fundraising / direct outreach instead).
+	// The live campaign "NWANA · Founding Circle · Donate" is left untouched
+	// in the account (the reconcile script never mutates campaigns outside
+	// desired state); pause it in the UI when ready. Removal also frees
+	// desired-state budget headroom under the $329/day Ad Grants cap.
 	{
-		directive_id: "DIR-FOUNDING-CIRCLE-2026",
-		purpose: "FOUNDING_CIRCLE",
-		required_result: "Raise founding capital donations",
-		candidate_action: "Acquire donors via search",
+		directive_id: "DIR-CHALLENGE-SPORT-WALKING-2026",
+		purpose: "CHALLENGE_PARTICIPATION",
+		required_result: "Acquire walking-challenge participants via search",
+		candidate_action: "Acquire participants via search",
 		ordered_channel: "GOOGLE_ADS_GRANT",
-		channel_inputs_ref: "DIR-FOUNDING-CIRCLE-2026",
-		capabilities: ["DONATION"],
-		donation_destinations: [
-			{
-				url: NWANA_RUNSIGNUP_DONATION_URL,
-				provenance: {
-					store: "OWNER_DIRECTIVES (orchestration-sources.ts)",
-					reader: "explicit owner instruction",
-					adapter: "adaptOwnerDirectiveSources",
-				},
-			},
-		],
+		channel_inputs_ref: "DIR-CHALLENGE-SPORT-WALKING-2026",
+		capabilities: ["REGISTRATION"],
 		provenance_note:
-			"Owner-authored directive (ADR-0031): NWANA is a 501(c)(3) public charity, " +
-			"donations are tax-deductible, destination is the RunSignup donation page. " +
+			"Owner-authored directive (2026-10-10): first new-funnel launch — " +
+			"Challenge Sport Walking (volume driver). Keyword Planner US: " +
+			"virtual walking challenge 720/mo. Landing: challenges.nwaofna.org. " +
+			"No source object. No distribution rule.",
+	},
+	{
+		directive_id: "DIR-FUNDRAISE-WALK-CHARITY-2026",
+		purpose: "FUNDRAISING",
+		required_result: "Acquire charity fundraisers via search",
+		candidate_action: "Acquire fundraisers via search",
+		ordered_channel: "GOOGLE_ADS_GRANT",
+		channel_inputs_ref: "DIR-FUNDRAISE-WALK-CHARITY-2026",
+		capabilities: ["FUNDRAISING"],
+		provenance_note:
+			"Owner-authored directive (2026-10-10): second new-funnel launch — " +
+			"Fundraise Walk for Charity (money intent). Keyword Planner US: " +
+			"walk for charity 480/mo. Landing: challenges.nwaofna.org/fundraising. " +
 			"No source object. No distribution rule.",
 	},
 ];

@@ -334,6 +334,9 @@ async function getJson(
 export interface Series2026PreviewOptions {
 	distance?: string;
 	raceId?: number;
+	/** When set, only this event is fetched (per-event preview: ~3-5
+	 * RunSignup calls instead of the whole distance). */
+	eventId?: number;
 	apiCallerToken?: string;
 	apiCallerSecret?: string;
 }
@@ -365,6 +368,7 @@ export async function previewSeries2026ResultPublications(
 			const event = asRecord(rawEvent);
 			const eventId = Number(event?.event_id);
 			if (!event || !Number.isInteger(eventId)) continue;
+			if (options.eventId !== undefined && eventId !== options.eventId) continue;
 
 			const setsUrl = new URL(`https://api.runsignup.com/rest/race/${source.raceId}/results/get-result-sets`);
 			setsUrl.searchParams.set("format", "json");
@@ -419,6 +423,90 @@ export async function previewSeries2026ResultPublications(
 	};
 }
 
+
+/**
+ * TEMPORARY — Series 2026 completion only; Series 2027 will use incremental
+ * cloud processing.
+ *
+ * Legacy completion mode detector: true when every non-disqualified result
+ * row already carries a Performance Level and a Level Place — i.e. the
+ * NWANA-FINAL.ps1 laptop script already scored this event and wrote the
+ * values back to RunSignup as custom fields. Mirrors the `finalized`
+ * definition in buildSeries2026PublicationDraft, plus the disqualification
+ * exclusion. Pure: no I/O.
+ */
+export function isLegacyScoredFinalized(
+	rows: Array<{ result_id?: string | null; performance_level?: string | null; level_place?: string | null }>,
+	disqualifiedResultIds: string[],
+): boolean {
+	if (rows.length === 0) return false;
+	const disqualified = new Set(disqualifiedResultIds);
+	return rows.every((row) => {
+		if (row.result_id !== null && row.result_id !== undefined && disqualified.has(row.result_id)) {
+			return true;
+		}
+		const level = row.performance_level;
+		const place = row.level_place;
+		return (
+			typeof level === "string" && level.trim() !== "" &&
+			typeof place === "string" && place.trim() !== ""
+		);
+	});
+}
+
+export interface LegacyScoringDetection {
+	/** Part A: every decidable result row carries Performance Level + Level Place. */
+	fieldsComplete: boolean;
+	/** Two-part verification record (fields observation + standings guarantee). */
+	detail: string;
+}
+
+/**
+ * TEMPORARY — Series 2026 completion only; Series 2027 will use incremental
+ * cloud processing.
+ *
+ * Legacy completion mode detection (explicit two-part verification):
+ * - Part A (fields, observed): every decidable result row across all result
+ *   sets of the event carries a non-empty Performance Level and Level Place
+ *   (via isLegacyScoredFinalized).
+ * - Part B (standings, guaranteed by write contract): the NWANA-FINAL.ps1
+ *   inner body — mirrored exactly by applyEventResultSet in
+ *   series-2026-apply.ts — processes each result set in strict order:
+ *   upload_standings → ensure_custom_fields → write_result_fields, each
+ *   step throwing on failure. A crash anywhere before the fields write
+ *   necessarily leaves fields incomplete, so fields-complete on all
+ *   decidable rows PROVES the standings upload completed for every result
+ *   set. RunSignup exposes no standings read API
+ *   (race-series-results.json is POST-only), so standings are verified by
+ *   write-contract, not by re-reading them.
+ * Pure: no I/O.
+ */
+export function detectLegacyScoring(
+	rows: Array<{ result_id?: string | null; performance_level?: string | null; level_place?: string | null }>,
+	disqualifiedResultIds: string[],
+): LegacyScoringDetection {
+	const fieldsComplete = isLegacyScoredFinalized(rows, disqualifiedResultIds);
+	const disqualified = new Set(disqualifiedResultIds);
+	const isDecidable = (row: { result_id?: string | null }) =>
+		row.result_id === null || row.result_id === undefined || !disqualified.has(row.result_id);
+	const decidable = rows.filter(isDecidable);
+	const missing = decidable.filter((row) => {
+		const level = row.performance_level;
+		const place = row.level_place;
+		return !(
+			typeof level === "string" && level.trim() !== "" &&
+			typeof place === "string" && place.trim() !== ""
+		);
+	}).length;
+	const detail = fieldsComplete
+		? `Part A (fields): ${decidable.length}/${rows.length} decidable rows carry Performance Level + Level Place. ` +
+		  `Part B (standings): guaranteed by the NWANA-FINAL.ps1 write contract — per result set the script runs ` +
+		  `upload_standings → ensure_custom_fields → write_result_fields, each throwing on failure; ` +
+		  `fields-complete therefore proves the standings upload completed for every result set.`
+		: `Part A (fields): FAILED — ${missing}/${decidable.length} decidable rows lack Performance Level and/or Level Place ` +
+		  `(WAITING_FOR_LEGACY_SCORING). Part B (standings): not verifiable — no standings read API exists.`;
+	return { fieldsComplete, detail };
+}
 
 export function applySeries2026PublicationHistory(
 	drafts: ReturnType<typeof buildSeries2026PublicationDraft>[],

@@ -34,7 +34,6 @@ import {
 import { DISTRIBUTION_ACTIONS, type DistributionActionConfig } from "./distribution-evidence";
 import {
 	collectSources,
-	NWANA_RUNSIGNUP_DONATION_URL,
 	OWNER_DIRECTIVES,
 	type NormalizedSource,
 } from "./orchestration-sources";
@@ -161,105 +160,295 @@ const seriesSitelinks: SitelinkHint[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Founding Circle: owner directive source (DIR-FOUNDING-CIRCLE-2026)
+// Challenge Sport · Walking: owner directive source (DIR-CHALLENGE-SPORT-WALKING-2026)
+// First new-funnel launch 2026-10-10 (volume driver). Owner-approved launch package:
+// google-ads/launch-package-funnel1-2.md. All copy verified against RSA limits
+// (headlines <=30, descriptions <=90) and Ad Grants policy (exact/phrase only,
+// 2+ words per keyword, 2+ ads per ad group, 2+ sitelinks).
 // ---------------------------------------------------------------------------
 
-const FC_DONATE = NWANA_RUNSIGNUP_DONATION_URL;
-const FC_ABOUT = "https://nwaofna.org";
+const CHALLENGE_HOME = "https://challenges.nwaofna.org";
+const CHALLENGE_FUNDRAISING = "https://challenges.nwaofna.org/fundraising";
+const CHALLENGE_FUNDRAISING_TEAMS = "https://challenges.nwaofna.org/fundraising-teams";
+const CHALLENGE_HOW = "https://challenges.nwaofna.org/how-it-works";
+const CHALLENGE_TEAMS = "https://challenges.nwaofna.org/teams";
+const CHALLENGE_DISCIPLINES = "https://challenges.nwaofna.org/disciplines";
 
-const foundingCircleAdGroups: AdGroupHint[] = [
+const walkingAdGroups: AdGroupHint[] = [
 	{
-		name: "Support Nordic Walking",
-		default_cpc: 2.0,
+		name: "Virtual Walking Challenge",
+		default_cpc: 1.5,
 		keywords: [
-			{ text: "support nordic walking", match_type: "PHRASE" },
-			{ text: "donate to sports nonprofit", match_type: "PHRASE" },
-			{ text: "nordic walking federation donation", match_type: "PHRASE" },
+			{ text: "virtual walking challenge", match_type: "EXACT" },
+			{ text: "virtual walking challenge", match_type: "PHRASE" },
+			{ text: "online walking challenge", match_type: "EXACT" },
+			{ text: "online walking challenge", match_type: "PHRASE" },
+			{ text: "virtual step challenge", match_type: "EXACT" },
+			{ text: "virtual step challenge", match_type: "PHRASE" },
 		],
 		ads: [
 			{
 				headlines: [
-					"Support Nordic Walking",
-					"Tax-Deductible Donation",
-					"Build the U.S. Federation",
-					"501(c)(3) Nonprofit",
-					"Fund Youth Walking Sport",
-					"Donate Today",
+					"Free Virtual Walking Challenge",
+					"Join the NWANA Challenge",
+					"Walk Anywhere, Anytime",
+					"Track Miles, Earn Recognition",
+					"All Levels Welcome",
+					"Walk for a Good Cause",
+					"Free to Join — Start Today",
+					"Virtual Walking Challenge 2026",
 				],
 				descriptions: [
-					"Your tax-deductible gift builds Nordic walking as a recognized sport in North America.",
-					"NWANA is a 501(c)(3) nonprofit federation running national virtual race series.",
-					"Donations fund competitions, coaching, and the instructor pipeline.",
+					"Join the free virtual walking challenge and support instructor education.",
+					"Free to join. Track miles, join teams, climb leaderboards — every mile counts.",
+					"Walk anywhere, anytime. Register free and turn your miles into impact.",
 				],
-				final_url: FC_DONATE,
+				final_url: CHALLENGE_HOME,
 			},
 			{
 				headlines: [
-					"Donate to the Federation",
-					"Grow Walking Sport in the USA",
-					"501(c)(3) Tax-Deductible",
-					"Every Gift Builds the Sport",
-					"Transparent Nonprofit",
-					"Give Securely Online",
+					"Virtual Walking Challenge",
+					"Free to Join Today",
+					"Walk Your Own Way",
+					"Every Mile Counts",
+					"Join Thousands Walking",
+					"Start Your Challenge",
+					"No Cost to Participate",
 				],
 				descriptions: [
-					"Help take Nordic walking from a niche activity to a continental sport.",
-					"Secure online donation to the official North American federation.",
-					"Your gift is tax-deductible to the full extent of the law.",
+					"Sign up free and walk on your schedule. Your miles fund instructor education.",
+					"The charity walking challenge is open to all levels. Register today.",
 				],
-				final_url: FC_DONATE,
+				final_url: CHALLENGE_HOME,
 			},
 		],
 	},
 	{
-		name: "Amateur Sports Giving",
-		default_cpc: 2.0,
+		name: "Free Virtual Challenge",
+		default_cpc: 1.5,
 		keywords: [
-			{ text: "donate to amateur sports", match_type: "PHRASE" },
-			{ text: "support youth sports nonprofit", match_type: "PHRASE" },
-			{ text: "walking sport charity donation", match_type: "PHRASE" },
+			{ text: "free virtual walking challenge", match_type: "EXACT" },
+			{ text: "free virtual walking challenge", match_type: "PHRASE" },
+			{ text: "free walking challenge", match_type: "EXACT" },
+			{ text: "free walking challenge", match_type: "PHRASE" },
+			{ text: "free virtual challenge", match_type: "EXACT" },
 		],
 		ads: [
 			{
 				headlines: [
-					"Give to Amateur Sport",
-					"Walking for All Ages",
-					"Tax-Deductible Sports Gift",
-					"National Race Series",
-					"Certified Instructors",
-					"Donate in Minutes",
+					"Free Virtual Walking Challenge",
+					"100% Free to Join",
+					"No Fees, Just Walking",
+					"Join Free Today",
+					"Virtual Challenge — Free",
+					"Walk for Charity, Free",
+					"Start Walking Free",
+					"Free Walking Challenge",
 				],
 				descriptions: [
-					"Support free and low-cost Nordic walking competitions across the country.",
-					"NWANA certifies instructors and runs the national virtual series.",
-					"Make a secure tax-deductible donation online today.",
+					"The NWANA Charity Challenge is completely free. Register and start walking today.",
+					"Free participation, real impact. Your miles support free instructor education.",
 				],
-				final_url: FC_DONATE,
+				final_url: CHALLENGE_HOME,
 			},
 			{
 				headlines: [
-					"Fuel the Walking Movement",
-					"Donate to NWANA",
-					"501(c)(3) Public Charity",
-					"Competitions Need You",
-					"Build Something Continental",
-					"Secure Online Giving",
+					"Free Walking Challenge",
+					"Zero Fees, All Fun",
+					"Join Without Paying",
+					"Walk Free Today",
+					"Completely Free Entry",
+					"Start Free Now",
 				],
 				descriptions: [
-					"One federation, one continent, one sport. Your gift makes it real.",
-					"Donations power race operations, results verification, and standings.",
-					"Give securely online. Every dollar stays in the sport.",
+					"No entry fee, no hidden costs. Just walk and make a difference.",
+					"Register free in minutes and start your walking challenge.",
 				],
-				final_url: FC_ABOUT,
+				final_url: CHALLENGE_HOME,
+			},
+		],
+	},
+	{
+		name: "Charity Walking Challenge",
+		default_cpc: 1.5,
+		keywords: [
+			{ text: "charity walking challenge", match_type: "EXACT" },
+			{ text: "charity walking challenge", match_type: "PHRASE" },
+			{ text: "charity walk challenge", match_type: "EXACT" },
+			{ text: "charity walk challenge", match_type: "PHRASE" },
+		],
+		ads: [
+			{
+				headlines: [
+					"Charity Walking Challenge",
+					"Walk for a Cause",
+					"Turn Miles Into Donations",
+					"Charity Challenge 2026",
+					"Walk. Fundraise. Impact.",
+					"Join the Charity Challenge",
+				],
+				descriptions: [
+					"Turn your miles into fundraising for free instructor education. Join free.",
+					"Join the charity walking challenge. Walk, fundraise, and grow the mission.",
+				],
+				final_url: CHALLENGE_FUNDRAISING,
+			},
+			{
+				headlines: [
+					"Walk for Charity Today",
+					"Make Miles Matter",
+					"Charity Walk 2026",
+					"Fundraise While Walking",
+					"Give Back by Walking",
+				],
+				descriptions: [
+					"Your steps can fund free instructor training. Join the challenge.",
+					"Walk, raise funds, and help grow Nordic walking across America.",
+				],
+				final_url: CHALLENGE_FUNDRAISING,
 			},
 		],
 	},
 ];
 
-const foundingCircleSitelinks: SitelinkHint[] = [
-	{ text: "Donate Now", final_url: FC_DONATE, description: "Secure tax-deductible gift" },
-	{ text: "About NWANA", final_url: FC_ABOUT, description: "The federation story" },
-	{ text: "Race Series", final_url: "https://series.nwaofna.org", description: "What your gift powers" },
+const walkingSitelinks: SitelinkHint[] = [
+	{ text: "How It Works", final_url: CHALLENGE_HOW, description: "Join, walk, submit results" },
+	{ text: "Create a Team", final_url: CHALLENGE_TEAMS, description: "Walk together, raise together" },
+	{ text: "Disciplines", final_url: CHALLENGE_DISCIPLINES, description: "Walk, run, cycle and more" },
+	{ text: "Fundraising", final_url: CHALLENGE_FUNDRAISING, description: "Turn miles into donations" },
+];
+
+// ---------------------------------------------------------------------------
+// Fundraise · Walk for Charity: owner directive source (DIR-FUNDRAISE-WALK-CHARITY-2026)
+// Second new-funnel launch 2026-10-10 (money intent). Same package and limits.
+// ---------------------------------------------------------------------------
+
+const fundraiseAdGroups: AdGroupHint[] = [
+	{
+		name: "Walk for Charity",
+		default_cpc: 1.5,
+		keywords: [
+			{ text: "walk for charity", match_type: "EXACT" },
+			{ text: "walk for charity", match_type: "PHRASE" },
+			{ text: "walking for charity", match_type: "EXACT" },
+			{ text: "walking for charity", match_type: "PHRASE" },
+		],
+		ads: [
+			{
+				headlines: [
+					"Walk for Charity",
+					"Turn Miles Into Donations",
+					"Start Fundraising Today",
+					"Charity Walking Challenge",
+					"Raise Funds Walking",
+					"Your Miles, Their Future",
+					"Walk. Raise. Impact.",
+				],
+				descriptions: [
+					"Create a free fundraiser and turn every mile you walk into support.",
+					"Walk for charity with NWANA. Start fundraising in minutes — free to join.",
+				],
+				final_url: CHALLENGE_FUNDRAISING,
+			},
+			{
+				headlines: [
+					"Charity Walk Fundraiser",
+					"Raise Money Walking",
+					"Start Your Fundraiser",
+					"Walk With Purpose",
+					"Donations Through Walking",
+				],
+				descriptions: [
+					"Turn your daily walks into donations for a nonprofit mission.",
+					"Set up your fundraiser in minutes. Every mile raises support.",
+				],
+				final_url: CHALLENGE_FUNDRAISING,
+			},
+		],
+	},
+	{
+		name: "Fundraising Challenge",
+		default_cpc: 1.5,
+		keywords: [
+			{ text: "fundraising walking challenge", match_type: "EXACT" },
+			{ text: "fundraising walking challenge", match_type: "PHRASE" },
+			{ text: "charity walk fundraiser", match_type: "EXACT" },
+			{ text: "charity walk fundraiser", match_type: "PHRASE" },
+		],
+		ads: [
+			{
+				headlines: [
+					"Fundraising Walking Challenge",
+					"Walk & Fundraise",
+					"Take the Challenge",
+					"Join the Fundraising Challenge",
+				],
+				descriptions: [
+					"Join a fundraising walking challenge where your miles fund free instructor education.",
+					"Free to join. Walk, fundraise, and multiply your impact with a team.",
+				],
+				final_url: CHALLENGE_FUNDRAISING,
+			},
+			{
+				headlines: [
+					"Join a Fundraising Walk",
+					"Challenge for Charity",
+					"Walk, Give, Repeat",
+					"Fundraise With Every Step",
+				],
+				descriptions: [
+					"Combine walking with giving. Your challenge funds instructor education.",
+					"Invite friends, form a team, and fundraise together.",
+				],
+				final_url: CHALLENGE_FUNDRAISING,
+			},
+		],
+	},
+	{
+		name: "Team Fundraising",
+		default_cpc: 1.5,
+		keywords: [
+			{ text: "team fundraising challenge", match_type: "EXACT" },
+			{ text: "team fundraising challenge", match_type: "PHRASE" },
+			{ text: "fundraising team challenge", match_type: "EXACT" },
+			{ text: "fundraising team challenge", match_type: "PHRASE" },
+		],
+		ads: [
+			{
+				headlines: [
+					"Team Fundraising Challenge",
+					"Fundraise as a Team",
+					"Start a Fundraising Team",
+					"Teams That Give Back",
+				],
+				descriptions: [
+					"Create a fundraising team and multiply your impact. Free to start.",
+					"Walk together, fundraise together. Launch your team in the Charity Challenge.",
+				],
+				final_url: CHALLENGE_FUNDRAISING_TEAMS,
+			},
+			{
+				headlines: [
+					"Build a Giving Team",
+					"Team Up for Charity",
+					"Group Fundraising Walk",
+					"Stronger Together",
+				],
+				descriptions: [
+					"Rally your crew around a cause. Team fundraising multiplies impact.",
+					"Create your team today and start turning miles into donations.",
+				],
+				final_url: CHALLENGE_FUNDRAISING_TEAMS,
+			},
+		],
+	},
+];
+
+const fundraiseSitelinks: SitelinkHint[] = [
+	{ text: "Start Fundraising", final_url: CHALLENGE_FUNDRAISING, description: "Create your fundraiser" },
+	{ text: "Fundraising Teams", final_url: CHALLENGE_FUNDRAISING_TEAMS, description: "Multiply impact together" },
+	{ text: "Donate", final_url: CHALLENGE_FUNDRAISING, description: "Support the mission" },
+	{ text: "How It Works", final_url: CHALLENGE_HOW, description: "Join, walk, submit results" },
 ];
 
 /**
@@ -287,19 +476,35 @@ export const GOOGLE_ADS_CHANNEL_INPUTS: Readonly<Record<string, GoogleAdsChannel
 		ad_groups: seriesAdGroups,
 		sitelinks: seriesSitelinks,
 	},
-	"DIR-FOUNDING-CIRCLE-2026": {
-		name: "NWANA \u00b7 Founding Circle \u00b7 Donate",
-		target_url: FC_DONATE,
-		cta: "Donate Now",
+	"DIR-CHALLENGE-SPORT-WALKING-2026": {
+		name: "NWANA · Challenge Sport · Walking",
+		target_url: CHALLENGE_HOME,
+		cta: "Join free",
 		audience: null,
 		source_facts: [
-			"NWANA is a 501(c)(3) public charity",
-			"donations are tax-deductible",
+			"Keyword Planner US: virtual walking challenge 720/mo",
+			"free virtual walking challenge 110/mo; charity walking challenge 10/mo",
+			"owner-approved launch package 2026-10-10",
 		],
-		daily_budget: 100,
+		daily_budget: 70,
 		geo_target_id: 2840,
-		ad_groups: foundingCircleAdGroups,
-		sitelinks: foundingCircleSitelinks,
+		ad_groups: walkingAdGroups,
+		sitelinks: walkingSitelinks,
+	},
+	"DIR-FUNDRAISE-WALK-CHARITY-2026": {
+		name: "NWANA · Fundraise · Walk for Charity",
+		target_url: CHALLENGE_FUNDRAISING,
+		cta: "Start fundraising",
+		audience: null,
+		source_facts: [
+			"Keyword Planner US: walk for charity 480/mo",
+			"top-page bids above the $2 Ad Grants cap; lower-auction impressions",
+			"owner-approved launch package 2026-10-10",
+		],
+		daily_budget: 40,
+		geo_target_id: 2840,
+		ad_groups: fundraiseAdGroups,
+		sitelinks: fundraiseSitelinks,
 	},
 };
 

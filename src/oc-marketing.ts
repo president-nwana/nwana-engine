@@ -45,7 +45,8 @@ const ADS_ACTIONS_HTML = `<section class="panel"><h2>Ads actions</h2>
 	<p class="meta"><strong>Machine (automatic):</strong> reads the Google Ads account, computes the Ad Grants compliance snapshot, and prepares campaign proposals from verified intents. <strong>Owner (manual):</strong> the actions below. Creating or changing campaigns is disabled — the owner reviews every proposal before anything is created.</p>
 	<div id="ads-act">Loading…</div></section>`;
 
-const ADS_DETAILS_HTML = `<section class="panel"><h2>Live campaigns</h2><div id="ads-det-campaigns">Loading…</div></section>
+const ADS_DETAILS_HTML = `<section class="panel"><h2>Account inventory (in-account script)</h2><div id="ads-det-inventory">Loading…</div></section>
+	<section class="panel"><h2>Live campaigns</h2><div id="ads-det-campaigns">Loading…</div></section>
 	<section class="panel"><h2>Ad Grants compliance</h2><div id="ads-det-compliance">Loading…</div></section>
 	<section class="panel"><h2>Machine proposals</h2><div id="ads-det-proposals">Loading…</div></section>
 	<section class="panel"><h2>Orchestration decisions</h2><div id="ads-det-orch">Loading…</div></section>
@@ -142,6 +143,44 @@ const ADS_SCRIPT = `
 	async function boot_ads_details(){
 		try{
 			const data=await ads_fetchOverview();
+			const inv=data.account_inventory;
+			const ib=document.querySelector('#ads-det-inventory');
+			if(inv&&inv.campaigns){
+				const cs=inv.campaigns||[];
+				let h='<div class="item"><strong>'+cs.length+' campaign(s) inventoried</strong>'
+					+'<div class="meta">Snapshot '+esc(inv.snapshot_at||'?')+' · script '+esc(inv.script_version||'?')+' · '+(inv.stats_window?esc(inv.stats_window)+' stats':'no stats window')+'</div>'
+					+'<div class="meta">Read-only: collected by the in-account Ads Script. The Engine never changes campaigns.</div></div>';
+				for(const c of cs){
+					const st=c.status==='ENABLED'?'<span class="badge-ok">'+esc(c.status)+'</span>':'<span class="badge-warn">'+esc(c.status)+'</span>';
+					const s=c.stats_30d||{};
+					const ctr=(s.ctr!=null?(Number(s.ctr)*100).toFixed(2)+'%':'n/a');
+					h+='<div class="item"><strong>'+esc(c.name)+' '+st+'</strong>'
+						+'<div class="meta">'+esc(c.channel_type||'SEARCH')+' · $'+Number(c.daily_budget_usd||0).toFixed(2)+'/day'
+						+((c.start_date||c.end_date)?' · '+esc(c.start_date||'?')+' → '+esc(c.end_date||'open'):'')+'</div>'
+						+'<div class="meta">30d: '+Number(s.impressions||0).toLocaleString('en-US')+' impr · '+Number(s.clicks||0).toLocaleString('en-US')+' clicks · CTR '+ctr
+						+' · $'+Number(s.cost_usd||0).toFixed(2)+' · '+Number(s.conversions||0)+' conv</div>'
+						+'<div class="meta">'+(c.ad_group_count||0)+' ad group(s) · '+(c.keyword_count||0)+' keyword(s)</div>';
+					if((c.landing_pages||[]).length){h+='<div class="meta">Landing: '+c.landing_pages.map(esc).join(', ')+'</div>';}
+					if((c.sitelinks||[]).length){h+='<div class="meta">Sitelinks: '+c.sitelinks.map(esc).join(' · ')+'</div>';}
+					h+='<details><summary>Ad groups, keywords &amp; ads</summary>';
+					for(const g of (c.ad_groups||[])){
+						h+='<div class="detail"><b>'+esc(g.name)+'</b> ('+esc(g.status||'?')+')<br>Keywords: '+((g.keywords||[]).map(esc).join(', ')||'—')+(g.keywords_truncated?' <i>(truncated)</i>':'')+'<br>';
+						for(const a of (g.ads||[])){
+							h+='Ad: '+a.headlines.map(esc).join(' | ')+'<br><span class="meta">'+esc(a.final_url||'')+'</span><br>';
+						}
+						h+='</div>';
+					}
+					h+='</details></div>';
+				}
+				if((inv.conversion_actions||[]).length){
+					h+='<div class="item"><strong>Conversion actions ('+inv.conversion_actions.length+')</strong><div class="meta">'
+						+inv.conversion_actions.map(a=>esc(a.name)+' ('+esc(a.status||'?')+')').join(' · ')+'</div></div>';
+				}
+				if(inv.note){h+='<div class="meta">'+esc(inv.note)+'</div>';}
+				ib.innerHTML=h;
+			}else{
+				ib.innerHTML='<div class="unavailable">No inventory snapshot yet. The in-account Ads Script posts one on its next hourly run after the updated script is installed.</div>';
+			}
 			const live=data.live_account;
 			const gc=data.grants_compliance;
 			const cb=document.querySelector('#ads-det-campaigns');
