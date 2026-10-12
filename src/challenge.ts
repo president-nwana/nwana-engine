@@ -475,17 +475,113 @@ async function handlePostActivity(request: Request, env: Env): Promise<Response>
 	});
 }
 
-/** Series stats: total registration count for the homepage. */
-async function handleSeriesStats(env: Env): Promise<Response> {
+/**
+ * Series stats: total registration count for the homepage.
+ *
+ * Canonical source stays RunSignup (fetchParticipants), but the live call
+ * takes 1–40s, so the count is cached in D1 (challenge_stats_cache,
+ * migration 0087) with stale-while-revalidate:
+ * - fresh cache (< TTL): served immediately;
+ * - stale cache: served immediately, background refresh via ctx.waitUntil;
+ * - refresh failure: last confirmed value is kept (never replaced by an
+ *   error or a fabricated number);
+ * - no cache at all (first ever call): computed synchronously once.
+ * Refresh attempts are guarded (refresh_started_at) so a slow RunSignup
+ * cannot pile up parallel refreshes.
+ */
+const SERIES_STATS_CACHE_KEY = "series_stats";
+const SERIES_STATS_TTL_MS = 10 * 60 * 1000;
+const SERIES_STATS_REFRESH_GUARD_MS = 60 * 1000;
+
+async function computeSeriesStats(env: Env): Promise<{ total_registrations: number } | null> {
 	const fetched = await fetchParticipants(env);
-	if (!fetched.ok) return json({ ok: false, error: fetched.error }, 502);
+	if (!fetched.ok) return null;
 	const parts = fetched.participants || [];
 	const regIds = new Set<number>();
 	for (const p of parts) {
 		const rid = int((p as UnknownRecord).registration_id);
 		if (rid) regIds.add(rid);
 	}
-	return json({ ok: true, total_registrations: regIds.size });
+	return { total_registrations: regIds.size };
+}
+
+interface SeriesStatsCacheRow {
+	value_json: string;
+	updated_at: string;
+	refresh_started_at: string | null;
+}
+
+async function readSeriesStatsCache(env: Env): Promise<SeriesStatsCacheRow | null> {
+	try {
+		const row = await env.nwana_engine_db.prepare(
+			`SELECT value_json, updated_at, refresh_started_at FROM challenge_stats_cache WHERE cache_key = ?`
+		).bind(SERIES_STATS_CACHE_KEY).first<SeriesStatsCacheRow>();
+		return row ?? null;
+	} catch {
+		return null;
+	}
+}
+
+async function refreshSeriesStatsCache(env: Env): Promise<void> {
+	try {
+		await env.nwana_engine_db.prepare(
+			`INSERT INTO challenge_stats_cache (cache_key, value_json, updated_at, refresh_started_at)
+			 VALUES (?, '{}', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+			 ON CONFLICT(cache_key) DO UPDATE SET refresh_started_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+		).bind(SERIES_STATS_CACHE_KEY).run();
+	} catch {
+		// Guard bookkeeping must never block the refresh itself.
+	}
+	const computed = await computeSeriesStats(env);
+	if (!computed) return; // RunSignup failed: keep the last confirmed value.
+	try {
+		await env.nwana_engine_db.prepare(
+			`UPDATE challenge_stats_cache SET value_json = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE cache_key = ?`
+		).bind(JSON.stringify(computed), SERIES_STATS_CACHE_KEY).run();
+	} catch (e) {
+		console.error("series-stats cache store failed:", e);
+	}
+}
+
+async function handleSeriesStats(env: Env, ctx?: ExecutionContext): Promise<Response> {
+	const cached = await readSeriesStatsCache(env);
+	if (cached) {
+		let value: { total_registrations?: unknown } | null = null;
+		try {
+			value = JSON.parse(cached.value_json) as { total_registrations?: unknown };
+		} catch {
+			value = null;
+		}
+		if (value && typeof value.total_registrations === "number") {
+			const now = Date.now();
+			const ageMs = now - Date.parse(cached.updated_at);
+			const lastRefreshMs = cached.refresh_started_at ? now - Date.parse(cached.refresh_started_at) : Number.POSITIVE_INFINITY;
+			if (ageMs > SERIES_STATS_TTL_MS && lastRefreshMs > SERIES_STATS_REFRESH_GUARD_MS && ctx) {
+				ctx.waitUntil(refreshSeriesStatsCache(env));
+			}
+			return json({
+				ok: true,
+				total_registrations: value.total_registrations,
+				cached: true,
+				cache_age_seconds: Math.max(0, Math.round(ageMs / 1000)),
+			});
+		}
+	}
+	// No usable cache: compute synchronously (first ever call, or cache row
+	// unreadable) and seed the cache. Failure keeps the old 502 behavior —
+	// there is no confirmed value to fall back to yet.
+	const computed = await computeSeriesStats(env);
+	if (!computed) return json({ ok: false, error: "RunSignup participants fetch failed" }, 502);
+	try {
+		await env.nwana_engine_db.prepare(
+			`INSERT INTO challenge_stats_cache (cache_key, value_json, updated_at, refresh_started_at)
+			 VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+			 ON CONFLICT(cache_key) DO UPDATE SET value_json = excluded.value_json, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+		).bind(SERIES_STATS_CACHE_KEY, JSON.stringify(computed)).run();
+	} catch (e) {
+		console.error("series-stats cache seed failed:", e);
+	}
+	return json({ ok: true, total_registrations: computed.total_registrations, cached: false });
 }
 
 /**
@@ -1533,14 +1629,14 @@ async function handleDeleteActivity(tallyStr: string, url: URL, env: Env): Promi
 }
 
 /** Main entry: auth check + routing. Called early from the worker fetch handler. */
-export async function handleChallengeApi(request: Request, env: Env, url: URL): Promise<Response> {
+export async function handleChallengeApi(request: Request, env: Env, url: URL, ctx?: ExecutionContext): Promise<Response> {
 	const presented = request.headers.get("X-Challenge-Key") || "";
 	if (!env.CHALLENGE_API_KEY || presented !== env.CHALLENGE_API_KEY) {
 		return json({ ok: false, error: "unauthorized" }, 401);
 	}
 	const path = url.pathname;
 	if (path === "/api/challenge/v1/series-stats" && request.method === "GET") {
-		return handleSeriesStats(env);
+		return handleSeriesStats(env, ctx);
 	}
 	if (path === "/api/challenge/v1/my-events" && request.method === "GET") {
 		return handleMyEvents(url, env);
