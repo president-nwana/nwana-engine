@@ -16,7 +16,7 @@
 	// ("origin unknown"). Origin is now known, so the removal stands.
 	// scheduled() additionally ignores any schedule except 17 6 * * *.
 	"triggers": {
-		"crons": ["17 6 * * *"]
+		"crons": ["17 6 * * *", "3,13,23,33,43,53 * * * *"]
 	},
 	"observability": {
 		"enabled": true
