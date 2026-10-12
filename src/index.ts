@@ -5743,6 +5743,7 @@ export default {
 	async fetch(
 		request: Request,
 		env: Env,
+		ctx: ExecutionContext,
 	): Promise<Response> {
 		if (request.method === "OPTIONS") {
 			return new Response(null, {
@@ -5763,7 +5764,7 @@ export default {
 		// Dedicated key auth (X-Challenge-Key), independent of the
 		// operating-center identity below. Served by src/challenge.ts.
 		if (url.pathname.startsWith("/api/challenge/v1/")) {
-			return handleChallengeApi(request, env, url);
+			return handleChallengeApi(request, env, url, ctx);
 		}
 
 		// Legacy top-level shortcuts → their new section tabs (rebuild
@@ -9748,6 +9749,18 @@ if (
 		env: Env,
 		ctx: ExecutionContext,
 	): Promise<void> {
+		// Donation sync for Charity Challenge (race 216323) every 10 minutes.
+		// Keeps Total Raised near-real-time. Failure-isolated.
+		if (controller.cron === "3,13,23,33,43,53 * * * *") {
+			try {
+				const token = await resolveRunSignupAccessToken(env as unknown as Parameters<typeof resolveRunSignupAccessToken>[0]);
+				const d = await syncRunSignupDonations(env.nwana_engine_db, token, { raceId: 216323 });
+				console.log(`[charity-hourly] donations race 216323: ok=${d.ok} fetched=${d.fetched} new=${d.transactionsNew}`);
+			} catch (err) {
+				console.log(`[charity-hourly] donations ERROR ${err instanceof Error ? err.message : String(err)}`);
+			}
+			return;
+		}
 		// The daily 06:17 UTC cron is the only scheduled entry point. The
 		// normal fully-approved path is event-driven (approve endpoint);
 		// this cron is the fallback: deadline processing, missed events,
@@ -9836,6 +9849,8 @@ if (
 		} catch (err) {
 			console.log(`[series-2026-cron] auto-news ERROR ${err instanceof Error ? err.message : String(err)}`);
 		}
+		// Charity Challenge donation sync moved to hourly cron (23 * * * *).
+		// See scheduled() handler above for the hourly donation sync.
 	},
 };
 export {
