@@ -142,17 +142,14 @@ The implementation must account for the exact applicable channels, not vague “
 
 ## Email boundary
 
-RunSignup/TicketSignup email and contact lists are the Engine's mass-email and contact layer.
+RunSignup/TicketSignup email and contact lists are the Engine's mass-email and contact layer for existing marketing mailings.
 
-Do not create:
+OWNER DECISION 2026-10-11 (supersedes the 2026-09-19 restriction): Google Workspace / Gmail integration is allowed for corporate B2B outreach automation and reply handling. Verified gap: RunSignup's consent policy blocks cold B2B prospecting, which RunSignup/TicketSignup cannot perform. Scope: the three B2B tracks (Sponsor Every Kilometer, Corporate Umbrella Teams, Instructor Training Organizations) via the dedicated outreach mailbox (`partnerships@nwaofna.org`). Sending volumes are operational settings, not architecture.
 
-- a Gmail API integration;
-- automated bulk sending through Google Workspace;
-- a duplicate contact database for Google Workspace email.
+Do not create a duplicate contact database for Google Workspace email — the Engine's D1 pipeline tables (`sellers`, `partners`) remain the system of record. No Engine rebuild, no new CRM.
 
 The mailboxes `admin@nwaofna.org` and `president@nwaofna.org` remain human-operated accounts for individual business correspondence, including replies to press, partners, sponsors, and support. They are not Engine channels.
 
-If a future verified task cannot be performed through RunSignup/TicketSignup, evaluate that exact gap separately before reconsidering any Google Workspace integration. No such task is currently verified.
 
 Verified product/API distinction:
 
