@@ -82,13 +82,13 @@ Read before making changes:
 6. relevant docs/adr/
 7. AGENTS.md
 
-## EMAIL INTEGRATION BOUNDARY — OWNER CORRECTION 2026-09-19
+## EMAIL INTEGRATION BOUNDARY — OWNER DECISION 2026-10-11 (supersedes 2026-09-19 restriction)
 
-- Google Workspace email is not an NWANA Engine integration.
-- Do not build a Gmail API integration, automated Google Workspace bulk-email system, or duplicate Google Workspace contact database.
-- RunSignup/TicketSignup email and contact lists are the Engine's primary mass-email and contact layer.
+- RunSignup/TicketSignup email and contact lists remain the Engine's mass-email and contact layer for existing marketing mailings.
+- Google Workspace / Gmail integration with the NWANA Engine is allowed for corporate B2B outreach automation and reply handling. Verified gap: RunSignup's consent policy blocks cold B2B prospecting, which RunSignup/TicketSignup cannot perform.
+- Scope: the three B2B tracks (Sponsor Every Kilometer, Corporate Umbrella Teams, Instructor Training Organizations) via the dedicated outreach mailbox (`partnerships@nwaofna.org`). Sending volumes are operational settings, not architecture.
+- Do not build a duplicate Google Workspace contact database — the Engine's D1 pipeline tables (`sellers`, `partners`) remain the system of record. No Engine rebuild, no new CRM.
 - `admin@nwaofna.org` and `president@nwaofna.org` remain human-operated mailboxes for individual business correspondence, including replies to press, partners, sponsors, and support.
-- If a future verified task cannot be completed through RunSignup/TicketSignup, evaluate that exact task separately before reconsidering Google Workspace integration. No such task is currently verified.
 - This boundary concerns email only. The existing use of the Gemini application included with Google Workspace for Nonprofits to prepare reusable visual backgrounds remains separate and unchanged.
 
 ## OPERATING CENTER, INITIATIVES, AND BOARD — OWNER DECISION 2026-09-19
