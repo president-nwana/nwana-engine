@@ -6,6 +6,7 @@ import {
 	allResultsApproved,
 	getEventApprovals,
 	recordResultApproval,
+	recordRunsignupApproval,
 } from "../src/series-2026-approvals";
 import {
 	decideTrigger,
@@ -26,16 +27,32 @@ function makeApprovalDb() {
 					return {
 						async run() {
 							if (isInsert) {
-								const [series, distance, race_id, event_id, result_id, athlete, time, approved_at, , source] =
+								const [series, distance, race_id, event_id, result_id, athlete, time, approved_at] =
 									args;
+								// runsignup path binds 8 params (approved_by/source are
+								// literals in SQL); owner path binds 9 (source 9th).
+								const isRunsignup = args.length === 8;
+								const source = isRunsignup ? "runsignup" : args[8];
 								const k = `${series}|${distance}|${event_id}|${result_id}`;
-								if (!rows.has(k)) {
+								const existing = rows.get(k) as Record<string, unknown> | undefined;
+								if (!existing) {
 									rows.set(k, {
 										series, distance, raceId: race_id, eventId: event_id,
 										resultId: result_id, athlete, time,
-										approvedAt: approved_at, approvedBy: "owner", source,
+										approvedAt: approved_at,
+										approvedBy: isRunsignup ? "runsignup" : "owner",
+										source,
 									});
+								} else if (!isRunsignup && existing.source === "runsignup") {
+									// Explicit owner approval upgrades a RUNSIGNUP row.
+									existing.athlete = athlete;
+									existing.time = time;
+									existing.approvedAt = approved_at;
+									existing.approvedBy = "owner";
+									existing.source = source;
 								}
+								// runsignup over existing, or owner over owner:
+								// keep the existing row (earliest timestamp).
 							}
 						},
 						async first() {
@@ -105,13 +122,47 @@ describe("series_result_approvals", () => {
 		expect(await allResultsApproved(db, "5K", 1173956, ["1", "2"])).toBe(false);
 	});
 
-	it("never creates approvals on its own: no auto-approve helper exists", async () => {
-		// The module exports only record/get/all; there is no function that
-		// approves without an explicit owner action.
+	it("never invents approvals: only record/get/all plus the observed-RUNSIGNUP persister exist", async () => {
+		// recordRunsignupApproval persists an approval the owner already
+		// made inside RunSignup (presence signal) — it records, never invents.
 		const exported = await import("../src/series-2026-approvals");
 		expect(Object.keys(exported).sort()).toEqual(
-			["APPROVAL_SERIES", "allResultsApproved", "getEventApprovals", "recordResultApproval"],
+			["APPROVAL_SERIES", "allResultsApproved", "getEventApprovals", "recordResultApproval", "recordRunsignupApproval"],
 		);
+	});
+
+	it("recordRunsignupApproval is idempotent and never downgrades an owner approval", async () => {
+		const db = makeApprovalDb();
+		const input = {
+			distance: "10K", raceId: 210018, eventId: 1177719,
+			resultId: "233256054", athlete: "Susan Otto", time: "1:16:41",
+		};
+		const first = await recordRunsignupApproval(db, input);
+		expect(first.source).toBe("runsignup");
+		expect(first.approvedBy).toBe("runsignup");
+		// Second observation: same row, earliest timestamp kept.
+		const second = await recordRunsignupApproval(db, input);
+		expect(second.approvedAt).toBe(first.approvedAt);
+		expect((await getEventApprovals(db, "10K", 1177719)).size).toBe(1);
+
+		// Explicit owner approval upgrades the RUNSIGNUP row...
+		const upgraded = await recordResultApproval(db, { ...input, source: "oc" });
+		expect(upgraded.source).toBe("oc");
+		expect(upgraded.approvedBy).toBe("owner");
+
+		// ...but a later RUNSIGNUP observation never downgrades it back.
+		const after = await recordRunsignupApproval(db, input);
+		expect(after.source).toBe("oc");
+		expect(after.approvedBy).toBe("owner");
+	});
+
+	it("allResultsApproved authorizes from either source", async () => {
+		const db = makeApprovalDb();
+		await recordRunsignupApproval(db, {
+			distance: "10K", raceId: 210018, eventId: 1177719,
+			resultId: "1", athlete: "A", time: "1:16:41",
+		});
+		expect(await allResultsApproved(db, "10K", 1177719, ["1"])).toBe(true);
 	});
 });
 

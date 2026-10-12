@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { annotateSeries2026Records, applySeries2026PublicationHistory, buildSeries2026PublicationDraft, getSeries2026LevelDefinitions, previewSeries2026ResultPublications } from "../src/series-2026-results";
+import { annotateSeries2026Records, applySeries2026PublicationHistory, buildSeries2026PublicationDraft, detectLegacyScoring, getSeries2026LevelDefinitions, isLegacyScoredFinalized, previewSeries2026ResultPublications } from "../src/series-2026-results";
 
 const source = {
 	distance: "5K",
@@ -194,4 +194,171 @@ describe("Series 2026 result publication handoff", () => {
 		).rejects.toThrow("Unknown Series 2026 source filter");
 	});
 
+	it("fetches only the requested event when eventId is set", async () => {
+		const seenEventIds: string[] = [];
+		vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any) => {
+			const url = new URL(String(input));
+			if (url.pathname === "/rest/race/209477") {
+				return new Response(JSON.stringify({
+					race: {
+						events: [
+							{ event_id: 111, name: "Event A" },
+							{ event_id: 222, name: "Event B" },
+						],
+					},
+				}), { status: 200, headers: { "content-type": "application/json" } });
+			}
+			if (url.pathname.endsWith("/results/get-result-sets")) {
+				seenEventIds.push(url.searchParams.get("event_id") ?? "");
+				const eid = url.searchParams.get("event_id");
+				return new Response(JSON.stringify({
+					individual_results_sets: eid === "222"
+						? [{ individual_result_set_id: 9 }]
+						: [],
+				}), { status: 200, headers: { "content-type": "application/json" } });
+			}
+			if (url.pathname.endsWith("/results/get-results")) {
+				return new Response(JSON.stringify({
+					individual_results_sets: [{
+						individual_result_set_id: 9,
+						results_headers: {
+							"custom-field-10": "Performance Level",
+							"custom-field-11": "Level Place",
+						},
+						results: [{
+							result_id: 1,
+							first_name: "Alex",
+							last_name: "Walker",
+							gender: "M",
+							chip_time: "20:00",
+							"custom-field-10": "Elite",
+							"custom-field-11": "1",
+						}],
+					}],
+				}), { status: 200, headers: { "content-type": "application/json" } });
+			}
+			throw new Error(`unexpected fetch: ${url.pathname}`);
+		});
+
+		const preview = await previewSeries2026ResultPublications("oauth-token", {
+			raceId: 209477,
+			eventId: 222,
+		});
+		expect(seenEventIds).toEqual(["222"]);
+		expect(preview.drafts).toHaveLength(1);
+		expect(preview.drafts[0].source.event_id).toBe(222);
+		expect(preview.drafts[0].content.results[0].performance_level).toBe("Elite");
+	});
+
+	it("returns no drafts when eventId matches no event", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(JSON.stringify({ race: { events: [{ event_id: 111 }] } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+		const preview = await previewSeries2026ResultPublications("oauth-token", {
+			raceId: 209477,
+			eventId: 999,
+		});
+		expect(preview.drafts).toHaveLength(0);
+	});
+
+});
+
+describe("isLegacyScoredFinalized (legacy completion mode detector)", () => {
+	const scored = (id: string) => ({
+		result_id: id,
+		performance_level: "Competitive",
+		level_place: "1",
+	});
+
+	it("returns true when every row carries level and place", () => {
+		expect(isLegacyScoredFinalized([scored("1"), scored("2")], [])).toBe(true);
+	});
+
+	it("returns false when a row is missing the level", () => {
+		expect(isLegacyScoredFinalized([
+			scored("1"),
+			{ result_id: "2", performance_level: null, level_place: "3" },
+		], [])).toBe(false);
+	});
+
+	it("returns false when a row is missing the place", () => {
+		expect(isLegacyScoredFinalized([
+			scored("1"),
+			{ result_id: "2", performance_level: "Open", level_place: null },
+		], [])).toBe(false);
+	});
+
+	it("returns false for empty rows", () => {
+		expect(isLegacyScoredFinalized([], [])).toBe(false);
+	});
+
+	it("excludes disqualified results from the check", () => {
+		expect(isLegacyScoredFinalized([
+			scored("1"),
+			{ result_id: "2", performance_level: null, level_place: null },
+		], ["2"])).toBe(true);
+	});
+
+	it("treats empty-string level/place as missing", () => {
+		expect(isLegacyScoredFinalized([
+			{ result_id: "1", performance_level: "  ", level_place: "1" },
+		], [])).toBe(false);
+		expect(isLegacyScoredFinalized([
+			{ result_id: "1", performance_level: "Open", level_place: "" },
+		], [])).toBe(false);
+	});
+
+	it("counts null result_id rows (they cannot be excluded)", () => {
+		expect(isLegacyScoredFinalized([
+			{ result_id: null, performance_level: null, level_place: null },
+		], [])).toBe(false);
+		expect(isLegacyScoredFinalized([
+			{ result_id: null, performance_level: "Open", level_place: "5" },
+		], [])).toBe(true);
+	});
+});
+
+describe("detectLegacyScoring (two-part legacy verification)", () => {
+	const scored = (id: string) => ({
+		result_id: id,
+		performance_level: "Competitive",
+		level_place: "1",
+	});
+
+	it("reports fieldsComplete with the two-part detail when all decidable rows are scored", () => {
+		const detection = detectLegacyScoring([scored("1"), scored("2")], []);
+		expect(detection.fieldsComplete).toBe(true);
+		expect(detection.detail).toContain("Part A (fields): 2/2 decidable rows carry Performance Level + Level Place.");
+		expect(detection.detail).toContain("Part B (standings):");
+		expect(detection.detail).toContain("upload_standings → ensure_custom_fields → write_result_fields");
+	});
+
+	it("reports failure with WAITING detail when fields are incomplete", () => {
+		const detection = detectLegacyScoring([
+			scored("1"),
+			{ result_id: "2", performance_level: null, level_place: null },
+		], []);
+		expect(detection.fieldsComplete).toBe(false);
+		expect(detection.detail).toContain("Part A (fields): FAILED");
+		expect(detection.detail).toContain("1/2 decidable rows lack Performance Level and/or Level Place");
+		expect(detection.detail).toContain("WAITING_FOR_LEGACY_SCORING");
+	});
+
+	it("excludes disqualified rows from the decidable count", () => {
+		const detection = detectLegacyScoring([
+			scored("1"),
+			{ result_id: "2", performance_level: null, level_place: null },
+		], ["2"]);
+		expect(detection.fieldsComplete).toBe(true);
+		expect(detection.detail).toContain("1/2 decidable rows");
+	});
+
+	it("fails on empty rows", () => {
+		const detection = detectLegacyScoring([], []);
+		expect(detection.fieldsComplete).toBe(false);
+		expect(detection.detail).toContain("WAITING_FOR_LEGACY_SCORING");
+	});
 });
