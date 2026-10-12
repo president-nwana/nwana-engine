@@ -182,7 +182,7 @@ export async function homePage(db: D1Database): Promise<string> {
 	const newsTeaser = news.length > 0
 		? `<div class="grid cols-3">${news.map((n) => `
         <a class="card news-card" href="/news/${esc(n.slug)}">
-          <div class="meta">${esc(formatDate(n.published_at))} ${n.kind === "winner_announcement" ? `<span class="badge gold" style="margin-left:8px">Winners</span>` : ""}</div>
+          <div class="meta">${esc(formatDate(n.published_at))}<span class="badge soft" style="margin-left:8px">${esc(n.category || "News")}</span></div>
           <h3>${esc(n.title)}</h3>
         </a>`).join("")}</div>
         <p style="margin-top:18px"><a class="card-link" href="/news">All news →</a></p>`
@@ -688,9 +688,9 @@ export async function newsPage(db: D1Database): Promise<string> {
 	const body = items.length > 0
 		? `<div class="grid cols-3">${items.map((n) => `
         <a class="card news-card" href="/news/${esc(n.slug)}">
-          <div class="meta">${esc(formatDate(n.published_at))} ${n.kind === "winner_announcement" ? `<span class="badge gold" style="margin-left:8px">Winners</span>` : `<span class="badge soft" style="margin-left:8px">News</span>`}</div>
+          <div class="meta">${esc(formatDate(n.published_at))}<span class="badge soft" style="margin-left:8px">${esc(n.category || "News")}</span></div>
           <h3>${esc(n.title)}</h3>
-          <p style="font-size:14.5px;color:var(--muted)">${esc(newsExcerpt(n.body_html))}</p>
+          <p style="font-size:14.5px;color:var(--muted)">${esc(n.excerpt || newsExcerpt(n.body_html))}</p>
         </a>`).join("")}</div>`
 		: emptyState("The federation newsroom opens soon. Race reports, winner announcements, and federation updates will be published here as they happen.");
 
@@ -709,7 +709,7 @@ export async function newsArticlePage(db: D1Database, slug: string): Promise<str
 	if (!item) return null;
 	const content = `
   <div class="page-head"><div class="wrap">
-    <div class="meta" style="color:var(--gold-2);font-size:14px;margin-bottom:10px">${esc(formatDate(item.published_at))} ${item.kind === "winner_announcement" ? `<span class="badge gold" style="margin-left:8px">Winner announcement</span>` : ""}</div>
+    <div class="meta" style="color:var(--gold-2);font-size:14px;margin-bottom:10px">${esc(formatDate(item.published_at))}<span class="badge soft" style="margin-left:8px">${esc(item.category || "News")}</span></div>
     <h1>${esc(item.title)}</h1>
   </div></div>
   <div class="section"><div class="wrap">

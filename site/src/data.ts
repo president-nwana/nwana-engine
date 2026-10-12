@@ -60,9 +60,10 @@ export interface NewsItem {
 	id: number;
 	slug: string;
 	title: string;
+	excerpt: string;
 	body_html: string;
 	published_at: string;
-	kind: string;
+	category: string;
 }
 
 export function levelNameOf(row: ResultRow): string {
@@ -153,11 +154,14 @@ export function winnersOf(event: RaceEvent): ResultRow[] {
 }
 
 export async function getNews(db: D1Database, limit = 20): Promise<NewsItem[]> {
+	// Canonical news store: news_articles with audience flags.
+	// This site renders audience 'nwana' + 'both'. See migrations/0082.
 	try {
 		const { results } = await db
 			.prepare(
-				`SELECT id, slug, title, body_html, published_at, kind
-				 FROM site_news
+				`SELECT id, slug, title, excerpt, body_html, published_at, category
+				 FROM news_articles
+				 WHERE status = 'published' AND (audience = 'nwana' OR audience = 'both')
 				 ORDER BY published_at DESC
 				 LIMIT ?`,
 			)
@@ -173,9 +177,10 @@ export async function getNewsItem(db: D1Database, slug: string): Promise<NewsIte
 	try {
 		return await db
 			.prepare(
-				`SELECT id, slug, title, body_html, published_at, kind
-				 FROM site_news
-				 WHERE slug = ?
+				`SELECT id, slug, title, excerpt, body_html, published_at, category
+				 FROM news_articles
+				 WHERE slug = ? AND status = 'published'
+				   AND (audience = 'nwana' OR audience = 'both')
 				 LIMIT 1`,
 			)
 			.bind(slug)
