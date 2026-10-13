@@ -33,7 +33,8 @@ import {
 	evaluateEventTrigger,
 	fetchLiveEventResults,
 	getAthletePipeline,
-	isEventPublished,
+	getEventPublicationStatus,
+	logTriggerNotFired,
 } from "./series-2026-auto-process";
 import {
 	confirmRaceLifecyclePrep,
@@ -9779,36 +9780,74 @@ if (
 			publicBaseUrl: env.PUBLIC_BASE_URL ?? "https://nwana-engine.nwana-engine.workers.dev",
 		};
 		const rows = await env.nwana_engine_db
-			.prepare(`SELECT distance, race_id, active_event_id, events_json FROM race_lifecycle WHERE series = ?`)
+			.prepare(`SELECT distance, race_id, active_event_id, active_event_date, events_json FROM race_lifecycle WHERE series = ?`)
 			.bind(RACE_LIFECYCLE_SERIES)
-			.all<{ distance: string; race_id: number; active_event_id: number | null; events_json: string | null }>();
+			.all<{ distance: string; race_id: number; active_event_id: number | null; active_event_date: string | null; events_json: string | null }>();
 		// Fallback coverage: every event of every distance that is not yet
 		// published — the active event plus any missed past events (a past
 		// event whose results were never fully processed is evaluated here).
-		const eventsToCheck: Array<{ distance: string; raceId: number; eventId: number }> = [];
+		const eventsToCheck: Array<{ distance: string; raceId: number; eventId: number; eventDate: string | null }> = [];
 		for (const row of (rows.results ?? [])) {
 			const seen = new Set<number>();
 			if (row.active_event_id) {
-				eventsToCheck.push({ distance: row.distance, raceId: row.race_id, eventId: row.active_event_id });
+				eventsToCheck.push({ distance: row.distance, raceId: row.race_id, eventId: row.active_event_id, eventDate: row.active_event_date });
 				seen.add(row.active_event_id);
 			}
 			try {
-				const events = row.events_json ? JSON.parse(row.events_json) as Array<{ event_id: number; publication: string }> : [];
+				const events = row.events_json ? JSON.parse(row.events_json) as Array<{ event_id: number; event_date: string | null; publication: string }> : [];
 				for (const event of events) {
 					if (event.publication === "PUBLISHED") continue;
+					// LEGACY_BASELINE events are terminal (2026-10-13
+					// starvation fix): publication === "BASELINE" means
+					// every result set's history is LEGACY_BASELINE — a
+					// historical baseline that can never be published as
+					// new — yet evaluating one burned the same RunSignup
+					// subrequest budget as a live event. 21 of the 35
+					// daily candidates were baseline events; excluding
+					// them here leaves the budget for events that can
+					// still fire. Their data is not changed.
+					if (event.publication === "BASELINE") continue;
 					if (seen.has(event.event_id)) continue;
 					seen.add(event.event_id);
-					eventsToCheck.push({ distance: row.distance, raceId: row.race_id, eventId: event.event_id });
+					eventsToCheck.push({ distance: row.distance, raceId: row.race_id, eventId: event.event_id, eventDate: event.event_date ?? null });
 				}
 			} catch {
 				// events_json unreadable: the active event above is still covered.
 			}
 		}
+		// Newest first (2026-10-13 starvation fix): this single invocation
+		// has a finite subrequest budget, so events that can still fire
+		// must be evaluated before the backlog. Past events go newest ->
+		// oldest; future events (their deadline cannot have passed and no
+		// results are expected yet) go last, soonest first; undated
+		// events sort last within their group.
+		const todayUtc = new Date().toISOString().slice(0, 10);
+		eventsToCheck.sort((a, b) => {
+			const aFuture = a.eventDate !== null && a.eventDate > todayUtc;
+			const bFuture = b.eventDate !== null && b.eventDate > todayUtc;
+			if (aFuture !== bFuture) return aFuture ? 1 : -1;
+			if (a.eventDate && b.eventDate && a.eventDate !== b.eventDate) {
+				return aFuture
+					? a.eventDate.localeCompare(b.eventDate)
+					: b.eventDate.localeCompare(a.eventDate);
+			}
+			if (a.eventDate === null && b.eventDate !== null) return 1;
+			if (a.eventDate !== null && b.eventDate === null) return -1;
+			return b.eventId - a.eventId;
+		});
 		for (const item of eventsToCheck) {
 			const label = `${item.distance}/${item.eventId}`;
 			try {
-				if (await isEventPublished(env.nwana_engine_db, item.raceId, item.eventId)) {
+				const publicationStatus = await getEventPublicationStatus(env.nwana_engine_db, item.raceId, item.eventId);
+				if (publicationStatus === "PUBLISHED" || publicationStatus === "PUBLISHED_COMPLETE" || publicationStatus === "PUBLISHED_PARTIAL") {
 					console.log(`[series-2026-cron] ${label}: already PUBLISHED, skipping`);
+					continue;
+				}
+				if (publicationStatus === "LEGACY_BASELINE") {
+					// Terminal (see enumeration): the latest history row is
+					// a historical baseline even when events_json has not
+					// caught up — never spend evaluation budget on it.
+					console.log(`[series-2026-cron] ${label}: LEGACY_BASELINE (terminal), skipping`);
 					continue;
 				}
 				const trigger = await evaluateEventTrigger(autoEnv, {
@@ -9818,6 +9857,17 @@ if (
 				});
 				if (!trigger.fire) {
 					console.log(`[series-2026-cron] ${label}: not fired (${trigger.reason})`);
+					// Durable evidence for past-deadline non-fires
+					// (2026-10-13 starvation fix): console-only logging
+					// made a starved, failed-closed evaluation invisible
+					// in D1. One log row per event per run at most.
+					if (trigger.deadline && Date.parse(trigger.deadline) <= Date.now()) {
+						try {
+							await logTriggerNotFired(env.nwana_engine_db, item, trigger);
+						} catch (logErr) {
+							console.log(`[series-2026-cron] ${label}: trigger log write failed: ${logErr instanceof Error ? logErr.message : String(logErr)}`);
+						}
+					}
 					continue;
 				}
 				const result = await autoProcessEvent(autoEnv, {
