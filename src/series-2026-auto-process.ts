@@ -1072,6 +1072,24 @@ export async function getAthletePipeline(
 }
 
 /**
+ * Latest publication-history status for one event (any of its result
+ * sets), or null when the event has no history rows. Single source for
+ * the cron guards: PUBLISHED* (never re-process) and LEGACY_BASELINE
+ * (terminal — historical baseline, can never be published as new).
+ */
+export async function getEventPublicationStatus(
+	db: D1Database,
+	raceId: number,
+	eventId: number,
+): Promise<string | null> {
+	const row = await db
+		.prepare(`SELECT status FROM result_publication_history WHERE race_id = ? AND event_id = ? ORDER BY updated_at DESC LIMIT 1`)
+		.bind(raceId, eventId)
+		.first<{ status: string | null }>();
+	return row?.status ?? null;
+}
+
+/**
  * ADR-0042 cron guard: an event whose publication already reached PUBLISHED
  * is never re-processed by the daily deadline wake-up. Manual owner
  * "process now" retries remain available through the OC endpoint.
@@ -1081,9 +1099,34 @@ export async function isEventPublished(
 	raceId: number,
 	eventId: number,
 ): Promise<boolean> {
-	const row = await db
-		.prepare(`SELECT status FROM result_publication_history WHERE race_id = ? AND event_id = ? ORDER BY updated_at DESC LIMIT 1`)
-		.bind(raceId, eventId)
-		.first<{ status: string | null }>();
-	return row?.status === "PUBLISHED" || row?.status === "PUBLISHED_COMPLETE" || row?.status === "PUBLISHED_PARTIAL";
+	const status = await getEventPublicationStatus(db, raceId, eventId);
+	return status === "PUBLISHED" || status === "PUBLISHED_COMPLETE" || status === "PUBLISHED_PARTIAL";
+}
+
+/**
+ * Durable visibility for a NON-firing trigger evaluation (2026-10-13
+ * starvation fix). Before this, a non-firing evaluation existed only in
+ * the cron's console log, so an event whose evaluation failed closed on
+ * an exhausted subrequest budget was indistinguishable in D1 from an
+ * event that was never reached. The daily wake-up calls this only for
+ * past-deadline events; each event is evaluated at most once per run,
+ * so this writes at most one row per event per run.
+ */
+export async function logTriggerNotFired(
+	db: D1Database,
+	input: { distance: string; raceId: number; eventId: number },
+	trigger: TriggerEvaluation,
+): Promise<void> {
+	await logAutoStep(
+		db,
+		{
+			distance: input.distance,
+			raceId: input.raceId,
+			eventId: input.eventId,
+			trigger: trigger.reason,
+		},
+		"trigger",
+		trigger.reason === "exception" ? "failed" : "skipped",
+		`Not fired (${trigger.reason}): ${trigger.detail}`,
+	);
 }
