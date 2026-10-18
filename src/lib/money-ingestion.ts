@@ -979,23 +979,42 @@ export async function listMoneyEvents(
 	opts?: { eventType?: string; limit?: number },
 ): Promise<Record<string, unknown>[]> {
 	const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
-	let sql =
-		`SELECT event_key, source_system, source_transaction_id, transaction_key, event_type,
+	// Phase 2 (migration 0098): attribution columns ride along when the
+	// schema carries them; before 0098 is applied the legacy column set
+	// keeps this canonical read path working unchanged.
+	const columns =
+		`event_key, source_system, source_transaction_id, transaction_key, event_type,
 				occurred_at, ingested_at, currency,
 				gross_cents, gross_status, fee_cents, fee_status,
 				amount_paid_cents, amount_paid_status,
 				net_cents, net_status, refund_cents, refund_status,
-				attribution, source_ref
-		 FROM money_events`;
+				attribution, source_ref, territory_id, fundraiser_id,
+				funding_lane, restriction, source_prospect_id`;
+	const legacyColumns =
+		`event_key, source_system, source_transaction_id, transaction_key, event_type,
+				occurred_at, ingested_at, currency,
+				gross_cents, gross_status, fee_cents, fee_status,
+				amount_paid_cents, amount_paid_status,
+				net_cents, net_status, refund_cents, refund_status,
+				attribution, source_ref, territory_id, fundraiser_id`;
 	const binds: unknown[] = [];
+	let where = "";
 	if (opts?.eventType && isKnownEventType(opts.eventType)) {
-		sql += ` WHERE event_type = ?`;
+		where = ` WHERE event_type = ?`;
 		binds.push(opts.eventType);
 	}
-	sql += ` ORDER BY occurred_at DESC, ingested_at DESC LIMIT ?`;
-	binds.push(limit);
-	const rows = await db.prepare(sql).bind(...binds).all<Record<string, unknown>>();
-	return rows.results ?? [];
+	const run = async (cols: string) => {
+		const rows = await db
+			.prepare(`SELECT ${cols} FROM money_events${where} ORDER BY occurred_at DESC, ingested_at DESC LIMIT ?`)
+			.bind(...binds, limit)
+			.all<Record<string, unknown>>();
+		return rows.results ?? [];
+	};
+	try {
+		return await run(columns);
+	} catch {
+		return run(legacyColumns);
+	}
 }
 
 /** Canonical read path (ADR-0044): current state per transaction from D1. */
@@ -1004,22 +1023,39 @@ export async function listMoneyTransactions(
 	opts?: { lifecycleState?: string; limit?: number },
 ): Promise<Record<string, unknown>[]> {
 	const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
-	let sql =
-		`SELECT transaction_key, source_system, source_transaction_id, first_event_key,
+	// Phase 2 (migration 0098): attribution columns when present (see
+	// listMoneyEvents for the staged-schema fallback rationale).
+	const columns =
+		`transaction_key, source_system, source_transaction_id, first_event_key,
 				currency, gross_cents, gross_status, fee_cents, fee_status,
 				amount_paid_cents, amount_paid_status,
 				net_cents, net_status, refund_cents, refund_status,
-				lifecycle_state, attribution, source_ref, first_seen_at, updated_at
-		 FROM money_transactions`;
+				lifecycle_state, attribution, source_ref, first_seen_at, updated_at,
+				territory_id, funding_lane, restriction, source_prospect_id`;
+	const legacyColumns =
+		`transaction_key, source_system, source_transaction_id, first_event_key,
+				currency, gross_cents, gross_status, fee_cents, fee_status,
+				amount_paid_cents, amount_paid_status,
+				net_cents, net_status, refund_cents, refund_status,
+				lifecycle_state, attribution, source_ref, first_seen_at, updated_at`;
 	const binds: unknown[] = [];
+	let where = "";
 	if (opts?.lifecycleState) {
-		sql += ` WHERE lifecycle_state = ?`;
+		where = ` WHERE lifecycle_state = ?`;
 		binds.push(opts.lifecycleState);
 	}
-	sql += ` ORDER BY updated_at DESC LIMIT ?`;
-	binds.push(limit);
-	const rows = await db.prepare(sql).bind(...binds).all<Record<string, unknown>>();
-	return rows.results ?? [];
+	const run = async (cols: string) => {
+		const rows = await db
+			.prepare(`SELECT ${cols} FROM money_transactions${where} ORDER BY updated_at DESC LIMIT ?`)
+			.bind(...binds, limit)
+			.all<Record<string, unknown>>();
+		return rows.results ?? [];
+	};
+	try {
+		return await run(columns);
+	} catch {
+		return run(legacyColumns);
+	}
 }
 
 /** Canonical read path (ADR-0044): sync checkpoints from D1. */

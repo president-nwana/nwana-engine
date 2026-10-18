@@ -1,5 +1,6 @@
 import { getFundView } from "./fund";
 import { getSponsorshipAssetsView } from "./sponsorship-asset";
+import { getLaneGates, type LaneGate } from "./lib/money-receipts";
 
 // Executive money view: a read-only, on-demand aggregation for the owner.
 // Fundraising and sponsorship are separate processes, separate
@@ -114,7 +115,62 @@ export interface ExecutiveMoneyView {
 	/** MemberOrg source objects with membership counts and revenue. */
 	memberorgs: ExecutiveMoneyMemberOrg[];
 	sponsorship: ExecutiveMoneySponsorshipSummary;
+	/** Phase 2 (TZ 13): the money cycle itself — lane gates, the receipts
+	 * registry with territory attribution, received-vs-expected separation,
+	 * and the Florida pilot cycle from source to real receipt. */
+	money_cycle: MoneyCycleSection;
 	disclaimer: string;
+}
+
+export interface MoneyCycleReceipt {
+	event_key: string;
+	event_type: string;
+	lane: string;
+	occurred_at: string | null;
+	gross_cents: number | null;
+	territory_id: string | null;
+	territory_name: string | null;
+	restriction: string | null;
+	source_prospect_id: number | null;
+	source_org: string | null;
+	attribution: string;
+}
+
+export interface MoneyCycleFlorida {
+	state_territory_id: string;
+	sources: number;
+	outreach_sent: number;
+	replies: number;
+	interested_replies: number;
+	receipts_count: number;
+	receipts_gross_cents: number;
+	sponsorship_contract_receipts: number;
+	first_case: {
+		prospect_id: number;
+		org_name: string;
+		track: string;
+		city_state: string | null;
+		first_sent_at: string | null;
+		reply_classification: string | null;
+		reply_received_at: string | null;
+		money_received_cents: number;
+		stage: string;
+	} | null;
+}
+
+export interface MoneyCycleSection {
+	lane_gates: LaneGate[] | null;
+	lane_gates_note: string | null;
+	receipts_registry: MoneyCycleReceipt[];
+	received_totals_by_lane: Record<string, { events: number; gross_cents: number }>;
+	received_totals_note: string;
+	expected_not_received: {
+		sponsor_commitments_count: number;
+		sponsor_commitments_cents: number;
+		note: string;
+	};
+	florida_cycle: MoneyCycleFlorida | null;
+	basis: string;
 }
 
 const num = (value: unknown): number => {
@@ -392,11 +448,261 @@ async function getMemberOrgs(db: D1Database, tenantId: string = "nwana"): Promis
 	return out;
 }
 
+/** Lane of a stored event when funding_lane was never backfilled (pre-0098 rows). */
+export function laneForEventType(eventType: string): string {
+	switch (eventType) {
+		case "donation_received":
+		case "fundraiser_donation_received":
+			return "donation";
+		case "registration_paid":
+			return "registration";
+		case "license_purchased":
+		case "license_renewed":
+			return "license";
+		case "sponsorship_received":
+			return "sponsorship";
+		case "contract_payment_received":
+			return "contract";
+		case "grant_received":
+			return "grant";
+		default:
+			return "other";
+	}
+}
+
+const FLORIDA_STATE_TERRITORY_ID = "terr-st-12";
+const FLORIDA_STATE_FIPS = "12";
+/** SQL predicate: the row's territory belongs to the Florida subtree. */
+const FL_SUBTREE = `IN (SELECT territory_id FROM territories WHERE territory_id = '${FLORIDA_STATE_TERRITORY_ID}' OR state_fips = '${FLORIDA_STATE_FIPS}')`;
+
+/**
+ * Phase 2 money cycle (TZ 13 Phase 2, criteria 3/7/8): gates, receipts
+ * registry, received-vs-expected, and the Florida cycle. Reads Engine
+ * state only (ADR-0044). Every part degrades independently: before
+ * migration 0098 / the territory backfill are applied, the affected part
+ * reports its pending state instead of failing the whole money view.
+ */
+export async function getMoneyCycle(db: D1Database): Promise<MoneyCycleSection> {
+	const section: MoneyCycleSection = {
+		lane_gates: null,
+		lane_gates_note: null,
+		receipts_registry: [],
+		received_totals_by_lane: {},
+		received_totals_note:
+			"Totals sum VERIFIED gross only. fundraiser_donation_received rows mirror a donation_received row for the same money and are excluded from cycle totals to avoid double counting.",
+		expected_not_received: {
+			sponsor_commitments_count: 0,
+			sponsor_commitments_cents: 0,
+			note: "Commitments and asks are expectations, never received money (TZ criterion 7); they are shown separately and never enter received totals.",
+		},
+		florida_cycle: null,
+		basis:
+			"Attribution reads money_events.territory_id / funding_lane (migration 0098 + Phase 2 backfill). Before the backfill is applied, territory and Florida-cycle counts read zero — that is the staged state, not missing money.",
+	};
+
+	try {
+		section.lane_gates = await getLaneGates(db);
+	} catch {
+		section.lane_gates_note = "funding_lane_gates not applied yet (migration 0098 pending)";
+	}
+
+	// Receipts registry + received totals.
+	try {
+		const rows = await db
+			.prepare(
+				`SELECT e.event_key, e.event_type, e.funding_lane, e.occurred_at,
+						CASE WHEN e.gross_status = 'VERIFIED' THEN e.gross_cents ELSE NULL END AS gross_cents,
+						e.territory_id, t.name AS territory_name, e.restriction,
+						e.source_prospect_id, p.org_name AS source_org, e.attribution
+				 FROM money_events e
+				 LEFT JOIN territories t ON t.territory_id = e.territory_id
+				 LEFT JOIN outreach_prospects p ON p.id = e.source_prospect_id
+				 ORDER BY e.occurred_at DESC, e.ingested_at DESC LIMIT 50`,
+			)
+			.all<Record<string, unknown>>();
+		for (const r of rows.results ?? []) {
+			section.receipts_registry.push({
+				event_key: String(r.event_key),
+				event_type: String(r.event_type),
+				lane: r.funding_lane ? String(r.funding_lane) : laneForEventType(String(r.event_type)),
+				occurred_at: (r.occurred_at as string) ?? null,
+				gross_cents: r.gross_cents == null ? null : num(r.gross_cents),
+				territory_id: (r.territory_id as string) ?? null,
+				territory_name: (r.territory_name as string) ?? null,
+				restriction: (r.restriction as string) ?? null,
+				source_prospect_id: r.source_prospect_id == null ? null : num(r.source_prospect_id),
+				source_org: (r.source_org as string) ?? null,
+				attribution: String(r.attribution ?? ""),
+			});
+		}
+	} catch {
+		try {
+			const rows = await db
+				.prepare(
+					`SELECT e.event_key, e.event_type, e.occurred_at,
+							CASE WHEN e.gross_status = 'VERIFIED' THEN e.gross_cents ELSE NULL END AS gross_cents,
+							e.territory_id, t.name AS territory_name, e.attribution
+					 FROM money_events e
+					 LEFT JOIN territories t ON t.territory_id = e.territory_id
+					 ORDER BY e.occurred_at DESC, e.ingested_at DESC LIMIT 50`,
+				)
+				.all<Record<string, unknown>>();
+			for (const r of rows.results ?? []) {
+				section.receipts_registry.push({
+					event_key: String(r.event_key),
+					event_type: String(r.event_type),
+					lane: laneForEventType(String(r.event_type)),
+					occurred_at: (r.occurred_at as string) ?? null,
+					gross_cents: r.gross_cents == null ? null : num(r.gross_cents),
+					territory_id: (r.territory_id as string) ?? null,
+					territory_name: (r.territory_name as string) ?? null,
+					restriction: null,
+					source_prospect_id: null,
+					source_org: null,
+					attribution: String(r.attribution ?? ""),
+				});
+			}
+		} catch {
+			// Registry unavailable; totals below still stand on their own query.
+		}
+	}
+	try {
+		const totals = await db
+			.prepare(
+				`SELECT event_type, funding_lane, COUNT(*) AS events,
+						COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0) AS gross_cents
+				 FROM money_events
+				 WHERE event_type NOT IN ('fundraiser_donation_received', 'fundraiser_created')
+				 GROUP BY event_type, funding_lane`,
+			)
+			.all<{ event_type: string; funding_lane: string | null; events: number; gross_cents: number }>();
+		for (const r of totals.results ?? []) {
+			const lane = r.funding_lane ?? laneForEventType(r.event_type);
+			const cur = section.received_totals_by_lane[lane] ?? { events: 0, gross_cents: 0 };
+			cur.events += num(r.events);
+			cur.gross_cents += num(r.gross_cents);
+			section.received_totals_by_lane[lane] = cur;
+		}
+	} catch {
+		try {
+			const totals = await db
+				.prepare(
+					`SELECT event_type, COUNT(*) AS events,
+							COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0) AS gross_cents
+					 FROM money_events
+					 WHERE event_type NOT IN ('fundraiser_donation_received', 'fundraiser_created')
+					 GROUP BY event_type`,
+				)
+				.all<{ event_type: string; events: number; gross_cents: number }>();
+			for (const r of totals.results ?? []) {
+				const lane = laneForEventType(r.event_type);
+				const cur = section.received_totals_by_lane[lane] ?? { events: 0, gross_cents: 0 };
+				cur.events += num(r.events);
+				cur.gross_cents += num(r.gross_cents);
+				section.received_totals_by_lane[lane] = cur;
+			}
+		} catch {
+			// Leave empty totals rather than failing the view.
+		}
+	}
+
+	// Expected, not received: confirmed sponsor commitments.
+	try {
+		const c = await db
+			.prepare(
+				`SELECT COUNT(*) AS n, COALESCE(SUM(committed_amount_cents), 0) AS cents
+				 FROM sponsor_commitments WHERE status = 'confirmed'`,
+			)
+			.first<{ n: number; cents: number }>();
+		if (c) {
+			section.expected_not_received.sponsor_commitments_count = num(c.n);
+			section.expected_not_received.sponsor_commitments_cents = num(c.cents);
+		}
+	} catch {
+		// Commitments table may not exist in a staged environment.
+	}
+
+	// Florida pilot cycle (TZ 4.2): source -> outreach -> reply -> receipt.
+	try {
+		const counts = await db
+			.prepare(
+				`SELECT
+					(SELECT COUNT(*) FROM outreach_prospects WHERE territory_id ${FL_SUBTREE}) AS sources,
+					(SELECT COUNT(DISTINCT s.prospect_id) FROM outreach_sends s
+					   JOIN outreach_prospects p ON p.id = s.prospect_id
+					  WHERE p.territory_id ${FL_SUBTREE}) AS sent,
+					(SELECT COUNT(DISTINCT r.prospect_id) FROM outreach_replies r
+					   JOIN outreach_prospects p ON p.id = r.prospect_id
+					  WHERE p.territory_id ${FL_SUBTREE}) AS replies,
+					(SELECT COUNT(DISTINCT r.prospect_id) FROM outreach_replies r
+					   JOIN outreach_prospects p ON p.id = r.prospect_id
+					  WHERE p.territory_id ${FL_SUBTREE} AND r.classification = 'interested') AS interested,
+					(SELECT COUNT(*) FROM money_events WHERE territory_id ${FL_SUBTREE}
+					   AND event_type NOT IN ('fundraiser_donation_received', 'fundraiser_created')) AS receipts,
+					(SELECT COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0)
+					   FROM money_events WHERE territory_id ${FL_SUBTREE}
+					   AND event_type NOT IN ('fundraiser_donation_received', 'fundraiser_created')) AS receipts_gross,
+					(SELECT COUNT(*) FROM money_events WHERE territory_id ${FL_SUBTREE}
+					   AND event_type IN ('sponsorship_received', 'contract_payment_received')) AS b2b_receipts`,
+			)
+			.first<Record<string, number>>();
+		const fl: MoneyCycleFlorida = {
+			state_territory_id: FLORIDA_STATE_TERRITORY_ID,
+			sources: num(counts?.sources),
+			outreach_sent: num(counts?.sent),
+			replies: num(counts?.replies),
+			interested_replies: num(counts?.interested),
+			receipts_count: num(counts?.receipts),
+			receipts_gross_cents: num(counts?.receipts_gross),
+			sponsorship_contract_receipts: num(counts?.b2b_receipts),
+			first_case: null,
+		};
+		try {
+			const fc = await db
+				.prepare(
+					`SELECT p.id AS prospect_id, p.org_name, p.track, p.city_state,
+							(SELECT MIN(s.sent_at) FROM outreach_sends s WHERE s.prospect_id = p.id) AS first_sent_at,
+							r.classification AS reply_classification, r.received_at AS reply_received_at,
+							COALESCE((SELECT SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END)
+								FROM money_events WHERE source_prospect_id = p.id), 0) AS money_received_cents
+					 FROM outreach_prospects p
+					 JOIN outreach_replies r ON r.prospect_id = p.id
+					 WHERE p.territory_id ${FL_SUBTREE}
+					 ORDER BY r.received_at ASC LIMIT 1`,
+				)
+				.first<Record<string, unknown>>();
+			if (fc) {
+				const money = num(fc.money_received_cents);
+				fl.first_case = {
+					prospect_id: num(fc.prospect_id),
+					org_name: String(fc.org_name ?? ""),
+					track: String(fc.track ?? ""),
+					city_state: (fc.city_state as string) ?? null,
+					first_sent_at: (fc.first_sent_at as string) ?? null,
+					reply_classification: (fc.reply_classification as string) ?? null,
+					reply_received_at: (fc.reply_received_at as string) ?? null,
+					money_received_cents: money,
+					stage: money > 0
+						? "full cycle: source, outreach, reply, money received and attributed"
+						: "cycle open at the reply stage: no money received from this source yet",
+				};
+			}
+		} catch {
+			// First-case detail is additive; counts above already carry the cycle.
+		}
+		section.florida_cycle = fl;
+	} catch {
+		section.florida_cycle = null;
+	}
+
+	return section;
+}
+
 export async function getExecutiveMoneyView(
 	db: D1Database,
 	tenantId: string = "nwana",
 ): Promise<ExecutiveMoneyView> {
-	const [fundView, sponsorshipView, donationOutcome, donationsCat, registrationsCat, licensesCat, sources, memberorgs] =
+	const [fundView, sponsorshipView, donationOutcome, donationsCat, registrationsCat, licensesCat, sources, memberorgs, moneyCycle] =
 		await Promise.all([
 			getFundView(db),
 			getSponsorshipAssetsView(db),
@@ -406,6 +712,7 @@ export async function getExecutiveMoneyView(
 			getRevenueCategory(db, ["license_purchased", "license_renewed"], tenantId),
 			getSourceBreakdown(db, tenantId),
 			getMemberOrgs(db, tenantId),
+			getMoneyCycle(db),
 		]);
 
 	const total_verified_revenue = {
@@ -479,6 +786,7 @@ export async function getExecutiveMoneyView(
 			committed_count: stage_counts["committed"] ?? 0,
 			note: "Agreement values are not recorded in the machine; stages and counts only.",
 		},
+		money_cycle: moneyCycle,
 		disclaimer:
 			"Fundraising and sponsorship are separate processes, relationships, and lifecycles. This view aggregates them for visibility only.",
 	};

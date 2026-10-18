@@ -42,12 +42,52 @@ export const MONEY_EVENT_TYPES = [
 	"course_purchased",
 	"fundraiser_created",
 	"fundraiser_donation_received",
+	// Phase 2 (TZ 5.2-5.4, migration 0098): B2B-lane receipts. Sponsorship is
+	// a commercial relationship, never a donation: booking it as
+	// donation_received would falsify the donation totals (TZ criterion 7).
+	"sponsorship_received",
+	"contract_payment_received",
+	"grant_received",
 	"transaction_refunded",
 	"transaction_partially_refunded",
 	"transaction_reversed",
 	"transaction_chargeback",
 ] as const;
 export type MoneyEventType = (typeof MONEY_EVENT_TYPES)[number];
+
+/**
+ * Funding lanes (TZ 5.2: separate flows, never merged). Stored on
+ * money_events.funding_lane / money_transactions.funding_lane (migration
+ * 0098). `registration` and `license` are earned-revenue lanes carried for
+ * attribution completeness; the solicitation gates of TZ section 8 apply
+ * to donation / sponsorship / contract / grant / in-kind.
+ */
+export const FUNDING_LANES = [
+	"donation",
+	"sponsorship",
+	"contract",
+	"grant",
+	"in-kind",
+	"registration",
+	"license",
+] as const;
+export type FundingLane = (typeof FUNDING_LANES)[number];
+
+/**
+ * Restriction vocabulary for money_events.restriction. NULL means no
+ * restriction was recorded for the receipt (the historical default);
+ * it never means "unrestricted" retroactively.
+ */
+export const RESTRICTIONS = [
+	"unrestricted",
+	"territory",
+	"program",
+	"territory_program",
+] as const;
+export type Restriction = (typeof RESTRICTIONS)[number];
+
+/** Source system for receipts recorded by hand through the OC (B2B lane). */
+export const MANUAL_B2B_SOURCE_SYSTEM = "manual-b2b";
 
 export const AMOUNT_VERIFIED = "VERIFIED" as const;
 export const AMOUNT_UNKNOWN = "UNKNOWN" as const;

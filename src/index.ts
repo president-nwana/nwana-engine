@@ -148,6 +148,7 @@ import {
 	backfillRunSignupDonations,
 	backfillRunSignupRegistrations,
 } from "./lib/money-ingestion";
+import { getLaneGates, recordReceivedPayment } from "./lib/money-receipts";
 import {
 	ACTION_STATUSES,
 	REVENUE_OBJECT_TYPES,
@@ -6826,6 +6827,44 @@ export default {
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/money/sync-state") {
 			return json({ ok: true, sync: await getMoneySyncState(env.nwana_engine_db) });
+		}
+		// Phase 2 Money Engine (TZ 8, 13): the funding lane gates as data.
+		// The Florida charitable donation lane stays CLOSED until FDACS
+		// registration is approved; sponsorship/contract lanes carry their
+		// own gates and are not blocked by it.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/money/lane-gates") {
+			try {
+				return json({ ok: true, gates: await getLaneGates(env.nwana_engine_db) });
+			} catch {
+				return json({ ok: false, error: "funding_lane_gates not applied yet (migration 0098 pending)", gates: [] }, 503);
+			}
+		}
+		// Phase 2 Money Engine: record a REAL received sponsorship/contract
+		// payment into the canonical money store with source, territory and
+		// restriction attribution. Explicit owner action only (no cron);
+		// idempotent by payment_ref; lane gates enforced in the lib.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/money/record-receipt") {
+			let body: Record<string, unknown> = {};
+			try {
+				body = (await request.json()) as Record<string, unknown>;
+			} catch {
+				body = {};
+			}
+			const result = await recordReceivedPayment(env.nwana_engine_db, {
+				lane: body.lane as never,
+				payment_ref: body.payment_ref as string,
+				amount_cents: body.amount_cents as number,
+				currency: body.currency as string | undefined,
+				occurred_at: body.occurred_at as string,
+				territory_id: body.territory_id as string,
+				restriction: body.restriction as never,
+				source_prospect_id: body.source_prospect_id as number | undefined,
+				fee_cents: body.fee_cents as number | undefined,
+				payer_name: body.payer_name as string | undefined,
+				solicitation: body.solicitation as boolean | undefined,
+				note: body.note as string | undefined,
+			});
+			return json(result, result.ok ? 200 : 400);
 		}
 		// Phase 1 Money Ingestion: explicit sync trigger. This is the
 		// allowed start per the OPERATING_PLAN trigger rule (owner action
