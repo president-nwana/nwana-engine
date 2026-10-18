@@ -36,6 +36,8 @@ import {
 	waysToGivePage,
 } from "./pages-migration";
 import { esc, layout } from "./views";
+import { getNews } from "./data";
+import { dlInjectForms, dlInjectLibrary, dlServe, sfDef, sfFormPage, sfHandlePost } from "./forms-downloads";
 
 interface Env {
 	nwana_site_db: D1Database;
@@ -56,7 +58,12 @@ function notFound(): Response {
 	});
 }
 
+let CANONICAL_PATH = "/";
+
 function html(body: string, status = 200): Response {
+	if (status === 200 && typeof body === "string" && body.includes("</head>")) {
+		body = body.replace("</head>", `<link rel="canonical" href="https://nwaofna.org${CANONICAL_PATH === "/" ? "/" : CANONICAL_PATH}"></head>`);
+	}
 	return new Response(body, {
 		status,
 		headers: {
@@ -82,7 +89,7 @@ function errorPage(error: unknown): Response {
 	});
 }
 
-import { LOGO_JPG_BASE64, FAVICON_PNG_BASE64, ALBERT_FATIKHOV_PNG_BASE64 } from "./assets-embedded";
+import { LOGO_JPG_BASE64, FAVICON_PNG_BASE64, ALBERT_FATIKHOV_PNG_BASE64, LIENE_VISOCKA_SQ_JPG_BASE64, ALBERT_TAZETDINOV_SQ_JPG_BASE64, SVEN_THORSLUND_379_JPG_BASE64, SVEN_THORSLUND_SILVER_JPG_BASE64 } from "./assets-embedded";
 
 function base64ToBytes(b64: string): Uint8Array {
 	const bin = atob(b64);
@@ -94,7 +101,14 @@ function base64ToBytes(b64: string): Uint8Array {
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
+		if (url.hostname === "www.nwaofna.org") {
+			return new Response(null, {
+				status: 301,
+				headers: { location: "https://nwaofna.org" + url.pathname + url.search },
+			});
+		}
 		const path = url.pathname.replace(/\/+$/, "") || "/";
+		CANONICAL_PATH = path;
 
 		try {
 			// Serve embedded static assets (logo, favicon) directly from the
@@ -109,7 +123,7 @@ export default {
 					},
 				});
 			}
-			if (request.method === "GET" && (path === "/favicon.png" || path === "/favicon.ico")) {
+			if (request.method === "GET" && (path === "/favicon.png" || path === "/favicon.ico" || path === "/apple-touch-icon.png")) {
 				return new Response(base64ToBytes(FAVICON_PNG_BASE64), {
 					headers: {
 						"content-type": "image/png",
@@ -124,6 +138,25 @@ export default {
 				return new Response(base64ToBytes(ALBERT_FATIKHOV_PNG_BASE64), {
 					headers: {
 						"content-type": "image/png",
+						"cache-control": "public, max-age=86400",
+					},
+				});
+			}
+			// Photos whose files exist in public/ but are not reliably served
+			// by the assets binding: served embedded, like the logo (see the
+			// comment on the logo route above). The two Sven photos are
+			// web-optimized copies (max 1000px wide) of the public/ originals.
+			if (request.method === "GET" && (path === "/board/liene-visocka-sq.jpg" || path === "/board/albert-tazetdinov-sq.jpg" || path === "/elite/sven-thorslund-379.jpg" || path === "/elite/sven-thorslund-silver.jpg")) {
+				const b64img = path === "/board/liene-visocka-sq.jpg"
+					? LIENE_VISOCKA_SQ_JPG_BASE64
+					: path === "/board/albert-tazetdinov-sq.jpg"
+						? ALBERT_TAZETDINOV_SQ_JPG_BASE64
+						: path === "/elite/sven-thorslund-379.jpg"
+							? SVEN_THORSLUND_379_JPG_BASE64
+							: SVEN_THORSLUND_SILVER_JPG_BASE64;
+				return new Response(base64ToBytes(b64img), {
+					headers: {
+						"content-type": "image/jpeg",
 						"cache-control": "public, max-age=86400",
 					},
 				});
@@ -168,8 +201,14 @@ export default {
 			if (request.method === "GET" && path === "/sponsors") {
 				return html(await sponsorsPage());
 			}
-			if (request.method === "GET" && path === "/groups") {
+			if (request.method === "GET" && path === "/umbrella-groups") {
 				return html(await groupsPage());
+			}
+			if (request.method === "GET" && path === "/groups") {
+				return new Response(null, {
+					status: 301,
+					headers: { location: "https://groups.nwaofna.org/" },
+				});
 			}
 			if (request.method === "GET" && path === "/press") {
 				return html(await pressPage());
@@ -205,10 +244,10 @@ export default {
 				return html(await safetyPage());
 			}
 			if (request.method === "GET" && path === "/documents") {
-				return html(await documentsPage());
+				return html(dlInjectLibrary(await documentsPage()));
 			}
 			if (request.method === "GET" && path === "/forms") {
-				return html(await formsPage());
+				return html(dlInjectForms(await formsPage()));
 			}
 			if (request.method === "GET" && path === "/choose-your-path") {
 				return html(await chooseYourPathPage());
@@ -258,10 +297,36 @@ export default {
 			if (request.method === "GET" && path === "/partners/become-a-partner") {
 				return html(await becomePartnerPage());
 			}
+			if (request.method === "GET" && path === "/sitemap.xml") {
+				let slugs: string[] = [];
+				try {
+					slugs = (await getNews(env.nwana_site_db, 100)).map((n) => n.slug);
+				} catch {}
+				const staticPaths = ["/", "/about", "/results", "/calendar", "/challenges", "/series", "/winners", "/news", "/elite", "/elite/tommy-aunan", "/elite/sven-thorslund", "/board/liene-visocka", "/board/maris-vainovskis", "/board/leonids-reinholds", "/board/albert-tazetdinov", "/choose-your-path", "/events", "/faq", "/governance", "/privacy", "/terms", "/terms-conditions", "/code-of-conduct", "/safesport", "/anti-doping", "/safety", "/documents", "/forms", "/forms/general-inquiry", "/forms/instructor-coach-inquiry", "/forms/event-program-proposal", "/forms/sponsor-partner-inquiry", "/forms/volunteer-interest", "/forms/safety-incident-report", "/forms/media-request", "/forms/document-brand-asset-request", "/forms/correction-request", "/brand", "/press", "/media-contact", "/sponsors", "/partners", "/partner-network", "/partners/become-a-partner", "/sellers", "/umbrella-groups", "/support", "/ways-to-give", "/contact"];
+				const urls = staticPaths.concat(slugs.map((s) => "/news/" + s));
+				const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls.map((u) => "<url><loc>https://nwaofna.org" + u + "</loc></url>").join("\n") + "\n</urlset>";
+				return new Response(xml, {
+					headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=3600" },
+				});
+			}
 			const article = /^\/news\/([a-z0-9-]+)$/.exec(path);
 			if (request.method === "GET" && article) {
 				const page = await newsArticlePage(env.nwana_site_db, article[1]);
 				return page ? html(page) : notFound();
+			}
+			const sfMatch = /^\/forms\/([a-z0-9-]+)$/.exec(path);
+			if (sfMatch && (request.method === "GET" || request.method === "POST")) {
+				const def = sfDef(sfMatch[1]);
+				if (!def) return notFound();
+				if (request.method === "GET") return html(sfFormPage(def, {}, []));
+				const r = await sfHandlePost(request, env.nwana_site_db, def);
+				return html(r.body, r.status);
+			}
+			const dlMatch = /^\/downloads\/([a-z0-9._-]+)$/.exec(path);
+			if (request.method === "GET" && dlMatch) {
+				const resp = await dlServe(dlMatch[1], env.nwana_site_db);
+				if (resp) return resp;
+				return notFound();
 			}
 			return notFound();
 		} catch (error) {

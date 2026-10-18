@@ -20,7 +20,7 @@ function legalSection(num: number | string, title: string, body: string): string
 }
 
 function effectiveDate(date: string): string {
-	return `<p style="color:var(--muted);font-size:14px;margin-bottom:22px"><strong>Effective Date:</strong> ${esc(date)}</p>`;
+	return `<p style="color:var(--muted);font-size:15px;margin-bottom:22px"><strong>Effective Date:</strong> ${esc(date)}</p>`;
 }
 
 function bullets(items: string[]): string {
@@ -115,9 +115,9 @@ export async function sponsorsPage(): Promise<string> {
 	return layout("Sponsors", "sponsors", content, "Sponsor NWANA: eight sponsorship programs supporting competitions, instructor education, community programs, and the growth of Nordic Walking across North America.");
 }
 
-// ---------------- 2. /groups ----------------
+// ---------------- 2. /umbrella-groups (Umbrella NW Groups) ----------------
 
-const NW_GROUPS_URL = "https://runsignup.com/MemberOrg/NWANANWGroups";
+const NW_GROUPS_URL = "https://groups.nwaofna.org/";
 
 export async function groupsPage(): Promise<string> {
 	const content = `
@@ -155,11 +155,11 @@ export async function groupsPage(): Promise<string> {
     <p>If your company, school, municipality, club, sponsor group, or organization wants to explore an Umbrella NW Group, contact NWANA to discuss the best structure. If you are an individual participant, you can also introduce this idea to your employer, school, club, wellness program, city office, or community organization.</p>
     <div class="grid cols-2" style="margin-top:22px">
       ${contactCard("Umbrella NW Group")}
-      <div class="card"><h3>NW Groups member organization</h3><p>Join an existing NW Group or become the first licensed participant connected with the formation of a new group in your community or organization.</p><p><a class="card-link" href="${NW_GROUPS_URL}">Visit the NW Groups page on RunSignup →</a></p></div>
+      <div class="card"><h3>NW Groups member organization</h3><p>Join an existing NW Group or become the first licensed participant connected with the formation of a new group in your community or organization.</p><p><a class="card-link" href="${NW_GROUPS_URL}">Visit the NW Groups site →</a></p></div>
     </div>
   </div></div>`;
 
-	return layout("Umbrella NW Groups", "groups", content, "Umbrella NW Groups: one shared NWANA structure connecting multiple Nordic Walking groups for employers, schools, clubs, and sponsors.");
+	return layout("Umbrella NW Groups", "umbrella-groups", content, "Umbrella NW Groups: one shared NWANA structure connecting multiple Nordic Walking groups for employers, schools, clubs, and sponsors.");
 }
 // ---------------- 3. /press (Press Kit) ----------------
 
@@ -284,7 +284,7 @@ export async function governancePage(): Promise<string> {
 		{ href: "/events", t: "Events", d: "NWANA organizational events, clinics, workshops, fundraisers, recognition events, partner gatherings, and education sessions." },
 	];
 	const groupCards = (items: { href: string; t: string; d: string }[]) =>
-		`<div class="grid cols-3" style="margin-top:18px">${items.map((i) => `<a class="card news-card" href="${i.href}"><h3>${esc(i.t)}</h3><p style="font-size:14.5px;color:var(--muted)">${esc(i.d)}</p></a>`).join("")}</div>`;
+		`<div class="grid cols-3" style="margin-top:18px">${items.map((i) => `<a class="card news-card" href="${i.href}"><h3>${esc(i.t)}</h3><p style="font-size:15.5px;color:var(--muted)">${esc(i.d)}</p></a>`).join("")}</div>`;
 	const content = `
   ${pageHead("Governance", "Governance & Policies", "The Nordic Walking Association of North America (NWANA) is building Nordic Walking in North America through clear standards, responsible leadership, safe participation, public-facing policies, education, licenses, events, community programs, partnerships, sponsorships, and transparent organizational resources. This page is the central access point for NWANA governance, policies, safety standards, legal terms, media resources, public documents, forms, and contact pathways. NWANA is a U.S. nonprofit public charity recognized under IRS Section 501(c)(3). Donations may be tax-deductible to the extent allowed by law. Please consult your tax advisor.")}
   <div class="section"><div class="wrap">
@@ -660,7 +660,7 @@ export async function chooseYourPathPage(): Promise<string> {
     <div class="grid cols-3">
       ${card("Learn Nordic Walking", "Build a sound technical foundation and explore structured Nordic Walking education for beginners and experienced walkers.", "https://academy.nwaofna.org", "Visit the Academy →")}
       ${card("Compete as an Athlete", "Enter current NWANA competitions, submit results, follow standings, and explore the rules and disciplines of Nordic Walking sport.", "https://runsignup.com/Race/FL/SaintPetersburg/NWANANWSeries", "Competition Calendar →")}
-      ${card("Join or Start an NW Group", "Join an existing NW Group or become the first licensed participant connected with the formation of a new group in your community or organization.", "https://runsignup.com/MemberOrg/NWANANWGroups", "NW Groups →")}
+      ${card("Join or Start an NW Group", "Join an existing NW Group or become the first licensed participant connected with the formation of a new group in your community or organization.", "https://groups.nwaofna.org/", "NW Groups →")}
     </div>
   </div></div>
   <div class="section alt"><div class="wrap">
@@ -690,7 +690,7 @@ export async function chooseYourPathPage(): Promise<string> {
       ${mailto("General Question", "Contact NWANA")}
       <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="/contact">Contact page</a>
     </div>
-    <p style="margin-top:26px">Also see: <a class="card-link" href="/elite">Elite Athletes →</a> <a class="card-link" href="/events" style="margin-left:18px">NWANA Events →</a> <a class="card-link" href="/groups" style="margin-left:18px">Umbrella NW Groups →</a> <a class="card-link" href="/faq" style="margin-left:18px">FAQ →</a></p>
+    <p style="margin-top:26px">Also see: <a class="card-link" href="/elite">Elite Athletes →</a> <a class="card-link" href="/events" style="margin-left:18px">NWANA Events →</a> <a class="card-link" href="/umbrella-groups" style="margin-left:18px">Umbrella NW Groups →</a> <a class="card-link" href="/faq" style="margin-left:18px">FAQ →</a></p>
   </div></div>`;
 
 	return layout("Choose Your Path", "choose-your-path", content, "Choose your NWANA pathway: learn, compete, join a group, become an instructor or official, partner, sponsor, or volunteer.");
@@ -713,8 +713,8 @@ export async function faqPage(): Promise<string> {
 		["Where does NWANA professional education begin?", "Every NWANA professional pathway begins with the Nordic Walking Instructor – Beginner Level Certification through NWANA Academy. This course establishes the fundamental understanding of Nordic Walking technique, equipment, movement principles, safety, and professional responsibility required before entering more advanced education."],
 		["Can I skip professional education levels?", "No. NWANA professional education develops step by step. Previous education or experience may be considered, but it does not automatically authorize a person to bypass required NWANA education, assessment, practical preparation, or licensing requirements."],
 		["Does completing professional education guarantee a license?", "No. Course completion and licensing are separate. After completing the required education, an applicant must satisfy the applicable eligibility, verification, practical, and license-activation requirements."],
-		["What is an NWANA Nordic Walking Group?", 'An NW Group connects people through Nordic Walking within a particular community, organization, territory, or program category. NWANA can establish a dedicated group page and provide tools for registrations, communications, activities, events, fundraising, ticket sales, donations, and continued group development. <a href="https://runsignup.com/MemberOrg/NWANANWGroups">NW Groups</a>'],
-		["Can I join an existing NW Group?", "Yes. If an appropriate group already exists, you may obtain the applicable Individual License and join it. If no group exists in the selected area or category, you may become the first licensed participant connected with the formation of a new group."],
+		["What is an NWANA Nordic Walking Group?", 'An NW Group connects people through Nordic Walking within a particular community, organization, territory, or program category. NWANA can establish a dedicated group page and provide tools for registrations, communications, activities, events, fundraising, ticket sales, donations, and continued group development. <a href="https://groups.nwaofna.org/">NW Groups</a>'],
+		["Can I join an existing NW Group?", "Yes. If an appropriate group already exists, you may obtain the applicable Individual License and <a href=\"https://groups.nwaofna.org/find-a-group\">join it</a>. If no group exists in the selected area or category, you may become the first licensed participant connected with the formation of a new group."],
 		["Does obtaining an Individual License require me to lead a group?", "No. An Individual License does not require you to create or lead a group, organize activities, or conduct events. However, it does not prevent you from becoming involved in those activities if you choose to do so and satisfy any applicable requirements."],
 		["May I create a group using an organization's name?", "A group connected with a specific company, school, university, government agency, healthcare organization, faith community, sports organization, homeowners association, or other established organization must be created by that organization or with its permission. An Individual License does not authorize the use of another organization's name, logo, facilities, communication channels, or other resources."],
 		["What is a RECOGNIZED NW Group?", "RECOGNIZED status is an optional advanced status for a group that has developed the leadership, participation, programs, administration, financial readiness, and other capabilities required by NWANA. The group must be prepared to manage its own payment account and expanded website tools. NWANA will help the group prepare for this transition."],
@@ -892,7 +892,7 @@ function albertCard(profile: CanonicalAthleteRow | null): string {
       <p>Albert Fatikhov is a World Championship medalist in competitive Nordic Walking and an active international-level athlete. His competitive record includes two World Championship medals, six Latvian Championship medals, and a successful return to regular competition in the United States through the NWANA Open Nordic Walking Series. At the 2024 World Championship in Lahti, Finland, Albert won the Silver Medal in the 4 x 5K men's relay and the Bronze Medal in the 5K individual race. ${esc(seasonLine)}</p>
       ${bullets(achievementBullets)}
       ${focus ? `<p><strong>${esc(focus.title)}.</strong> Albert continues to compete actively while focusing on speed, technique, and performance development across the shorter Nordic Walking distances.</p>` : ``}
-      ${statsAsOf ? `<p style="color:var(--muted);font-size:13px">Season statistics computed from official finalized NWANA results, as of ${esc(statsAsOf)}.</p>` : ``}
+      ${statsAsOf ? `<p style="color:var(--muted);font-size:14.5px">Season statistics computed from official finalized NWANA results, as of ${esc(statsAsOf)}.</p>` : ``}
       <p><a class="card-link" href="${esc(propertyUrl)}" target="_blank" rel="noopener">albertfatikhov.nwaofna.org →</a></p>
     </div>`;
 }
@@ -991,7 +991,7 @@ export async function tommyAunanPage(): Promise<string> {
     <div class="kicker">Photo gallery</div>
     <h2>Championships and competitions across two decades</h2>
     <div class="grid cols-3" style="margin-top:22px">
-      ${gallery.map(([src, caption]) => `<div class="card"><img src="${src}" alt="${caption}" style="width:100%;border-radius:12px;margin-bottom:10px"><p style="font-size:14px;color:var(--muted)">${caption}</p></div>`).join("")}
+      ${gallery.map(([src, caption]) => `<div class="card"><img src="${src}" alt="${caption}" style="width:100%;border-radius:12px;margin-bottom:10px"><p style="font-size:15px;color:var(--muted)">${caption}</p></div>`).join("")}
     </div>
   </div></div>
   <div class="section alt"><div class="wrap">
@@ -1217,14 +1217,14 @@ export async function waysToGivePage(): Promise<string> {
         <div class="kicker">Donor-advised fund</div>
         <h3>Give from your Donor-Advised Fund (DAF)</h3>
         <p>The simplest way to give from your DAF is to recommend a grant to NWANA directly through your fund provider (Fidelity Charitable, Schwab Charitable, Vanguard Charitable, or your community foundation). Search for us by name or EIN:</p>
-        <p><strong>Legal name:</strong> Nordic Walking Association of North America<br><strong>EIN:</strong> 33-2444142<br><strong>Address:</strong> 7901 4th St N 23228, St. Petersburg, FL 33702</p>
+        <p><strong>Legal name:</strong> Nordic Walking Association of North America<br><strong>EIN:</strong> 33-2444142<br><strong>Address:</strong> 7901 4th St N, #23228, St. Petersburg, FL 33702</p>
         <p>No online form is needed. Your DAF provider will send the grant to us directly. Please note: if you give through a DAF, your tax receipt comes from your DAF provider, not from NWANA, because the deduction was taken when you funded your DAF.</p>
       </div>
       <div class="card">
         <div class="kicker">By check</div>
         <h3>Give by check</h3>
         <p>Make your check payable to "Nordic Walking Association of North America" or "NWANA" and mail it to:</p>
-        <p><strong>7901 4th St N 23228<br>St. Petersburg, FL 33702</strong></p>
+        <p><strong>7901 4th St N, #23228<br>St. Petersburg, FL 33702</strong></p>
       </div>
       <div class="card">
         <div class="kicker">Through your employer</div>
@@ -1443,7 +1443,7 @@ export async function partnerNetworkPage(): Promise<string> {
 		"Media organizations, publishers, platforms, agencies, and communications networks.",
 		"Restaurants, retailers, local employers, service businesses, and other community businesses.",
 	];
-	const typeCardsWithDesc = types.map(([num, name, tags], i) => `<div class="card"><div class="meta">${esc(num)}</div><h3>${esc(name)}</h3><p style="font-size:14px;color:var(--muted)">${esc(typeDescs[i])}</p><p style="font-size:13.5px">${tags.map((t) => `<span class="threshold" style="margin:0 6px 6px 0;display:inline-block">${esc(t)}</span>`).join("")}</p></div>`).join("");
+	const typeCardsWithDesc = types.map(([num, name, tags], i) => `<div class="card"><div class="meta">${esc(num)}</div><h3>${esc(name)}</h3><p style="font-size:15px;color:var(--muted)">${esc(typeDescs[i])}</p><p style="font-size:13.5px">${tags.map((t) => `<span class="threshold" style="margin:0 6px 6px 0;display:inline-block">${esc(t)}</span>`).join("")}</p></div>`).join("");
 	const content = `
   ${pageHead("Partner Network", "NWANA Partner Network", "NWANA Partner Network connects organizations with the infrastructure, programs, and opportunities of the Nordic Walking Association of North America. NWANA works with national and regional networks, sports organizations, government and public agencies, healthcare and aging organizations, schools and universities, corporations, foundations, equipment and outdoor brands, event organizers, research institutions, media, local businesses, and other organizations that can help develop Nordic Walking across North America. Partners may distribute opportunities through existing networks, support local delivery, fund or sponsor NWANA programs, provide equipment or professional services, host activities and events, contribute research, or support public awareness and regional development. NWANA builds the continental infrastructure. Partners help put it to work.")}
   <div class="section"><div class="wrap">

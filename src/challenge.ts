@@ -8,6 +8,7 @@
 import { runSignupGetJson } from "./runsignup-client";
 import { resolveRunSignupAccessToken } from "./runsignup-oauth";
 import { syncRunSignupDonations } from "./lib/money-ingestion";
+import { recordAdClick, bindAdClick } from "./lib/ads-conversions";
 import { fetchFundraiserMineState } from "./fundraiser-mine";
 
 export const CHALLENGE_RACE_ID = 216323;
@@ -1751,6 +1752,43 @@ async function handleDeleteActivity(tallyStr: string, url: URL, env: Env): Promi
 }
 
 /** Main entry: auth check + routing. Called early from the worker fetch handler. */
+/**
+ * POST /api/challenge/v1/ad-click
+ * Body: { click_id, kind, landing_path, rsu_user_id? }
+ * Google Ads completed-conversion truth layer (Phase 1, 2026-10-16): the
+ * charity worker reports each ad click ID captured on a landing; when the
+ * browser is already signed in, rsu_user_id binds the click immediately.
+ */
+async function handleAdClick(request: Request, env: Env): Promise<Response> {
+	let body: { click_id?: unknown; kind?: unknown; landing_path?: unknown; rsu_user_id?: unknown };
+	try {
+		body = await request.json();
+	} catch {
+		return json({ ok: false, error: "invalid JSON" }, 400);
+	}
+	const result = await recordAdClick(env.nwana_engine_db, body);
+	if (!result.ok) return json({ ok: false, error: result.error }, 400);
+	return json({ ok: true });
+}
+
+/**
+ * POST /api/challenge/v1/ad-click/bind
+ * Body: { click_id, kind, rsu_user_id }
+ * Called by the charity worker at RunSignup OAuth sign-in: binds the
+ * browser's nw_click cookie to the OAuth-verified rsu_user_id.
+ */
+async function handleAdClickBind(request: Request, env: Env): Promise<Response> {
+	let body: { click_id?: unknown; kind?: unknown; rsu_user_id?: unknown };
+	try {
+		body = await request.json();
+	} catch {
+		return json({ ok: false, error: "invalid JSON" }, 400);
+	}
+	const result = await bindAdClick(env.nwana_engine_db, body);
+	if (!result.ok) return json({ ok: false, error: result.error }, 400);
+	return json({ ok: true });
+}
+
 export async function handleChallengeApi(request: Request, env: Env, url: URL, ctx?: ExecutionContext): Promise<Response> {
 	const presented = request.headers.get("X-Challenge-Key") || "";
 	if (!env.CHALLENGE_API_KEY || presented !== env.CHALLENGE_API_KEY) {
@@ -1824,6 +1862,12 @@ export async function handleChallengeApi(request: Request, env: Env, url: URL, c
 	}
 	if (path === "/api/challenge/v1/fundraiser/mine" && request.method === "GET") {
 		return handleMyFundraiser(url, env);
+	}
+	if (path === "/api/challenge/v1/ad-click" && request.method === "POST") {
+		return handleAdClick(request, env);
+	}
+	if (path === "/api/challenge/v1/ad-click/bind" && request.method === "POST") {
+		return handleAdClickBind(request, env);
 	}
 	if (path === "/api/challenge/v1/debug-race-info" && request.method === "GET") {
 		return handleDebugRaceInfo(env);

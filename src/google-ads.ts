@@ -507,6 +507,104 @@ export async function getConversionActions(
 	}
 }
 
+export interface ClickConversionUploadItem {
+	conversionAction: string;
+	gclid?: string;
+	gbraid?: string;
+	wbraid?: string;
+	conversionDateTime: string;
+	conversionValue?: number;
+	currencyCode?: string;
+	orderId?: string;
+}
+
+export interface ClickConversionUploadFailure {
+	/** Index into the submitted conversions array. */
+	index: number;
+	message: string;
+	/** JSON of the Google Ads errorCode object, for classification. */
+	errorCode: string;
+}
+
+/**
+ * Upload offline click conversions (ConversionUploadService.
+ * uploadClickConversions, partial_failure = true). Used by the
+ * completed-conversion truth layer (src/lib/ads-conversions.ts) to report
+ * TRUE completed events (registration / fundraiser creation / donation)
+ * against the Import (UPLOAD_CLICKS) conversion actions.
+ *
+ * Throws only on whole-request failure (auth, transport, API error).
+ * Per-conversion failures are returned, keyed by submission index.
+ */
+export async function uploadClickConversions(
+	env: GoogleAdsEnv,
+	customerId: string,
+	conversions: ClickConversionUploadItem[],
+): Promise<{ failures: ClickConversionUploadFailure[] }> {
+	const missing = missingConfiguration(env);
+	if (missing.length > 0) {
+		throw new Error(`Not connected: ${missing.join(", ")} missing.`);
+	}
+	const credential = await env.nwana_engine_db.prepare(`
+		SELECT encrypted_refresh_token, iv
+		FROM integration_credentials
+		WHERE provider = ?
+		LIMIT 1
+	`).bind(PROVIDER).first<{
+		encrypted_refresh_token: string;
+		iv: string;
+	}>();
+	if (!credential) {
+		throw new Error("Not connected: no OAuth credential stored yet.");
+	}
+	const refreshToken = await decryptRefreshToken(
+		credential.encrypted_refresh_token,
+		credential.iv,
+		env.GOOGLE_ADS_TOKEN_KEY!,
+	);
+	const accessToken = await refreshAccessToken(refreshToken, env);
+	const response = await fetch(
+		`https://googleads.googleapis.com/${API_VERSION}/customers/${customerId}:uploadClickConversions`,
+		{
+			method: "POST",
+			headers: googleAdsApiHeaders(accessToken, env),
+			body: JSON.stringify({ conversions, partialFailure: true }),
+		},
+	);
+	const payload = await response.json() as {
+		partialFailureError?: {
+			details?: Array<{
+				errors?: Array<{
+					errorCode?: Record<string, unknown>;
+					message?: string;
+					location?: {
+						fieldPathElements?: Array<{ fieldName?: string; index?: number }>;
+					};
+				}>;
+			}>;
+		};
+		error?: { message?: string };
+	};
+	if (!response.ok) {
+		throw new Error(payload.error?.message ?? `Google Ads upload failed (${response.status})`);
+	}
+	const failures: ClickConversionUploadFailure[] = [];
+	for (const detail of payload.partialFailureError?.details ?? []) {
+		for (const err of detail.errors ?? []) {
+			const convEl = (err.location?.fieldPathElements ?? []).find(
+				(el) => el.fieldName === "conversions",
+			);
+			if (!convEl || typeof convEl.index !== "number") continue;
+			failures.push({
+				index: convEl.index,
+				message: err.message ?? "unknown conversion upload error",
+				errorCode: JSON.stringify(err.errorCode ?? {}),
+			});
+		}
+	}
+	return { failures };
+}
+
 export function buildLiveCampaignsQuery(): string {
 	return [
 		"SELECT campaign.id, campaign.name, campaign.status,",

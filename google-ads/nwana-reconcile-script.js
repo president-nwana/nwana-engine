@@ -59,7 +59,7 @@ var CONFIG = {
 };
 
 // Increment on every behavior change so Preview logs prove which version ran.
-var SCRIPT_VERSION = "2026-10-10a / inventory-readonly";
+var SCRIPT_VERSION = "2026-10-10b / inventory-readonly";
 // ── ONE-TIME BOOTSTRAP ──────────────────────────────────────────────
 // Paste the operating center key between the quotes, Preview once
 // (authorize when asked), then DELETE the key from this line and Save.
@@ -552,14 +552,16 @@ function entityStatus(obj) {
 }
 
 function collectAccountInventory() {
-  var meta = readCampaignMetaBulk(); // id -> {channel_type,start_date,end_date}
+  var meta = readCampaignMetaBulk(); // id -> {channel_type}
   var conversionActions = readConversionActions();
   var campaigns = [];
   var note = null;
   var it;
   try {
+    // GAQL-style IN needs parentheses and quoted values; square brackets
+    // throw QueryError.BAD_VALUE (proven 2026-10-10 in Preview).
     it = AdsApp.campaigns()
-      .withCondition('campaign.status IN [ENABLED, PAUSED]')
+      .withCondition("campaign.status IN ('ENABLED', 'PAUSED')")
       .get();
   } catch (e) {
     // Fallback: unfiltered iterator, skip REMOVED manually.
@@ -596,14 +598,17 @@ function safeName(campaign) {
   try { return campaign.getName(); } catch (e) { return '(unnamed)'; }
 }
 
-// One GAQL query for channel type + start/end dates of all campaigns.
+// One GAQL query for the channel type of all campaigns.
+// (campaign.start_date / campaign.end_date are NOT selectable via
+// AdsApp.search() in this runtime — QueryError.UNRECOGNIZED_FIELD, proven
+// 2026-10-10 in Preview. Dates come from the classic getStartDate() /
+// getEndDate() in readCampaignInventory instead.)
 // Defensive: any failure degrades to an empty map (fields become null).
 function readCampaignMetaBulk() {
   var meta = {};
   try {
     var rows = AdsApp.search(
-      'SELECT campaign.id, campaign.name, campaign.advertising_channel_type, ' +
-      'campaign.start_date, campaign.end_date ' +
+      'SELECT campaign.id, campaign.name, campaign.advertising_channel_type ' +
       'FROM campaign WHERE campaign.status != \'REMOVED\' ' +
       'ORDER BY campaign.name LIMIT 200');
     while (rows.hasNext()) {
@@ -612,14 +617,12 @@ function readCampaignMetaBulk() {
       var id = String(c.id || '');
       if (!id) continue;
       meta[id] = {
-        channel_type: c.advertisingChannelType || c.advertising_channel_type || null,
-        start_date: c.startDate || c.start_date || null,
-        end_date: c.endDate || c.end_date || null
+        channel_type: c.advertisingChannelType || c.advertising_channel_type || null
       };
     }
   } catch (e) {
     Logger.log('Inventory pass: campaign metadata query failed (' + e.message +
-      '); channel type and dates will be null.');
+      '); channel type will be null.');
   }
   return meta;
 }
@@ -651,11 +654,30 @@ function readConversionActions() {
   return actions;
 }
 
+function pad2(n) {
+  return (n < 10 ? '0' : '') + n;
+}
+
+function classicDateString(d) {
+  // AdsApp GoogleAdsDate object {year, month, day} -> 'yyyy-MM-dd'.
+  try {
+    if (!d || !d.year) return null;
+    return d.year + '-' + pad2(d.month) + '-' + pad2(d.day);
+  } catch (e) {
+    return null;
+  }
+}
+
 function readCampaignInventory(campaign, meta) {
   var id = String(campaign.getId());
   var m = meta[id] || {};
   var budgetUsd = 0;
   try { budgetUsd = campaign.getBudget().getAmount(); } catch (e) { /* null */ }
+  // Dates via the classic API (GAQL campaign.start_date is unselectable
+  // in AdsApp.search(); see readCampaignMetaBulk).
+  var startDate = null, endDate = null;
+  try { startDate = classicDateString(campaign.getStartDate()); } catch (e) { /* null */ }
+  try { endDate = classicDateString(campaign.getEndDate()); } catch (e) { /* null */ }
   var stats = { impressions: 0, clicks: 0, cost_usd: 0, conversions: 0, ctr: 0, conversion_rate: 0 };
   try {
     var s = campaign.getStatsFor('LAST_30_DAYS');
@@ -726,8 +748,8 @@ function readCampaignInventory(campaign, meta) {
     status: entityStatus(campaign),
     channel_type: m.channel_type || null,
     daily_budget_usd: budgetUsd,
-    start_date: m.start_date || null,
-    end_date: m.end_date || null,
+    start_date: startDate,
+    end_date: endDate,
     stats_30d: stats,
     ad_groups: adGroups,
     landing_pages: Object.keys(landingPages),

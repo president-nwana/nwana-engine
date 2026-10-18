@@ -286,7 +286,13 @@ import {
 	ensureUpcomingMeeting,
 	getBoardCadence,
 } from "./board-protocol";
-import { handleChallengeApi } from "./challenge";
+import { handleChallengeApi, CHALLENGE_EVENT_IDS, BUNDLE_EVENT_IDS } from "./challenge";
+import {
+	syncChallengeRegistrations,
+	syncChallengeFundraisers,
+	buildConversionOutbox,
+	uploadPendingConversions,
+} from "./lib/ads-conversions";
 import { handleNewsList, handleNewsItem } from "./news";
 
 interface Env {
@@ -9760,6 +9766,31 @@ if (
 			} catch (err) {
 				console.log(`[charity-hourly] donations ERROR ${err instanceof Error ? err.message : String(err)}`);
 			}
+			// Google Ads completed-conversion truth layer (Phase 1,
+			// 2026-10-16): persist race-216323 completions on the same
+			// cadence as donations, then rebuild the conversion outbox.
+			// Each step failure-isolated; none may fail the donation sync.
+			try {
+				const regs = await syncChallengeRegistrations(env as unknown as Parameters<typeof syncChallengeRegistrations>[0], {
+					raceId: 216323,
+					eventIds: [...CHALLENGE_EVENT_IDS, ...BUNDLE_EVENT_IDS],
+				});
+				console.log(`[ads-truth] registrations race 216323: ok=${regs.ok} fetched=${regs.fetched} inserted=${regs.inserted}${regs.error ? ` error=${regs.error}` : ""}`);
+			} catch (err) {
+				console.log(`[ads-truth] registrations ERROR ${err instanceof Error ? err.message : String(err)}`);
+			}
+			try {
+				const funds = await syncChallengeFundraisers(env as unknown as Parameters<typeof syncChallengeFundraisers>[0], { raceId: 216323 });
+				console.log(`[ads-truth] fundraisers race 216323: ok=${funds.ok} fetched=${funds.fetched} inserted=${funds.inserted}${funds.error ? ` error=${funds.error}` : ""}`);
+			} catch (err) {
+				console.log(`[ads-truth] fundraisers ERROR ${err instanceof Error ? err.message : String(err)}`);
+			}
+			try {
+				const outbox = await buildConversionOutbox(env.nwana_engine_db, 216323);
+				console.log(`[ads-truth] outbox: registrations+${outbox.registrations} fundraisers+${outbox.fundraisers} donations+${outbox.donations} rematched=${outbox.rematched}`);
+			} catch (err) {
+				console.log(`[ads-truth] outbox ERROR ${err instanceof Error ? err.message : String(err)}`);
+			}
 			return;
 		}
 		// The daily 06:17 UTC cron is the only scheduled entry point. The
@@ -9898,6 +9929,17 @@ if (
 			console.log(`[series-2026-cron] auto-news drafted ${news.drafts.length} item(s)`);
 		} catch (err) {
 			console.log(`[series-2026-cron] auto-news ERROR ${err instanceof Error ? err.message : String(err)}`);
+		}
+		// Google Ads completed conversions: daily upload of pending outbox
+		// rows (Phase 1 truth layer, 2026-10-16). Google's documented
+		// cadence for offline import is at least daily. Failure-isolated:
+		// missing Import conversion actions are logged by exact name and
+		// their rows stay pending; nothing here touches bidding.
+		try {
+			const up = await uploadPendingConversions(env as unknown as Parameters<typeof uploadPendingConversions>[0]);
+			console.log(`[ads-upload] daily: uploaded=${up.uploaded} failed=${up.failed} expired=${up.expired} skipped_no_action=${up.skippedNoAction} not_found=[${up.notFound.join(" | ")}]${up.error ? ` error=${up.error}` : ""}`);
+		} catch (err) {
+			console.log(`[ads-upload] ERROR ${err instanceof Error ? err.message : String(err)}`);
 		}
 		// Charity Challenge donation sync moved to hourly cron (23 * * * *).
 		// See scheduled() handler above for the hourly donation sync.

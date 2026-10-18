@@ -134,8 +134,8 @@ function upcomingCardFromEntry(e: CalEntry): string {
 	return `<div class="card">
     <div class="meta">${esc(weekdayOf(e.event_date))}, ${esc(formatDate(e.event_date))}</div>
     <h3>${esc(e.title)}</h3>
-    <p style="font-size:14.5px">${esc(e.sub)}</p>
-    ${e.url ? `<a class="card-link" href="${esc(e.url)}">Register →</a>` : `<span style="color:var(--muted);font-size:14px">Registration opens soon.</span>`}
+    <p style="font-size:15.5px">${esc(e.sub)}</p>
+    ${e.url ? `<a class="card-link" href="${esc(e.url)}">Register →</a>` : `<span style="color:var(--muted);font-size:15px">Registration opens soon.</span>`}
   </div>`;
 }
 
@@ -172,7 +172,7 @@ export async function homePage(db: D1Database): Promise<string> {
 			return `<div class="congrats">
           <div class="kicker">Latest winners</div>
           <h3>${esc(event.event_name ?? "")}</h3>
-          <p class="meta" style="color:var(--muted);font-size:14px">${esc(formatDate(event.event_date))}</p>
+          <p class="meta" style="color:var(--muted);font-size:15px">${esc(formatDate(event.event_date))}</p>
           ${lines}
           <p style="margin-top:14px"><a class="card-link" href="/winners">All congratulations →</a></p>
         </div>`;
@@ -217,7 +217,7 @@ export async function homePage(db: D1Database): Promise<string> {
       <div class="card">
         <h3>Belong</h3>
         <p>Start or join a local NWANA Group, train together, enter team competitions, and grow the sport in your city. The federation scales through its groups.</p>
-        <a class="card-link" href="/groups">Explore NW Groups →</a>
+        <a class="card-link" href="https://groups.nwaofna.org/">Explore NW Groups →</a>
       </div>
     </div>
   </div></div>
@@ -278,7 +278,7 @@ export async function aboutPage(): Promise<string> {
       <div class="card"><h3>Governance</h3><p>Develop rules, standards, policies, integrity protections, and long-term direction for Nordic walking across North America.</p></div>
       <div class="card"><h3>Education</h3><p>Provide progressive education and qualification pathways for instructors, coaches, judges, Race Directors, technical officials, and leaders through NWANA Academy.</p></div>
       <div class="card"><h3>Licensing</h3><p>Operate licensing pathways for athletes, professionals, individual NW Group participants, and eligible organizations.</p></div>
-      <div class="card"><h3>Community</h3><p>Help people join existing NW Groups or begin establishing new groups for communities, workplaces, schools, healthcare organizations, and municipalities.</p></div>
+      <div class="card"><h3>Community</h3><p>Help people join existing NW Groups or begin establishing new groups for communities, workplaces, schools, healthcare organizations, and municipalities.</p><p style="margin-top:14px"><a class="card-link" href="https://groups.nwaofna.org/find-a-group">Find an NW Group →</a> <a class="card-link" href="https://groups.nwaofna.org/start-a-group" style="margin-left:18px">Start an NW Group →</a></p></div>
       <div class="card"><h3>Competitions</h3><p>Develop and operate Nordic walking competitions, publish official results and standings, maintain competition rules, and expand opportunities for athletes.</p></div>
       <div class="card"><h3>Sport development</h3><p>Continue building the people, organizations, events, technical standards, sanctioning capacity, and ranking structures for a sustainable continental sport system.</p></div>
     </div>
@@ -288,7 +288,7 @@ export async function aboutPage(): Promise<string> {
     <h2>One system, five steps</h2>
     <div class="grid cols-2">
       <div class="card"><h3>1. Learn and develop</h3><p>Begin with Nordic walking education and continue through the appropriate participant or professional pathway.</p></div>
-      <div class="card"><h3>2. Connect locally</h3><p>Join an existing NW Group or help establish a new group in your community or organization.</p></div>
+      <div class="card"><h3>2. Connect locally</h3><p>Join an existing NW Group or help establish a new group in your community or organization.</p><p style="margin-top:14px"><a class="card-link" href="https://groups.nwaofna.org/find-a-group">Find an NW Group →</a> <a class="card-link" href="https://groups.nwaofna.org/start-a-group" style="margin-left:18px">Start an NW Group →</a></p></div>
       <div class="card"><h3>3. Obtain the appropriate license</h3><p>Select the license that corresponds to your role, activity, organization, or level of professional responsibility.</p></div>
       <div class="card"><h3>4. Participate and compete</h3><p>Take part in NWANA activities, challenges, competitions, and other published opportunities.</p></div>
       <div class="card"><h3>5. Lead, organize, or support</h3><p>Continue developing as a professional, establish an NW Group, organize activities or competitions, volunteer, partner with NWANA, sponsor a program, or support a designated fund.</p></div>
@@ -394,24 +394,24 @@ function eventResultsHtml(event: RaceEvent): string {	const levels = levelThresh
 
 const PMAT_CSS = `<style>
 .pmat-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:18px 0}
-.pmat-controls input[type=search]{padding:10px 16px;border:1.5px solid var(--line);border-radius:999px;font-size:15px;min-width:240px}
+.pmat-controls input[type=search]{padding:10px 16px;border:1.5px solid var(--line);border-radius:999px;font-size:16px;min-width:240px}
 .pmat-controls button{padding:10px 22px;font-size:15px}
 .pmat-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 6px 18px rgba(10,31,61,.05)}
 table.pmat{min-width:max-content;border-collapse:separate;border-spacing:0}
-table.pmat th,table.pmat td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:14px;white-space:nowrap}
-table.pmat thead th{background:var(--navy);color:#fff;font-size:12.5px;letter-spacing:.4px;text-align:left;position:sticky;top:0}
+table.pmat th,table.pmat td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:15.5px;white-space:nowrap}
+table.pmat thead th{background:var(--navy);color:#fff;font-size:13.5px;letter-spacing:.4px;text-align:left;position:sticky;top:0}
 table.pmat th.sticky,table.pmat td.sticky{position:sticky;left:0;z-index:2;box-shadow:1px 0 0 var(--line)}
 table.pmat td.sticky{background:#fff;font-weight:700}
 table.pmat thead th.sticky{z-index:3}
 table.pmat td.cell-final{font-weight:700}
-.pmat-sub{display:block;font-weight:400;font-size:12px;color:var(--muted)}
+.pmat-sub{display:block;font-weight:400;font-size:13px;color:var(--muted)}
 .pmat-empty{color:var(--muted)}
-.pmat-event-date{display:block;font-weight:400;font-size:11.5px;color:#c6d2e8}
+.pmat-event-date{display:block;font-weight:400;font-size:12.5px;color:#c6d2e8}
 .pmat-summary-lines span{display:block;padding:2px 0}
 .pmat-pager{display:flex;gap:12px;align-items:center;justify-content:center;margin:22px 0 6px;font-size:15px}
 .pmat-pager a{padding:8px 18px;border:1.5px solid var(--navy);border-radius:999px;color:var(--navy);text-decoration:none;font-weight:700}
 .pmat-pager a:hover{background:var(--gold-soft)}
-.pmat-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:14px 0 4px}
+.pmat-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:14.5px;color:var(--muted);margin:14px 0 4px}
 </style>`;
 
 function matrixCellHtml(state: string, cell: { time: string | null; level: string | null; points: number | null }): string {
@@ -662,7 +662,7 @@ export async function winnersPage(db: D1Database): Promise<string> {
 				.join("");
 			return `<div class="congrats">
           <h3>${esc(headline)}</h3>
-          <p style="color:var(--muted);font-size:14px;margin:0 0 10px">${esc(event.event_name ?? "")} · ${esc(formatDate(event.event_date))}</p>
+          <p style="color:var(--muted);font-size:15px;margin:0 0 10px">${esc(event.event_name ?? "")} · ${esc(formatDate(event.event_date))}</p>
           ${lines}
         </div>`;
 		}).join("")
@@ -690,7 +690,7 @@ export async function newsPage(db: D1Database): Promise<string> {
         <a class="card news-card" href="/news/${esc(n.slug)}">
           <div class="meta">${esc(formatDate(n.published_at))}<span class="badge soft" style="margin-left:8px">${esc(n.category || "News")}</span></div>
           <h3>${esc(n.title)}</h3>
-          <p style="font-size:14.5px;color:var(--muted)">${esc(n.excerpt || newsExcerpt(n.body_html))}</p>
+          <p style="font-size:15.5px;color:var(--muted)">${esc(n.excerpt || newsExcerpt(n.body_html))}</p>
         </a>`).join("")}</div>`
 		: emptyState("The federation newsroom opens soon. Race reports, winner announcements, and federation updates will be published here as they happen.");
 
