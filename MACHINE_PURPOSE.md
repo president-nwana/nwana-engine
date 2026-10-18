@@ -30,8 +30,8 @@ The machine must support the relationships among:
 - Challenges;
 - Academy Courses;
 - Certification Pathways;
-- Athlete, Professional, and NW Group Licenses;
-- NW Group Individual, NW Groups, and RECOGNIZED Groups;
+- Athlete and Professional Licenses, and the single NWANA Individual License (the participation license; NWANA has no membership product);
+- Territories (Continental, National, State, County, City / Local Community), NW Groups owned and operated by NWANA (FORMING and ACTIVE), and Programs;
 - Funds and Donation Campaigns;
 - Sponsorship Assets;
 - Partner Opportunities and Partner Network;
@@ -42,12 +42,23 @@ The machine must support the relationships among:
 
 The value of the system comes from the connections among these assets. Examples include:
 
-- Course -> Certification -> Professional License -> Instructor -> Group;
-- Group -> Participants -> Programs -> Events -> Competitions -> Fundraising and Sponsorship;
+- Course -> Certification -> Professional License -> Instructor -> Appointment into a NWANA Group in a Territory;
+- NWANA Group -> Participants -> Programs -> Events -> Competitions -> Fundraising and Sponsorship;
 - Competition -> Registrations -> Results -> Rankings -> Next Race or Championship;
 - Sponsor -> Asset -> Agreement -> Visibility -> Renewal or Cross-sell;
 - Partner -> Funding, Location, Audience, Equipment, Expertise, or Distribution -> Program, Group, Event, or Competition;
-- Donor -> Fund -> Academy Credit -> Instructor -> Group -> Participants.
+- Donor -> Fund -> Academy Credit -> Instructor -> NWANA Group -> Participants.
+
+## NW Groups canonical model (owner-approved 2026-10-17)
+
+NWANA builds and owns the network. Local people are hired to operate it.
+
+- A Territory exists by geography, in the hierarchy Continental -> National -> State -> County -> City / Local Community. The continental level (NWANA center) is implemented from the start. Territory is the primary object for funding, job candidates, interested participants, organizations, facilities, sponsors, grants, and donations. Every money record carries a territory; national money belongs to the NATIONAL territory, continental money to CONTINENTAL.
+- An NW Group is NWANA's own operating unit inside a territory. By the owner's standing decision, one default group in status FORMING with zero participants is created in advance in every city territory, so any person can join immediately. Additional groups are created by NWANA decision without a count limit. A group becomes ACTIVE only when real launch conditions are met (designated funding, an appointed director, the minimum instructors, insurance coverage, an approved budget). A group never becomes independent, never graduates out of NWANA, and never operates its own payment account; money is accounted by territory inside NWANA.
+- A Program is funded NWANA activity inside a territory. Its territory link is mandatory; its group link is optional. A program may run at National, State, County, or City level with no group at all.
+- Participation is by the single Individual License: one license for the whole system, portable across every NWANA group for standard training at no extra charge, and distinct from the Athlete License. Buying the license marks the person in his home group and is the demand signal that triggers building that group's public site. The license never creates a group and grants no governance rights; NWANA sells no membership.
+- The Group Director is a paid role appointed by NWANA, never a club founder. Roles are pre-written for every entity in the hierarchy, including a group with zero participants.
+- The previous decentralized model (a local enthusiast founds "their" group, matures it toward RECOGNIZED status, independence, and its own payment account) is SUPERSEDED in full. Its records are preserved read-only for audit, technically isolated from live rules, statuses, and public output. See ADR-0050 and the owner-approved unified TZ (edition 7, 2026-10-17), whose implementation sequence governs this build.
 
 ## First operational priority
 

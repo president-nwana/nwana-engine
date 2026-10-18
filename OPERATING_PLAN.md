@@ -150,7 +150,6 @@ Do not create a duplicate contact database for Google Workspace email — the En
 
 The mailboxes `admin@nwaofna.org` and `president@nwaofna.org` remain human-operated accounts for individual business correspondence, including replies to press, partners, sponsors, and support. They are not Engine channels.
 
-
 Verified product/API distinction:
 
 - NWANA has an authenticated central Email Marketing Dashboard (ID `513494`) connected to its RunSignup/TicketSignup objects.
@@ -219,6 +218,12 @@ Existing objects, including Academy, Licenses, NW Groups, Instructor Growth Fund
 Future Series 2027, Challenges, U.S. Championships, and Continental Championships are to be created through Engine. Their creation request is the signal that starts Registry, platform creation, offers, audiences, distribution, sponsorship, and follow-up.
 
 Physical creation inside RunSignup/TicketSignup depends on verified write API access. Do not claim it works before that permission is confirmed. If access is unavailable, record the blocker and pursue the provider; do not silently redefine “create through Engine” as manual recreation by the owner.
+
+## NW Groups and national fundraising — approved model (owner decision 2026-10-17)
+
+The owner approved the unified TZ (edition 7, 2026-10-17) as the execution specification for the NW Groups network and the national fundraising machine. Its canonical model (MACHINE_PURPOSE.md, "NW Groups canonical model"; ADR-0050) replaces the former decentralized group model in full: NWANA builds and owns the network, territories are the primary funding and management object, groups are NWANA operating units (FORMING / ACTIVE), participation is the single portable Individual License, and money is accounted by territory inside NWANA.
+
+Execution follows the TZ phase sequence strictly: Phase 0 canonical migration; Phase 1A Florida charitable-solicitation compliance gate and Phase 1B territory/data foundation in parallel; Phase 2 Florida Money Engine as a minimal working loop on the existing outreach machine; Phase 3 Operating Center around the real money cycle; Phase 4 public surface (national basic catalog nationwide at once, extended territorial operations Florida first); Phase 5 Deployment Engine; Phase 6 group activation when designated funding exists. The existing corporate B2B outreach machine keeps running throughout and is not rebuilt. Nothing beyond the approved TZ is implemented.
 
 ## Access status — verify before integration work
 
