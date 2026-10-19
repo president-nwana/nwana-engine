@@ -1,18 +1,20 @@
 // Operating Center — Academy section (Summary / Actions / Details pattern).
 //
-// Eight functions: Courses, Students, Certifications, Instructor licenses,
-// Education partners, Academy operations, Academy performance, Promotion.
+// One wired function: Overview. The overview tab reads the Engine's
+// Academy sync snapshot (academy_instructor_snapshot), fed by the Moodle
+// read-only sync, and renders aggregates only: students enrolled,
+// certified instructors, per-course counts and the last sync time.
+// Individual Academy records and names are never shown here.
 //
-// Every function renders an HONEST empty state: there are no academy API
-// routes in src/index.ts and Moodle at academy.nwaofna.org is NOT connected.
-// Nothing here invents numbers, courses, students, or dates.
+// The remaining function panels below (Courses, Students, Certifications,
+// Instructor licenses, Education partners, Academy operations, Academy
+// performance, Promotion) are unwired placeholders kept for a later phase;
+// their copy predates the sync snapshot and is left untouched.
 //
-// Content rules: Summary = management summary only (what the function is,
-// current state, what needs attention). Actions = real manual owner actions
-// that exist in the API today — zero exist here, so an honest note plus a
-// disabled "Connect Moodle" placeholder; Promotion is the one exception and
-// shows real navigation links into Marketing. Details = what will live here
-// and the data source.
+// Content rules: Summary = management summary only. Actions = honest
+// text only (no Academy mutation exists from this screen). Details = the
+// data source note. Nothing here invents numbers, courses, students, or
+// dates: every number comes from the sync snapshot endpoint.
 //
 // Cost rule: this file adds UI only — no API routes, no new services, no new
 // runtime cost ($0).
@@ -246,29 +248,58 @@ export function renderAcademySectionHtml(): string {
 		subtitle: "NWANA Academy — courses, students, certifications, instructor licenses.",
 		queryTabs: true,
 		tabs: [
-			{ id: "overview", label: "Overview", panelsHtml: ACADEMY_OVERVIEW_PANELS, script: ACA_VIEW_SCRIPT },
+			{ id: "overview", label: "Overview", panelsHtml: ACADEMY_OVERVIEW_PANELS, script: ACADEMY_OVERVIEW_SCRIPT + ACA_VIEW_SCRIPT },
 		],
 	});
 }
 
+const ACADEMY_OVERVIEW_SCRIPT = `
+	async function boot_overview_summary(){
+		const stats=document.querySelector('#aca-ov-stats');
+		const courses=document.querySelector('#aca-ov-courses');
+		try{
+			const data=await api('/api/operating-center/education/overview');
+			const byCourse=data.by_course||[];
+			if(stats){
+				stats.innerHTML=
+					'<div class="stat"><strong>'+esc(data.students||0)+'</strong><span>Students enrolled</span></div>'+
+					'<div class="stat"><strong>'+esc(data.certified||0)+'</strong><span>Certified instructors</span></div>'+
+					'<div class="stat"><strong>'+esc(byCourse.length)+'</strong><span>Courses in the snapshot</span></div>'+
+					'<div class="stat"><strong>'+esc(data.last_sync?humanDate(data.last_sync):'never')+'</strong><span>Last sync</span></div>';
+			}
+			if(courses){
+				courses.innerHTML=(data.connected===false?'<div class="unavailable">'+esc(data.note||'The Academy sync snapshot is empty.')+'</div>':'')+
+					(byCourse.length?'<table class="data"><thead><tr><th>Course</th><th>Enrolled</th><th>Certified</th></tr></thead><tbody>'+byCourse.map(c=>'<tr><td>'+esc(c.course_id)+'</td><td>'+esc(c.enrolled||0)+'</td><td>'+esc(c.certified||0)+'</td></tr>').join('')+'</tbody></table>':'<div class="unavailable">No courses in the snapshot yet.</div>');
+			}
+		}catch(err){if(stats)stats.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>';if(courses)courses.innerHTML=''}
+	}
+	async function boot_overview_actions(){ /* static panel: honest text only, nothing to load */ }
+	async function boot_overview_details(){
+		const box=document.querySelector('#aca-ov-source');
+		if(!box)return;
+		try{
+			const data=await api('/api/operating-center/education/overview');
+			box.innerHTML='<div class="detail"><b>Source:</b> '+esc(data.source||'Moodle read-only sync')+'</div>'+
+				'<div class="detail"><b>Last sync:</b> '+esc(data.last_sync||'never')+'</div>'+
+				(data.note?'<div class="detail">'+esc(data.note)+'</div>':'')+
+				'<p class="meta">The Engine reads Academy aggregates from its sync snapshot (academy_instructor_snapshot), fed by the Moodle read-only sync. Aggregates only: no individual records and no names are ever shown in the Operating Center.</p>';
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+`;
+
 const ACADEMY_OVERVIEW_PANELS = ocFunction(
 	"overview",
-	"The Academy is not connected yet — this is the honest state, not a broken page.",
-	`<section class="panel"><h2>Academy — not connected</h2>
-		<p>The NWANA Academy (courses, students, certifications, instructor licenses) lives in Moodle at academy.nwaofna.org. The Engine has no academy integration yet, so there is nothing to show here — and nothing is faked.</p>
-		<p><strong>What will appear here once connected:</strong></p>
-		<p class="meta">&bull; <strong>Courses</strong> — the training program catalog<br>
-		&bull; <strong>Students</strong> — enrollments and progress<br>
-		&bull; <strong>Certifications</strong> — issued instructor certifications<br>
-		&bull; <strong>Instructor licenses</strong> — license records and renewals<br>
-		&bull; <strong>Education partners</strong> — partner organizations<br>
-		&bull; <strong>Academy operations &amp; performance</strong> — running the academy, measured</p>
-		<p class="meta"><strong>Next step:</strong> connecting Moodle is a separate project — it needs scoping and your approval before anything is built. Until then, this section stays parked.</p>
+	"Academy aggregates from the Engine sync snapshot: students enrolled, certified instructors, and per-course counts. Aggregates only - no individual records, no names.",
+	`<section class="stats" id="aca-ov-stats"><div class="stat"><strong>…</strong><span>Loading Academy aggregates</span></div></section>
+	<section class="panel" style="margin-top:20px"><h2>Students and certifications by course</h2>
+		<div id="aca-ov-courses">Loading…</div>
+		<p class="meta">Aggregates only. Individual Academy records are never shown in the Operating Center.</p>
 	</section>`,
 	`<section class="panel"><h2>Actions</h2>
-		<p class="unavailable">There are no Academy actions yet — the integration does not exist, so nothing can be run from here.</p>
+		<p>Individual Academy records are never shown here, and there is no Academy action to run from this screen: the sync is read-only and aggregates arrive automatically.</p>
+		<p class="meta">Certification assignment to territory roles appears in the Overview People tab when appointments exist: <a href="/operating-center/overview?tab=people&view=summary">Open Overview - People</a>.</p>
 	</section>`,
-	`<section class="panel"><h2>Details</h2>
-		<p class="meta">Planned data source: Moodle at academy.nwaofna.org (not connected). No data has been invented to fill this section.</p>
+	`<section class="panel"><h2>Data source</h2>
+		<div id="aca-ov-source">Loading…</div>
 	</section>`,
 );

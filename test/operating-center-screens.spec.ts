@@ -23,7 +23,7 @@ import {
 	updatePartnerStage,
 	buildGrantsCompliance,
 	getFundraisingOverview,
-	getGroupsOverview,
+	type GroupsRegistryData,
 	getMeetingsOverview,
 	buildSitesReport,
 	buildSocialReport,
@@ -176,6 +176,24 @@ describe("new screens (ADR-0027/0028): valid inline scripts", () => {
 		}
 	});
 });
+
+// Phase 3 (TZ 12) shared fixture: the live registry shape that replaced the
+// superseded ladder model. Small numbers on purpose; this is test data only.
+const GROUPS_REGISTRY_FIXTURE: GroupsRegistryData = {
+	ok: true,
+	generated_at: "2026-10-18T00:00:00.000Z",
+	model_note: "Territories are the entry point. Groups are NWANA units created by NWANA decision inside a territory.",
+	territories_by_type: { CONTINENTAL: 1, NATIONAL: 1, STATE: 1, COUNTY: 2, CITY: 3, LOCAL_COMMUNITY: 1 },
+	territories_total: 9,
+	groups: { total: 3, by_status: { FORMING: 2, ACTIVE: 1 }, defaults: 3 },
+	florida: {
+		territories_total: 4,
+		territories_by_type: { CONTINENTAL: 0, NATIONAL: 0, STATE: 1, COUNTY: 1, CITY: 2, LOCAL_COMMUNITY: 0 },
+		groups_total: 2,
+		groups_by_status: { FORMING: 2, ACTIVE: 0 },
+	},
+	categories: { count: 14, note: "Categories are an informational taxonomy and a request channel only." },
+};
 
 describe("new screens (ADR-0027/0028): honest data, no fabrication", () => {
 	// ADR-0030: stub Google Ads account readers. The account reader is
@@ -702,11 +720,18 @@ function makeStageDb(rows: Array<Record<string, unknown>>) {
 		expect(data.fund).toBeNull();
 	});
 
-	it("groups: ladder and funnel URLs, stats honestly not tracked", () => {
-		const data = getGroupsOverview();
-		expect(data.ladder).toHaveLength(3);
-		expect(data.funnel.member_org).toBe("https://runsignup.com/MemberOrg/NWANANWGroups");
-		expect(data.stats.connected).toBe(false);
+	// Phase 3 (TZ 12): deliberate rewrite. The old test encoded the superseded
+	// ladder model; this one encodes the live territory registry instead.
+	it("groups: registry report renders FORMING and ACTIVE counts, no superseded ladder", () => {
+		const html = buildGroupsReport(GROUPS_REGISTRY_FIXTURE);
+		expect(html).toContain("FORMING groups</th><td>2</td>");
+		expect(html).toContain("ACTIVE groups</th><td>1</td>");
+		expect(html).toContain("Total territories</th><td>9</td>");
+		expect(html).toContain("Florida groups</th><td>2</td>");
+		expect(html).toContain(GROUPS_REGISTRY_FIXTURE.model_note);
+		expect(html).not.toContain("RECOGNIZED");
+		expect(html).not.toContain("$200");
+		expect(html).not.toContain("Free group creation");
 	});
 
 	it("meetings: two real external entries, Integrity 9 done (date passed) with owner-gated join data", async () => {
@@ -755,7 +780,7 @@ describe("reports (ADR-0027/0028): external-safe HTML documents", () => {
 		})))],
 		["sellers", async () => buildSellersReport(await getSellersOverview(makePipelineDb(SELLER_SEED, PARTNER_SEED)))],
 		["partners", async () => buildPartnersReport(await getPartnersOverview(makePipelineDb(SELLER_SEED, PARTNER_SEED)))],
-		["groups", () => buildGroupsReport(getGroupsOverview())],
+		["groups", () => buildGroupsReport(GROUPS_REGISTRY_FIXTURE)],
 		[
 			"meetings",
 			() =>

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { renderAcademySectionHtml } from "../src/oc-academy";
 
-// Academy contract (2026-10-02 cleanup): a single honest Overview tab — the
-// Academy (Moodle) is not connected, so eight empty "not connected" tabs
-// were collapsed into one parked panel. No academy API routes exist and
-// nothing is invented.
+// Academy contract: a single Overview tab. Phase 3 (TZ 5.12) replaced the
+// old "not connected / parked" state: the Engine holds an Academy sync
+// snapshot (academy_instructor_snapshot, fed by the Moodle read-only sync)
+// and the tab renders its aggregates via
+// /api/operating-center/education/overview. Aggregates only - individual
+// records and names are never shown, and nothing is invented.
 
 describe("operating center academy: Summary/Actions/Details", () => {
 	const html = renderAcademySectionHtml();
@@ -41,15 +43,17 @@ describe("operating center academy: Summary/Actions/Details", () => {
 		expect(html).toContain("new URLSearchParams(location.search).get('view')");
 	});
 
-	it("lists what will live here once connected", () => {
-		for (const word of ["Courses", "Students", "Certifications", "Instructor licenses", "Education partners"]) {
+	it("shows live Academy aggregates from the sync snapshot", () => {
+		for (const word of ["Students enrolled", "Certified instructors", "Last sync", "Students and certifications by course"]) {
 			expect(html).toContain(word);
 		}
+		expect(html).toContain("/api/operating-center/education/overview");
 	});
 
-	it("states the section is parked, not broken", () => {
-		expect(html).toContain("not connected");
-		expect(html).toContain("parked");
+	it("states aggregates only, never individual records", () => {
+		expect(html).toContain("Aggregates only");
+		expect(html).toContain("never shown");
+		expect(html).not.toContain("parked");
 	});
 
 	it("contains no Russian text", () => {

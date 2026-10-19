@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { renderOperationsSectionHtml } from "../src/oc-operations";
 
-// Operations contract: 3 functions (Activity / System state / Exceptions),
-// each with a short description and three separate Summary / Actions /
-// Details views (one visible at a time), deep-linkable via
+// Operations contract: 4 functions (Activity / System state / Exceptions /
+// Readiness), each with a short description and three separate Summary /
+// Actions / Details views (one visible at a time), deep-linkable via
 // ?tab=<function>&view=<summary|actions|details>.
+// Phase 3 (TZ 5.13/5.14) added the readiness tab (equipment + safety).
 
-const FUNCTIONS = ["activity", "system", "exceptions"];
+const FUNCTIONS = ["activity", "system", "exceptions", "readiness"];
 
 describe("operating center operations: Summary/Actions/Details", () => {
 	const html = renderOperationsSectionHtml();
 
-	it("renders three function tabs", () => {
+	it("renders four function tabs", () => {
 		for (const f of FUNCTIONS) {
 			expect(html).toContain(`data-tab="${f}"`);
 		}

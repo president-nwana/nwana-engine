@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { renderGrowthSectionHtml } from "../src/oc-growth";
 
-// Growth contract: 6 functions, each with a short description and three
+// Growth contract: 9 functions, each with a short description and three
 // separate Summary / Actions / Details views (one visible at a time),
 // deep-linkable via ?tab=<function>&view=<summary|actions|details>.
+// Phase 3 (TZ 5.1/5.5/5.6) added the crm, grants, and budgets functions.
 
 const FUNCTIONS = [
 	"sponsorship",
@@ -12,12 +13,15 @@ const FUNCTIONS = [
 	"partners",
 	"funds",
 	"igf",
+	"crm",
+	"grants",
+	"budgets",
 ];
 
 describe("operating center growth: Summary/Actions/Details", () => {
 	const html = renderGrowthSectionHtml();
 
-	it("renders six function tabs", () => {
+	it("renders nine function tabs", () => {
 		for (const f of FUNCTIONS) {
 			expect(html).toContain(`data-tab="${f}"`);
 		}

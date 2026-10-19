@@ -137,6 +137,19 @@ import { generateAutoNews, listAutoNewsQueue, autoNewsTypeLabel, AUTO_NEWS_TYPES
 import { linkedInConnectUrl, threadsConnectUrl, handleLinkedInCallback, handleThreadsCallback, isSocialConnected, postToLinkedIn, postToThreads } from "./social-oauth";
 import { getExecutiveMoneyView } from "./operating-center-money";
 import {
+	getCabinetView,
+	getTodayQueue,
+	getCrmProspects,
+	getCrmProspect,
+	getFundingPipeline,
+	getGrantsView,
+	getTerritoryBudgets,
+	getPeopleView,
+	getGroupsRegistryView,
+	getTerritoryDrilldown,
+	getEducationView,
+} from "./operating-center-cabinet";
+import {
 	getMoneySyncState,
 	inspectDonationRecordShape,
 	listMoneyEvents,
@@ -248,7 +261,6 @@ import {
 	updateSellerStage,
 	updatePartnerStage,
 	getFundraisingOverview,
-	getGroupsOverview,
 	getMeetingsOverview,
 	renderMeetingsHtml,
 	getOperationsOverview,
@@ -260,6 +272,7 @@ import {
 	buildPartnersReport,
 	buildFundraisingReport,
 	buildGroupsReport,
+	type GroupsRegistryData,
 	buildMeetingsReport,
 	buildOperationsReport,
 } from "./operating-center-screens";
@@ -6667,7 +6680,54 @@ export default {
 			return json(await getFundraisingOverview(env.nwana_engine_db));
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/groups/overview") {
-			return json(getGroupsOverview());
+			return json(await getGroupsRegistryView(env.nwana_engine_db));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/groups/territory") {
+			const territoryId = url.searchParams.get("id") ?? "";
+			if (!territoryId) {
+				return json({ ok: false, error: "id query parameter is required" }, 400);
+			}
+			const data = await getTerritoryDrilldown(env.nwana_engine_db, territoryId);
+			return json(data, data.ok ? 200 : 404);
+		}
+		// Phase 3 (TZ 13): presidential cabinet, daily queue, CRM, funding
+		// pipeline, grants registry, territory budgets, people, education.
+		if (request.method === "GET" && url.pathname === "/api/operating-center/cabinet") {
+			return json(await getCabinetView(env.nwana_engine_db));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/today") {
+			return json(await getTodayQueue(env.nwana_engine_db));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/crm/prospects") {
+			const scope = url.searchParams.get("scope") === "fl" ? "fl" : "all";
+			const track = url.searchParams.get("track") || undefined;
+			const tier = url.searchParams.get("tier") || undefined;
+			const limitRaw = Number(url.searchParams.get("limit") ?? "");
+			const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+			return json(await getCrmProspects(env.nwana_engine_db, { scope, track, tier, limit }));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/crm/prospect") {
+			const idRaw = Number(url.searchParams.get("id") ?? "");
+			if (!Number.isFinite(idRaw) || idRaw <= 0) {
+				return json({ ok: false, error: "numeric id query parameter is required" }, 400);
+			}
+			const data = await getCrmProspect(env.nwana_engine_db, idRaw);
+			return json(data, data.ok ? 200 : 404);
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/funding/pipeline") {
+			return json(await getFundingPipeline(env.nwana_engine_db));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/grants") {
+			return json(await getGrantsView(env.nwana_engine_db));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/budgets") {
+			return json(await getTerritoryBudgets(env.nwana_engine_db));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/people") {
+			return json(await getPeopleView(env.nwana_engine_db));
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/education/overview") {
+			return json(await getEducationView(env.nwana_engine_db));
 		}
 		if (request.method === "GET" && url.pathname === "/api/operating-center/meetings/overview") {
 			return json(await getMeetingsOverview(env.nwana_engine_db));
@@ -7366,8 +7426,12 @@ export default {
 					const data = await getOperationsOverview(env);
 					return reportFile(buildOperationsReport(data), screen, data.generated_at.slice(0, 10));
 				}
-				const data = getGroupsOverview();
-				return reportFile(buildGroupsReport(data), screen, data.generated_at.slice(0, 10));
+				const data = await getGroupsRegistryView(env.nwana_engine_db);
+				// The cabinet view returns sparse count maps (only types and
+				// statuses that exist); the report builder's contract names
+				// every key and reads them defensively, so the shapes align
+				// at runtime.
+				return reportFile(buildGroupsReport(data as unknown as GroupsRegistryData), screen, data.generated_at.slice(0, 10));
 			}
 		}
 

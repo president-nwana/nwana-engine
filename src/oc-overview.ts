@@ -1,6 +1,6 @@
 // Operating Center — Overview section.
 //
-// Four functions: state, money, work, blockers. Every function has:
+// Six functions: florida, state, money, work, people, blockers. Every function has:
 //   - a 1-2 line human description,
 //   - three navigation buttons [ Summary ] [ Actions ] [ Details ],
 //   - three SEPARATE views (one visible at a time), deep-linkable as
@@ -82,7 +82,7 @@ const STATE_DETAILS_HTML = `<section class="panel"><h2>Series 2026 race lifecycl
 	<div id="state-det-fundraising">Loading…</div>
 	<p class="meta"><a href="/operating-center/growth?tab=fundraising&view=summary">Open fundraising →</a></p></section>
 	<section class="panel"><h2>NW Groups</h2>
-	<p class="meta">The group license ladder and the public funnel, with network statistics once tracked. Each screen has a downloadable report.</p>
+	<p class="meta">The NW Groups registry: groups and territories in the canonical territory model. Each screen has a downloadable report.</p>
 	<div id="state-det-groups">Loading…</div>
 	<p class="meta"><a href="/operating-center/sport?tab=groups&view=summary">Open groups →</a></p></section>
 	<section class="panel"><h2>Meetings</h2>
@@ -369,9 +369,27 @@ const STATE_SCRIPT = `
 		const box=document.querySelector('#state-det-groups');
 		try{
 			const data=await api('/api/operating-center/groups/overview');
-			const ladder=data.ladder||[];
-			box.innerHTML='<div class="meta">'+ladder.length+'-step license ladder</div>'+
-			'<div class="meta">Group counts: <span class="unavailable">not yet tracked</span></div>';
+			const groups=data.groups||{};
+			const byStatus=groups.by_status||{};
+			const pick=(obj,names)=>{for(const n of names){if(obj&&obj[n]!=null)return obj[n]}return 0};
+			const forming=pick(byStatus,['FORMING','forming']);
+			const active=pick(byStatus,['ACTIVE','active']);
+			let html='<div class="meta">NW Groups registry: '+esc(groups.total||0)+' groups ('+esc(forming)+' FORMING, '+esc(active)+' ACTIVE) across '+esc(data.territories_total||0)+' territories</div>';
+			const fl=data.florida||null;
+			if(fl){
+				const fg=fl.groups||fl;
+				const fBy=fg.by_status||{};
+				const fTotal=fg.total!=null?fg.total:fl.groups_total;
+				const fForm=fBy.FORMING!=null?fBy.FORMING:(fg.forming!=null?fg.forming:fl.forming);
+				const fAct=fBy.ACTIVE!=null?fBy.ACTIVE:(fg.active!=null?fg.active:fl.active);
+				const bits=[];
+				if(fTotal!=null)bits.push(fTotal+' groups');
+				if(fForm!=null)bits.push(fForm+' FORMING');
+				if(fAct!=null)bits.push(fAct+' ACTIVE');
+				if(fl.territories_total!=null)bits.push(fl.territories_total+' territories');
+				if(bits.length)html+='<div class="meta">Florida: '+bits.map(x=>esc(x)).join(' · ')+'</div>';
+			}
+			box.innerHTML=html;
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
 	async function state_detOperations(){
@@ -410,23 +428,161 @@ const STATE_PANELS = ocFunction(
 );
 
 // ---------------------------------------------------------------------------
+// 1b. florida - presidential cabinet, Florida first
+// ---------------------------------------------------------------------------
+
+const FLORIDA_SUMMARY_HTML = `<section class="stats" id="fla-stats"><div class="stat"><strong>…</strong><span>Loading Florida cabinet</span></div></section>
+	<section class="panel" style="margin-top:20px"><h2>Florida money cycle</h2><div id="fla-cycle">Loading…</div></section>
+	<section class="panel"><h2>National rollup</h2><div id="fla-national">Loading…</div></section>
+	<section class="panel"><h2>Lane gates</h2><div id="fla-gates">Loading…</div></section>`;
+
+const FLORIDA_ACTIONS_HTML = `<section class="panel"><h2>What to do today</h2>
+	<p class="meta">This queue is computed from live data and sorted by closeness to real money. Nothing here is a static list.</p>
+	<div id="fla-today-counts">Loading…</div>
+	<div id="fla-today">Loading…</div></section>`;
+
+const FLORIDA_DETAILS_HTML = `<section class="panel"><h2>People in Florida</h2><div id="fla-det-people">Loading…</div></section>
+	<section class="panel"><h2>Florida budget registers</h2><div id="fla-det-budget">Loading…</div>
+	<p class="meta"><a href="/operating-center/growth?tab=budgets&view=summary">Open Growth budgets →</a></p></section>`;
+
+const FLORIDA_SCRIPT = `
+	function fla_moneyCents(c){return '$'+(Number(c||0)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+	function fla_gateBadge(status){
+		const s=String(status||'');
+		const cls=s==='OPEN'?'badge-ok':(s==='CLOSED'||s==='OWNER_STOP')?'badge-warn':'badge';
+		return '<span class="'+cls+'">'+esc(s||'unknown')+'</span>';
+	}
+	function fla_firstCaseHtml(fc){
+		if(!fc)return '<div class="unavailable">No Florida case yet.</div>';
+		return '<div class="item"><strong>First Florida case: '+esc(fc.org_name)+'</strong>'+
+		'<div class="detail"><b>Track:</b> '+esc(fc.track||'-')+(fc.city_state?' <b>Place:</b> '+esc(fc.city_state):'')+'</div>'+
+		'<div class="detail"><b>Stage:</b> '+esc(fc.stage||'-')+'</div></div>';
+	}
+	async function boot_florida_summary(){
+		try{
+			const data=await api('/api/operating-center/cabinet');
+			const fl=data.florida||{}, nat=data.national||{}, aca=data.academy||{};
+			const fm=fl.money||{}, pr=fl.prospects||{};
+			document.querySelector('#fla-stats').innerHTML=
+				'<div class="stat"><strong>'+esc(fl.groups?fl.groups.forming||0:0)+'</strong><span>Florida groups FORMING</span></div>'+
+				'<div class="stat"><strong>'+esc(fl.roles_planned||0)+'</strong><span>Florida prescribed roles</span></div>'+
+				'<div class="stat"><strong>'+esc(aca.students||0)+'</strong><span>Academy students</span></div>'+
+				'<div class="stat"><strong>'+esc(aca.certified||0)+'</strong><span>Certified instructors</span></div>'+
+				'<div class="stat"><strong>'+esc(fm.receipts_count||0)+'</strong><span>Florida receipts</span></div>'+
+				'<div class="stat"><strong>'+esc(fla_moneyCents(fm.receipts_cents))+'</strong><span>Florida money received</span></div>';
+			document.querySelector('#fla-cycle').innerHTML=
+				'<div class="detail"><b>Sources:</b> '+esc(pr.total||0)+' prospects'+(pr.by_track?' ('+Object.entries(pr.by_track).map(([t,n])=>esc(t)+': '+n).join(' · ')+')':'')+'</div>'+
+				'<div class="detail"><b>Sent:</b> '+esc(pr.sent||0)+' · <b>Replies:</b> '+esc(pr.replies||0)+'</div>'+
+				'<div class="detail"><b>Receipts:</b> '+esc(fm.receipts_count||0)+' receipts · '+esc(fla_moneyCents(fm.receipts_cents))+' received · '+esc(fm.sponsorship_contract_receipts||0)+' sponsorship contract receipts</div>'+
+				'<div class="detail"><b>Territories:</b> '+esc(fl.territories_total||0)+' Florida territories'+(fl.territories_by_type?' ('+Object.entries(fl.territories_by_type).map(([t,n])=>esc(t)+': '+n).join(' · ')+')':'')+' · '+esc(fl.groups?fl.groups.total||0:0)+' groups ('+esc(fl.groups?fl.groups.active||0:0)+' active)</div>'+
+				fla_firstCaseHtml(fm.first_case);
+			const recByLane=nat.received_by_lane||{};
+			document.querySelector('#fla-national').innerHTML=
+				'<div class="meta">'+esc(nat.territories_total||0)+' territories · '+esc(nat.groups_total||0)+' groups ('+esc(nat.groups_active||0)+' active) · '+esc(nat.prospects_total||0)+' prospects · '+esc(nat.enrolled||0)+' enrolled</div>'+
+				'<div class="meta">Received nationally: <strong>'+esc(fla_moneyCents(nat.received_total_cents))+'</strong></div>'+
+				(Object.keys(recByLane).length?'<div class="meta">'+Object.entries(recByLane).map(([lane,v])=>esc(lane)+': '+esc(v.events||0)+' events · '+esc(fla_moneyCents(v.gross_cents))).join(' · ')+'</div>':'');
+			const gl=fl.lane_gates||[];
+			document.querySelector('#fla-gates').innerHTML=gl.length?'<table class="data"><thead><tr><th>Lane</th><th>Scope</th><th>Status</th></tr></thead><tbody>'+gl.map(g=>'<tr><td>'+esc(g.lane)+'</td><td>'+esc(g.scope)+'</td><td>'+fla_gateBadge(g.status)+'</td></tr>').join('')+'</tbody></table>':'<div class="unavailable">No lane gates recorded.</div>';
+		}catch(err){document.querySelector('#fla-stats').innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_florida_actions(){
+		const countsBox=document.querySelector('#fla-today-counts');
+		const box=document.querySelector('#fla-today');
+		try{
+			const [cab,today]=await Promise.all([api('/api/operating-center/cabinet'),api('/api/operating-center/today')]);
+			const tc=cab.today_counts||{};
+			countsBox.innerHTML='<div class="stats">'+
+				'<div class="stat"><strong>'+esc(tc.followups_due||0)+'</strong><span>Follow-ups due</span></div>'+
+				'<div class="stat"><strong>'+esc(tc.replies_waiting||0)+'</strong><span>Replies waiting</span></div>'+
+				'<div class="stat"><strong>'+esc(tc.applications_new||0)+'</strong><span>New applications</span></div>'+
+				'<div class="stat"><strong>'+esc(tc.unsent_step1||0)+'</strong><span>Unsent step 1</span></div>'+
+				'<div class="stat"><strong>'+esc(tc.unattributed_receipts||0)+'</strong><span>Unattributed receipts</span></div></div>';
+			const items=today.items||[];
+			box.innerHTML=(today.note?'<p class="meta">'+esc(today.note)+'</p>':'')+(items.length?items.map(it=>'<div class="item"><strong>'+esc(it.title)+'<span class="badge">'+esc(it.kind)+'</span></strong>'+(it.detail?'<div class="detail">'+esc(it.detail)+'</div>':'')+'<div class="meta">'+(it.org_name?esc(it.org_name):'')+(it.due_at?(it.org_name?' · ':'')+'due '+esc(humanDate(it.due_at)):'')+'</div></div>').join(''):'<div class="unavailable">Nothing in the queue today.</div>');
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_florida_details(){
+		const ppl=document.querySelector('#fla-det-people');
+		const bud=document.querySelector('#fla-det-budget');
+		try{
+			const [people,budgets]=await Promise.all([api('/api/operating-center/people'),api('/api/operating-center/budgets')]);
+			const fr=people.florida_roles||{};
+			let html='<div class="detail"><b>Total Florida roles:</b> '+esc(fr.total||0)+'</div>';
+			const byScope=fr.by_scope||{};
+			if(Object.keys(byScope).length)html+='<table class="data"><thead><tr><th>Scope</th><th>Roles</th></tr></thead><tbody>'+Object.entries(byScope).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+esc(v)+'</td></tr>').join('')+'</tbody></table>';
+			const tmpl=(fr.by_template||[]).slice().sort((a,b)=>Number(b.n||0)-Number(a.n||0)).slice(0,10);
+			if(tmpl.length)html+='<h3>Top Florida role templates</h3><table class="data"><thead><tr><th>Role</th><th>Planned</th></tr></thead><tbody>'+tmpl.map(t=>'<tr><td>'+esc(t.title||t.template_id)+'</td><td>'+esc(t.n)+'</td></tr>').join('')+'</tbody></table>';
+			ppl.innerHTML=html;
+			const scopes=budgets.scopes||[];
+			const sc=scopes.find(s=>s.key==='florida'||/florida/i.test(String(s.label||'')));
+			if(!sc){bud.innerHTML='<div class="unavailable">No Florida budget register yet.</div>';return}
+			const need=sc.need||{}, cov=sc.coverage||{}, act=sc.actual||{};
+			let bh='<div class="detail"><b>Need:</b> '+esc(need.roles_planned||0)+' roles planned</div>';
+			if(need.by_scope&&Object.keys(need.by_scope).length)bh+='<div class="meta">'+Object.entries(need.by_scope).map(([k,v])=>esc(k)+': '+v).join(' · ')+'</div>';
+			if(need.amounts_note)bh+='<div class="meta">'+esc(need.amounts_note)+'</div>';
+			bh+='<div class="detail"><b>Coverage:</b> '+esc(fla_moneyCents(cov.total_cents))+' received</div>';
+			const lanes=cov.received_by_lane||[];
+			if(lanes.length)bh+='<table class="data"><thead><tr><th>Lane</th><th>Events</th><th>Received</th></tr></thead><tbody>'+lanes.map(l=>'<tr><td>'+esc(l.lane)+'</td><td>'+esc(l.events)+'</td><td>'+esc(fla_moneyCents(l.cents))+'</td></tr>').join('')+'</tbody></table>';
+			bh+='<div class="detail"><b>Actual:</b> '+(act.expenses_cents==null?'none recorded':esc(fla_moneyCents(act.expenses_cents)))+(act.note?' · '+esc(act.note):'')+'</div>';
+			bud.innerHTML=bh;
+		}catch(err){ppl.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>';bud.innerHTML=''}
+	}`;
+
+const FLORIDA_PANELS = ocFunction(
+	"florida",
+	"President's cabinet - Florida first: the Florida money cycle, groups, roles and Academy on one screen, with the national picture kept secondary.",
+	FLORIDA_SUMMARY_HTML,
+	FLORIDA_ACTIONS_HTML,
+	FLORIDA_DETAILS_HTML,
+);
+
+// ---------------------------------------------------------------------------
 // 2. money — executive money view (visibility only)
 // ---------------------------------------------------------------------------
 
 const MONEY_SUMMARY_HTML = `<section class="panel"><h2>Executive money view — totals</h2>
 	<p class="meta">Fundraising, donations, sponsorship revenue, commitments, and pipeline totals side by side. Fundraising and sponsorship stay separate processes with separate lifecycles; this is visibility only.</p>
-	<div id="money-sum">Loading…</div></section>`;
+	<div id="money-sum">Loading…</div></section>
+	<section class="panel"><h2>Florida money cycle</h2><div id="money-flcycle">Loading…</div></section>
+	<section class="panel"><h2>Lane gates</h2><div id="money-gates">Loading…</div></section>`;
 
 const MONEY_ACTIONS_HTML = `<section class="panel"><h2>Act on money</h2>
 	<p class="meta">Money does not move from this page. Fundraising and sponsorship each have their own Actions view in the Growth section — this page only shows the totals. Pick where to act:</p>
 	<div id="money-act">Loading…</div></section>`;
 
 const MONEY_DETAILS_HTML = `<section class="panel"><h2>Executive money view — breakdown</h2>
-	<div id="money-det">Loading…</div>
+	<div id="money-det">Loading…</div></section>
+	<section class="panel"><h2>Receipts registry</h2><div id="money-receipts">Loading…</div></section>
+	<section class="panel"><h2>Expected, not received</h2><div id="money-expected">Loading…</div>
 	<p class="meta"><a href="/operating-center/growth?tab=funds&view=summary">Open funds →</a> · <a href="/operating-center/growth?tab=sponsorship&view=summary">Open sponsorship →</a></p></section>`;
 
 const MONEY_SCRIPT = `
 	function money_fmt(n){return '$'+Number(n||0).toLocaleString('en-US');}
+	function money_centsFmt(c){return '$'+(Number(c||0)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+	function money_gateBadge(status){
+		const s=String(status||'');
+		const cls=s==='OPEN'?'badge-ok':(s==='CLOSED'||s==='OWNER_STOP')?'badge-warn':'badge';
+		return '<span class="'+cls+'">'+esc(s||'unknown')+'</span>';
+	}
+	function money_floridaCycleHtml(mc){
+		if(!mc||!mc.florida_cycle)return '<div class="unavailable">Florida cycle not available yet.</div>';
+		const fc=mc.florida_cycle;
+		let html='<div class="detail"><b>Sources:</b> '+esc(fc.sources||0)+' · <b>Sent:</b> '+esc(fc.outreach_sent||0)+' · <b>Replies:</b> '+esc(fc.replies||0)+' ('+esc(fc.interested_replies||0)+' interested)</div>';
+		html+='<div class="detail"><b>Receipts:</b> '+esc(fc.receipts_count||0)+' receipts · '+esc(money_centsFmt(fc.receipts_gross_cents))+' received · '+esc(fc.sponsorship_contract_receipts||0)+' sponsorship contract receipts</div>';
+		const first=fc.first_case;
+		if(first){
+			html+='<div class="item"><strong>First Florida case: '+esc(first.org_name)+'</strong><div class="detail"><b>Track:</b> '+esc(first.track||'-')+(first.city_state?' <b>Place:</b> '+esc(first.city_state):'')+'</div><div class="detail"><b>Stage:</b> '+esc(first.stage||'-')+'</div></div>';
+		}else{
+			html+='<div class="unavailable">No Florida case yet.</div>';
+		}
+		return html;
+	}
+	function money_gatesHtml(mc){
+		if(!mc)return '<div class="unavailable">Lane gates not available yet.</div>';
+		if(!mc.lane_gates)return '<div class="unavailable">'+esc(mc.lane_gates_note||'Lane gates not available yet.')+'</div>';
+		if(!mc.lane_gates.length)return '<div class="unavailable">No lane gates recorded.</div>';
+		return '<table class="data"><thead><tr><th>Lane</th><th>Scope</th><th>Status</th><th>Basis</th></tr></thead><tbody>'+mc.lane_gates.map(g=>'<tr><td>'+esc(g.lane)+'</td><td>'+esc(g.scope)+'</td><td>'+money_gateBadge(g.status)+'</td><td>'+esc(g.basis||'')+'</td></tr>').join('')+'</tbody></table>';
+	}
 	async function money_fetchMoney(){
 		return await api('/api/operating-center/money/overview');
 	}
@@ -454,6 +610,10 @@ const MONEY_SCRIPT = `
 			const pipeLine=Object.entries(pipeStages).map(([st,amt])=>esc(st)+': <strong>'+money_fmt(amt)+'</strong>').join(' · ');
 			html+='<div class="item"><strong>Pipeline totals</strong><div class="detail">'+(pipeLine||'<span class="unavailable">No asks in pipeline yet.</span>')+'</div><div class="meta">'+esc(data.disclaimer)+'</div></div>';
 			box.innerHTML=html;
+			const flBox=document.querySelector('#money-flcycle');
+			if(flBox)flBox.innerHTML=money_floridaCycleHtml(data.money_cycle);
+			const gateBox=document.querySelector('#money-gates');
+			if(gateBox)gateBox.innerHTML=money_gatesHtml(data.money_cycle);
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
 	async function boot_money_actions(){
@@ -513,6 +673,19 @@ const MONEY_SCRIPT = `
 				html+='<div class="meta">'+money_fmt(fr.fund.goal_amount)+' goal · '+money_fmt(fr.fund.raised_amount)+' raised · '+esc(fr.fund.prospect_count)+' prospects'+(fr.fund.follow_ups_due_now?' · <span class="followup-due">'+fr.fund.follow_ups_due_now+' follow-up'+(fr.fund.follow_ups_due_now===1?'':'s')+' due</span>':'')+'</div>';
 			}
 			box.innerHTML=html;
+			const mc=data.money_cycle;
+			const recBox=document.querySelector('#money-receipts');
+			if(recBox){
+				const reg=(mc&&mc.receipts_registry)||[];
+				recBox.innerHTML=reg.length?'<table class="data"><thead><tr><th>Date</th><th>Lane</th><th>Type</th><th>Amount</th><th>Territory</th><th>Source org</th><th>Restriction</th></tr></thead><tbody>'+reg.map(r=>'<tr><td>'+esc(r.occurred_at?String(r.occurred_at).slice(0,10):'-')+'</td><td>'+esc(r.lane)+'</td><td>'+esc(r.event_type)+'</td><td>'+esc(money_centsFmt(r.gross_cents))+'</td><td>'+esc(r.territory_name||'-')+'</td><td>'+esc(r.source_org||'-')+'</td><td>'+esc(r.restriction||'-')+'</td></tr>').join('')+'</tbody></table>':'<div class="unavailable">No receipts recorded yet.</div>';
+			}
+			const expBox=document.querySelector('#money-expected');
+			if(expBox){
+				const enr=(mc&&mc.expected_not_received)||{sponsor_commitments_count:0,sponsor_commitments_cents:0,note:''};
+				expBox.innerHTML='<div class="detail"><b>Sponsor commitments:</b> '+esc(enr.sponsor_commitments_count||0)+' commitments · '+esc(money_centsFmt(enr.sponsor_commitments_cents))+' expected</div>'+
+				'<div class="detail">Expected money is shown separately and is never included in received totals.</div>'+
+				(enr.note?'<div class="meta">'+esc(enr.note)+'</div>':'');
+			}
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}`;
 
@@ -644,6 +817,81 @@ const WORK_PANELS = ocFunction(
 );
 
 // ---------------------------------------------------------------------------
+// 3b. people - prescribed roles, HQ roles, candidate pipeline, Academy totals
+// ---------------------------------------------------------------------------
+
+const PEOPLE_SUMMARY_HTML = `<section class="panel"><h2>Roles summary</h2><div id="ppl-sum">Loading…</div></section>
+	<section class="panel"><h2>HQ roles</h2><div id="ppl-hq">Loading…</div></section>
+	<section class="panel"><h2>Academy aggregates</h2><div id="ppl-academy">Loading…</div></section>`;
+
+const PEOPLE_ACTIONS_HTML = `<section class="panel"><h2>Candidate pipeline</h2><div id="ppl-pipeline">Loading…</div></section>
+	<section class="panel"><h2>Candidate inflow</h2>
+	<p class="meta">Counts only, from form submissions. Names are never shown here.</p>
+	<div id="ppl-inflow">Loading…</div></section>`;
+
+const PEOPLE_DETAILS_HTML = `<section class="panel"><h2>Role catalog</h2><div id="ppl-catalog">Loading…</div></section>
+	<section class="panel"><h2>Florida roles by template</h2><div id="ppl-florida">Loading…</div></section>`;
+
+const PEOPLE_SCRIPT = `
+	function ppl_kvTable(obj){
+		const entries=Object.entries(obj||{});
+		if(!entries.length)return '<div class="unavailable">None recorded.</div>';
+		return '<table class="data"><thead><tr><th>Key</th><th>Count</th></tr></thead><tbody>'+entries.map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+esc(v)+'</td></tr>').join('')+'</tbody></table>';
+	}
+	async function boot_people_summary(){
+		const box=document.querySelector('#ppl-sum');
+		try{
+			const data=await api('/api/operating-center/people');
+			const roles=data.roles||{};
+			box.innerHTML='<div class="stats"><div class="stat"><strong>'+esc(roles.total||0)+'</strong><span>Prescribed roles, national</span></div></div>'+
+				'<h3>By status</h3>'+ppl_kvTable(roles.by_status)+
+				'<h3>By scope</h3>'+ppl_kvTable(roles.by_scope);
+			const hq=data.hq_roles||[];
+			document.querySelector('#ppl-hq').innerHTML=hq.length?'<table class="data"><thead><tr><th>Role</th><th>Scope</th><th>Planned</th></tr></thead><tbody>'+hq.map(r=>'<tr><td>'+esc(r.title||r.template_id)+'</td><td>'+esc(r.scope_type||'')+'</td><td>'+esc(r.n)+'</td></tr>').join('')+'</tbody></table>':'<div class="unavailable">No HQ roles prescribed yet.</div>';
+			const aca=data.academy||{};
+			document.querySelector('#ppl-academy').innerHTML='<div class="stats"><div class="stat"><strong>'+esc(aca.students||0)+'</strong><span>Academy students</span></div><div class="stat"><strong>'+esc(aca.certified||0)+'</strong><span>Certified instructors</span></div></div>'+(aca.last_sync?'<p class="meta">Last Academy sync: '+esc(aca.last_sync)+'</p>':'');
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_people_actions(){
+		const box=document.querySelector('#ppl-pipeline');
+		try{
+			const data=await api('/api/operating-center/people');
+			const apps=data.applications||{};
+			const order=apps.pipeline_order||Object.keys(apps.by_pipeline_status||{});
+			let html='';
+			if(!apps.total){
+				html='<div class="unavailable">No candidates in the pipeline yet. Applications appear here when a candidate enters the pipeline.</div>';
+			}else{
+				html='<div class="detail"><b>Total candidates:</b> '+esc(apps.total)+'</div><table class="data"><thead><tr><th>Pipeline stage</th><th>Candidates</th></tr></thead><tbody>'+order.map(st=>'<tr><td>'+esc(st)+'</td><td>'+esc((apps.by_pipeline_status||{})[st]||0)+'</td></tr>').join('')+'</tbody></table>';
+			}
+			if(apps.note)html+='<p class="meta">'+esc(apps.note)+'</p>';
+			box.innerHTML=html;
+			const inflow=data.candidate_inflow||{};
+			const rows=inflow.rows||[];
+			document.querySelector('#ppl-inflow').innerHTML='<div class="detail"><b>New submissions:</b> '+esc(inflow.new_total||0)+'</div>'+(rows.length?'<table class="data"><thead><tr><th>Form</th><th>Status</th><th>Count</th></tr></thead><tbody>'+rows.map(r=>'<tr><td>'+esc(r.form_type)+'</td><td>'+esc(r.status)+'</td><td>'+esc(r.n)+'</td></tr>').join('')+'</tbody></table>':'<div class="unavailable">No form submissions counted yet.</div>');
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_people_details(){
+		const box=document.querySelector('#ppl-catalog');
+		try{
+			const data=await api('/api/operating-center/people');
+			const catalog=data.catalog||[];
+			box.innerHTML=catalog.length?'<table class="data"><thead><tr><th>Role</th><th>Scope</th><th>Employment type</th><th>Paid</th></tr></thead><tbody>'+catalog.map(r=>'<tr><td>'+esc(r.title||r.template_id)+'</td><td>'+esc(r.scope_type||'')+'</td><td>'+esc(r.employment_type||'')+'</td><td>'+(r.is_paid?'Paid':'Paid when funded')+'</td></tr>').join('')+'</tbody></table>':'<div class="unavailable">No role catalog yet.</div>';
+			const fr=data.florida_roles||{};
+			const tmpl=fr.by_template||[];
+			document.querySelector('#ppl-florida').innerHTML='<div class="detail"><b>Total Florida roles:</b> '+esc(fr.total||0)+'</div>'+(tmpl.length?'<table class="data"><thead><tr><th>Role</th><th>Planned</th></tr></thead><tbody>'+tmpl.map(t=>'<tr><td>'+esc(t.title||t.template_id)+'</td><td>'+esc(t.n)+'</td></tr>').join('')+'</tbody></table>':'<div class="unavailable">No Florida roles by template yet.</div>');
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}`;
+
+const PEOPLE_PANELS = ocFunction(
+	"people",
+	"Prescribed roles across the network, HQ roles, the candidate pipeline, and Academy aggregates. Counts only - no individual records.",
+	PEOPLE_SUMMARY_HTML,
+	PEOPLE_ACTIONS_HTML,
+	PEOPLE_DETAILS_HTML,
+);
+
+// ---------------------------------------------------------------------------
 // 4. blockers — everything needing owner input or blocked
 // ---------------------------------------------------------------------------
 
@@ -763,7 +1011,7 @@ const OVERVIEW_QUICK =
 	`<button type="button" onclick="location.href='/operating-center/board?tab=board&view=actions'">Review board queue</button>` +
 	`<span class="meta">Summaries load fresh when you open them; use ↻ Refresh in any section to reload the current view. This button takes you to the manual triage point.</span>`;
 
-const OVERVIEW_VIEW_SCRIPT = ocViewScript("ovw", ["state", "money", "work", "blockers"]);
+const OVERVIEW_VIEW_SCRIPT = ocViewScript("ovw", ["florida", "state", "money", "work", "people", "blockers"]);
 
 export function renderOverviewSectionHtml(): string {
 	return ocSectionShell({
@@ -773,9 +1021,11 @@ export function renderOverviewSectionHtml(): string {
 		queryTabs: true,
 		appTopHtml: OVERVIEW_QUICK,
 		tabs: [
-			{ id: "state", label: "State", panelsHtml: STATE_PANELS, script: STATE_SCRIPT + OVERVIEW_VIEW_SCRIPT },
+			{ id: "florida", label: "Florida Cabinet", panelsHtml: FLORIDA_PANELS, script: FLORIDA_SCRIPT + OVERVIEW_VIEW_SCRIPT },
+			{ id: "state", label: "State", panelsHtml: STATE_PANELS, script: STATE_SCRIPT },
 			{ id: "money", label: "Money", panelsHtml: MONEY_PANELS, script: MONEY_SCRIPT },
 			{ id: "work", label: "Work", panelsHtml: WORK_PANELS, script: WORK_SCRIPT },
+			{ id: "people", label: "People", panelsHtml: PEOPLE_PANELS, script: PEOPLE_SCRIPT },
 			{ id: "blockers", label: "Blockers", panelsHtml: BLOCKERS_PANELS, script: BLOCKERS_SCRIPT },
 		],
 	});

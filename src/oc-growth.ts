@@ -29,7 +29,8 @@ import { ocSectionShell, ocFunction, ocViewScript } from "./oc-shell";
 const SPONSORSHIP_DESC =
 	"Commercial sponsorship pipeline — packages generated for NWANA properties, tracked stage by stage. Separate from fundraising: this is revenue from sponsors buying into the system.";
 
-const SPONSORSHIP_SUMMARY_HTML = `<section class="panel"><h2>Sponsorship summary</h2><div id="sponsorship-sum">Loading…</div></section>`;
+const SPONSORSHIP_SUMMARY_HTML = `<section class="panel"><h2>Sponsorship summary</h2><div id="sponsorship-sum">Loading…</div></section>
+	<section class="panel"><h2>Commitments and receipts</h2><div id="sponsorship-money">Loading…</div></section>`;
 
 const SPONSORSHIP_ACTIONS_HTML = `<section class="panel"><h2>Generate a package</h2>
 		<form id="sponsorship-generate-form">
@@ -80,6 +81,20 @@ const SPONSORSHIP_SCRIPT = `
 			html+='<div class="item"><strong>Needs attention</strong>'+(attn.length?'<div class="detail">&bull; '+attn.map(esc).join('<br>&bull; ')+'</div>':'<div class="detail">Nothing needs attention right now.</div>')+'</div>';
 			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Nothing here runs automatically: every package was generated and every stage move was made by the owner. This view only reads the live asset registry.</div></div>';
 			box.innerHTML=html;
+			const mBox=document.querySelector('#sponsorship-money');
+			if(mBox){
+				try{
+					const mData=await api('/api/operating-center/money/overview');
+					const mc=mData.money_cycle||{};
+					const enr=mc.expected_not_received||{sponsor_commitments_count:0,sponsor_commitments_cents:0};
+					const centsFmt=c=>'$'+(Number(c||0)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+					const spLane=(mc.received_totals_by_lane||{}).sponsorship;
+					let mh='<div class="detail"><b>Expected, not received:</b> '+esc(enr.sponsor_commitments_count||0)+' sponsor commitments · '+esc(centsFmt(enr.sponsor_commitments_cents))+' expected. Expected money is labelled expected and is never included in received totals.</div>';
+					mh+=spLane?'<div class="detail"><b>Sponsorship money received:</b> '+esc(spLane.events||0)+' receipts · '+esc(centsFmt(spLane.gross_cents))+'</div>':'<div class="detail">No sponsorship money received yet.</div>';
+					mh+='<p class="meta">Receipts are recorded through the money endpoint when a payment actually arrives.</p>';
+					mBox.innerHTML=mh;
+				}catch(err2){mBox.innerHTML='<div class="unavailable">'+esc(err2.message)+'</div>'}
+			}
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
 	async function boot_sponsorship_actions(){
@@ -551,6 +566,245 @@ const FUNDS_PANELS = ocFunction(
 );
 
 // ---------------------------------------------------------------------------
+// 5b. CRM (outreach prospects, one contact card per organization)
+// ---------------------------------------------------------------------------
+
+const CRM_DESC =
+	"The outreach CRM: every prospect organization with its contact, track, stage and territory, plus the funding pipeline behind it. One contact card shows sends, replies and money for a single organization.";
+
+const CRM_SUMMARY_HTML = `<section class="panel"><h2>CRM prospects</h2>
+		<div class="grid">
+			<div><label for="crm-scope">Scope</label><select id="crm-scope"><option value="fl">Florida</option><option value="all">All</option></select></div>
+			<div><label for="crm-track">Track</label><select id="crm-track"><option value="">All tracks</option><option value="sponsor-kilometers">Sponsor Every Kilometer</option><option value="corporate-teams">Corporate Umbrella Teams</option><option value="instructor-training">Instructor Training Organizations</option></select></div>
+			<div><label for="crm-tier">Tier</label><select id="crm-tier"><option value="">All tiers</option><option value="A1">A1</option><option value="A2">A2</option><option value="B">B</option><option value="C">C</option></select></div>
+		</div>
+		<div id="crm-list">Loading…</div></section>
+	<section class="panel"><h2>Contact card</h2><div id="crm-card"><p class="unavailable">Pick a prospect row above to open its contact card.</p></div></section>`;
+
+const CRM_ACTIONS_HTML = `<section class="panel"><h2>Funding pipeline</h2><div id="crm-pipe">Loading…</div></section>`;
+
+const CRM_DETAILS_HTML = `<section class="panel"><h2>Funding pipeline - full tables</h2><div id="crm-det">Loading…</div></section>`;
+
+const CRM_SCRIPT = `
+	function crm_moneyCents(c){return '$'+(Number(c||0)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+	function crm_stageTable(stages){
+		if(!stages||!stages.length)return '<div class="unavailable">No pipeline stages yet.</div>';
+		return '<table class="data"><thead><tr><th>Stage</th><th>Count</th><th>Amount</th></tr></thead><tbody>'+stages.map(s=>'<tr><td>'+esc(s.label||s.key)+'</td><td>'+esc(s.n!=null?s.n:'-')+'</td><td>'+(s.cents!=null?esc(crm_moneyCents(s.cents)):'-')+'</td></tr>').join('')+'</tbody></table>';
+	}
+	function crm_byLaneHtml(byLane){
+		if(!byLane)return '';
+		let rows=[];
+		if(Array.isArray(byLane)){rows=byLane.map(l=>({lane:l.lane,n:l.n!=null?l.n:l.events,cents:l.cents!=null?l.cents:l.gross_cents}));}
+		else{rows=Object.entries(byLane).map(([lane,v])=>({lane:lane,n:(v&&(v.n!=null?v.n:v.events)),cents:(v&&(v.cents!=null?v.cents:v.gross_cents))}));}
+		if(!rows.length)return '';
+		return '<table class="data"><thead><tr><th>Lane</th><th>Events</th><th>Received</th></tr></thead><tbody>'+rows.map(r=>'<tr><td>'+esc(r.lane)+'</td><td>'+esc(r.n!=null?r.n:'-')+'</td><td>'+(r.cents!=null?esc(crm_moneyCents(r.cents)):'-')+'</td></tr>').join('')+'</tbody></table>';
+	}
+	async function crm_loadProspects(){
+		const box=document.querySelector('#crm-list');
+		try{
+			const scope=(document.querySelector('#crm-scope')||{}).value||'fl';
+			const track=(document.querySelector('#crm-track')||{}).value||'';
+			const tier=(document.querySelector('#crm-tier')||{}).value||'';
+			let path='/api/operating-center/crm/prospects?scope='+encodeURIComponent(scope)+'&limit=200';
+			if(track)path+='&track='+encodeURIComponent(track);
+			if(tier)path+='&tier='+encodeURIComponent(tier);
+			const data=await api(path);
+			const rows=data.rows||[];
+			if(!rows.length){box.innerHTML='<div class="unavailable">No prospects match this filter.</div>';return}
+			box.innerHTML='<p class="meta">'+esc(data.total!=null?data.total:rows.length)+' prospect(s)</p><table class="data"><thead><tr><th>Organization</th><th>Contact</th><th>Tier</th><th>Track</th><th>Stage</th><th>Territory</th><th>Sends</th><th>Last sent</th><th>Replies</th></tr></thead><tbody>'+
+				rows.map(r=>{
+					const tierBadge=r.tier||r.contact_level;
+					return '<tr data-crm-row="'+esc(r.id)+'" style="cursor:pointer"><td><strong>'+esc(r.org_name)+'</strong>'+(r.city_state?'<div class="meta">'+esc(r.city_state)+'</div>':'')+'</td><td>'+esc(r.contact_name||'-')+(r.contact_title?'<div class="meta">'+esc(r.contact_title)+'</div>':'')+'</td><td>'+(tierBadge?'<span class="badge">'+esc(tierBadge)+'</span>':'-')+'</td><td>'+esc(r.track)+'</td><td>'+esc(r.stage)+'</td><td>'+esc(r.territory_name||'-')+'</td><td>'+esc(r.sends||0)+'</td><td>'+esc(r.last_sent_at?humanDate(r.last_sent_at):'-')+'</td><td>'+esc(r.replies||0)+(r.last_reply_classification?' <span class="badge">'+esc(r.last_reply_classification)+'</span>':'')+'</td></tr>';
+				}).join('')+'</tbody></table>';
+			box.querySelectorAll('[data-crm-row]').forEach(tr=>tr.addEventListener('click',()=>crm_loadCard(tr.getAttribute('data-crm-row'))));
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function crm_loadCard(id){
+		const box=document.querySelector('#crm-card');
+		box.innerHTML='Loading…';
+		try{
+			const data=await api('/api/operating-center/crm/prospect?id='+encodeURIComponent(id));
+			const p=data.prospect||{};
+			let html='<div class="item"><strong>'+esc(p.org_name||'Prospect')+'</strong>';
+			const fields=[['Contact',p.contact_name],['Title',p.contact_title],['Contact level',p.contact_level],['Track',p.track],['Stage',p.stage],['Place',p.city_state],['Territory',p.territory_name]];
+			for(const [k,v] of fields){if(v)html+='<div class="detail"><b>'+esc(k)+':</b> '+esc(v)+'</div>'}
+			html+='</div>';
+			if(data.roles_note)html+='<div class="item"><strong>Roles</strong><div class="detail">'+esc(data.roles_note)+'</div></div>';
+			const chain=data.territory_chain||[];
+			if(chain.length)html+='<div class="item"><strong>Territory chain</strong><div class="detail">'+chain.map(t=>esc(t.name)).join(' → ')+'</div><div class="meta">'+chain.map(t=>esc(t.type)).join(' → ')+'</div></div>';
+			const sends=data.sends||[];
+			html+='<div class="item"><strong>Sends</strong>'+(sends.length?sends.map(s=>'<div class="meta">Step '+esc(s.sequence_step)+' · '+esc(s.sent_at?humanDate(s.sent_at):'-')+'</div>').join(''):'<div class="unavailable">No sends yet.</div>')+'</div>';
+			const replies=data.replies||[];
+			html+='<div class="item"><strong>Replies</strong>'+(replies.length?replies.map(r=>'<div class="meta">'+esc(r.classification||'reply')+' · '+esc(r.received_at?humanDate(r.received_at):'')+(r.engine_action?' · Engine action: '+esc(r.engine_action):'')+'</div>').join(''):'<div class="unavailable">No replies yet.</div>')+'</div>';
+			const money=data.money||[];
+			html+='<div class="item"><strong>Money</strong>'+(money.length?money.map(m=>'<div class="meta">'+esc(m.event_type)+' · '+esc(m.funding_lane)+' · '+esc(crm_moneyCents(m.gross_cents))+' · '+esc(m.occurred_at?humanDate(m.occurred_at):'')+'</div>').join(''):'<div class="unavailable">No money received from this contact yet.</div>')+'</div>';
+			box.innerHTML=html;
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_crm_summary(){
+		const panel=document.querySelector('#tabpanel-crm');
+		if(panel&&!panel.dataset.crmWired){
+			panel.dataset.crmWired='1';
+			['crm-scope','crm-track','crm-tier'].forEach(id=>{const el=document.querySelector('#'+id);if(el)el.addEventListener('change',crm_loadProspects);});
+		}
+		await crm_loadProspects();
+	}
+	async function boot_crm_actions(){
+		const box=document.querySelector('#crm-pipe');
+		try{
+			const data=await api('/api/operating-center/funding/pipeline');
+			let html='<h3>National stages</h3>'+crm_stageTable(data.stages);
+			html+='<h3>Florida stages</h3>'+crm_stageTable(data.florida_stages);
+			const lf=data.legacy_fund||{};
+			const fundNames=(lf.funds||[]).map(f=>esc(f.name)).join(', ');
+			html+='<h3>Legacy fund</h3><div class="meta">'+(fundNames?'Funds: '+fundNames:'No legacy funds recorded.')+'</div>';
+			if(data.note)html+='<p class="meta">'+esc(data.note)+'</p>';
+			box.innerHTML=html;
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_crm_details(){
+		const box=document.querySelector('#crm-det');
+		try{
+			const data=await api('/api/operating-center/funding/pipeline');
+			let html='<h3>National stages</h3>'+crm_stageTable(data.stages);
+			for(const s of (data.stages||[])){const bl=crm_byLaneHtml(s.by_lane);if(bl)html+='<h3>'+esc(s.label||s.key)+' - money received by lane</h3>'+bl;}
+			html+='<h3>Florida stages</h3>'+crm_stageTable(data.florida_stages);
+			for(const s of (data.florida_stages||[])){const bl=crm_byLaneHtml(s.by_lane);if(bl)html+='<h3>Florida: '+esc(s.label||s.key)+' - money received by lane</h3>'+bl;}
+			const lf=data.legacy_fund||{};
+			html+='<h3>Legacy fund prospects by stage</h3>'+crm_stageTable(Object.entries(lf.prospects_by_stage||{}).map(([k,v])=>({key:k,label:k,n:v})));
+			if(data.note)html+='<p class="meta">'+esc(data.note)+'</p>';
+			box.innerHTML=html;
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+`;
+
+const CRM_PANELS = ocFunction(
+	"crm",
+	CRM_DESC,
+	CRM_SUMMARY_HTML,
+	CRM_ACTIONS_HTML,
+	CRM_DETAILS_HTML,
+);
+
+// ---------------------------------------------------------------------------
+// 5c. Grants (tracking only - owner stop order)
+// ---------------------------------------------------------------------------
+
+const GRANTS_DESC =
+	"Grant tracking only: the grant lane gate, the registry and the calendar. No applications and no letters while the owner stop order stands.";
+
+const GRANTS_SUMMARY_HTML = `<section class="panel"><h2>Grant lane gate</h2><div id="grants-gate">Loading…</div></section>
+	<section class="panel"><h2>Grant registry</h2><div id="grants-registry">Loading…</div></section>
+	<section class="panel"><h2>Grant calendar</h2><div id="grants-calendar">Loading…</div></section>`;
+
+const GRANTS_ACTIONS_HTML = `<section class="panel"><h2>Tracking only</h2>
+		<p>Tracking only: no applications, no letters. The owner stop order of 2026-10-15 paused all grant applications and outreach letters; this tab records gates, registry entries and calendar dates and nothing more.</p>
+		<p class="meta">When the owner lifts the stop order, application work starts from the registry and calendar shown in Summary.</p></section>`;
+
+const GRANTS_DETAILS_HTML = `<section class="panel"><h2>Grant gate - full basis</h2><div id="grants-det">Loading…</div></section>`;
+
+const GRANTS_SCRIPT = `
+	function grants_gateBadge(status){
+		const s=String(status||'');
+		const cls=s==='OPEN'?'badge-ok':(s==='CLOSED'||s==='OWNER_STOP')?'badge-warn':'badge';
+		return '<span class="'+cls+'">'+esc(s||'unknown')+'</span>';
+	}
+	function grants_listHtml(rows,note){
+		if(!rows||!rows.length)return '<div class="unavailable">'+esc(note||'Nothing recorded yet.')+'</div>';
+		return rows.map(r=>'<div class="item"><strong>'+esc(r.name||r.title||r.label||'Entry')+'</strong>'+(r.status?'<span class="badge">'+esc(r.status)+'</span>':'')+(r.detail?'<div class="detail">'+esc(r.detail)+'</div>':'')+(r.due_at?'<div class="meta">Due: '+esc(humanDate(r.due_at))+'</div>':'')+'</div>').join('');
+	}
+	async function boot_grants_summary(){
+		const gateBox=document.querySelector('#grants-gate');
+		try{
+			const data=await api('/api/operating-center/grants');
+			const gate=data.gate;
+			gateBox.innerHTML=gate?'<div class="item"><strong>'+esc(gate.lane)+' lane · '+esc(gate.scope)+' '+grants_gateBadge(gate.status)+'</strong><div class="detail">'+esc(gate.basis||'')+'</div></div>':'<div class="unavailable">No grant lane gate recorded.</div>';
+			document.querySelector('#grants-registry').innerHTML=grants_listHtml(data.registry,data.registry_note);
+			document.querySelector('#grants-calendar').innerHTML=grants_listHtml(data.calendar,data.calendar_note);
+		}catch(err){gateBox.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_grants_actions(){ /* static panel: tracking only, nothing to load */ }
+	async function boot_grants_details(){
+		const box=document.querySelector('#grants-det');
+		try{
+			const data=await api('/api/operating-center/grants');
+			const gate=data.gate;
+			box.innerHTML=gate?'<div class="item"><strong>'+esc(gate.lane)+' lane · '+esc(gate.scope)+' '+grants_gateBadge(gate.status)+'</strong><div class="detail">'+esc(gate.basis||'')+'</div></div>':'<div class="unavailable">No grant lane gate recorded.</div>';
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+`;
+
+const GRANTS_PANELS = ocFunction(
+	"grants",
+	GRANTS_DESC,
+	GRANTS_SUMMARY_HTML,
+	GRANTS_ACTIONS_HTML,
+	GRANTS_DETAILS_HTML,
+);
+
+// ---------------------------------------------------------------------------
+// 5d. Budgets (need / coverage / actual registers per scope)
+// ---------------------------------------------------------------------------
+
+const BUDGETS_DESC =
+	"Budget registers per scope: what the network needs (prescribed roles), what covers it (money actually received, by lane), and what was actually spent. The three registers are kept separate on purpose.";
+
+const BUDGETS_SUMMARY_HTML = `<section class="panel"><h2>Budget registers</h2><div id="budgets-note">Loading…</div><div id="budgets-list"></div></section>`;
+
+const BUDGETS_ACTIONS_HTML = `<section class="panel"><h2>Budget actions</h2>
+		<p class="meta">Budgets here are read-only registers computed from prescribed roles and received money. There is no manual budget action on this screen: roles are prescribed in the network model and receipts are recorded through the money endpoint when a payment actually arrives.</p></section>`;
+
+const BUDGETS_DETAILS_HTML = `<section class="panel"><h2>Budget registers - full detail</h2><div id="budgets-det">Loading…</div></section>`;
+
+const BUDGETS_SCRIPT = `
+	function budgets_moneyCents(c){return '$'+(Number(c||0)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+	function budgets_scopeHtml(sc){
+		const need=sc.need||{}, cov=sc.coverage||{}, act=sc.actual||{};
+		let html='<section class="panel"><h2>'+esc(sc.label||sc.key)+'</h2><div class="grid">';
+		html+='<div class="panel"><h3>Need</h3><div class="detail"><b>Roles planned:</b> '+esc(need.roles_planned||0)+'</div>';
+		const bs=need.by_scope||{};
+		if(Object.keys(bs).length)html+='<table class="data"><thead><tr><th>Scope</th><th>Roles</th></tr></thead><tbody>'+Object.entries(bs).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+esc(v)+'</td></tr>').join('')+'</tbody></table>';
+		if(need.amounts_note)html+='<p class="meta">'+esc(need.amounts_note)+'</p>';
+		html+='</div>';
+		html+='<div class="panel"><h3>Coverage</h3>';
+		const lanes=cov.received_by_lane||[];
+		html+=lanes.length?'<table class="data"><thead><tr><th>Lane</th><th>Events</th><th>Received</th></tr></thead><tbody>'+lanes.map(l=>'<tr><td>'+esc(l.lane)+'</td><td>'+esc(l.events)+'</td><td>'+esc(budgets_moneyCents(l.cents))+'</td></tr>').join('')+'</tbody></table>':'<div class="unavailable">No money received yet.</div>';
+		html+='<div class="detail"><b>Total coverage:</b> '+esc(budgets_moneyCents(cov.total_cents))+'</div></div>';
+		html+='<div class="panel"><h3>Actual</h3><div class="detail"><b>Expenses:</b> '+(act.expenses_cents==null?'none recorded':esc(budgets_moneyCents(act.expenses_cents)))+'</div>';
+		if(act.note)html+='<p class="meta">'+esc(act.note)+'</p>';
+		html+='</div></div></section>';
+		return html;
+	}
+	async function boot_budgets_summary(){
+		const noteBox=document.querySelector('#budgets-note');
+		const list=document.querySelector('#budgets-list');
+		try{
+			const data=await api('/api/operating-center/budgets');
+			noteBox.innerHTML=data.registers_note?'<p class="meta">'+esc(data.registers_note)+'</p>':'';
+			const scopes=data.scopes||[];
+			list.innerHTML=scopes.length?scopes.map(budgets_scopeHtml).join(''):'<div class="unavailable">No budget scopes yet.</div>';
+		}catch(err){noteBox.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_budgets_actions(){ /* static panel: registers are read-only, nothing to load */ }
+	async function boot_budgets_details(){
+		const box=document.querySelector('#budgets-det');
+		try{
+			const data=await api('/api/operating-center/budgets');
+			const scopes=data.scopes||[];
+			box.innerHTML=(data.registers_note?'<p class="meta">'+esc(data.registers_note)+'</p>':'')+(scopes.length?scopes.map(budgets_scopeHtml).join(''):'<div class="unavailable">No budget scopes yet.</div>');
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+`;
+
+const BUDGETS_PANELS = ocFunction(
+	"budgets",
+	BUDGETS_DESC,
+	BUDGETS_SUMMARY_HTML,
+	BUDGETS_ACTIONS_HTML,
+	BUDGETS_DETAILS_HTML,
+);
+
+// ---------------------------------------------------------------------------
 // 6. Instructor Growth Fund (fundraising-asset view)
 // ---------------------------------------------------------------------------
 
@@ -694,6 +948,9 @@ const GRO_VIEW_SCRIPT = ocViewScript("gro", [
 	"sellers",
 	"partners",
 	"funds",
+	"crm",
+	"grants",
+	"budgets",
 	"igf",
 ]);
 
@@ -711,6 +968,9 @@ export function renderGrowthSectionHtml(): string {
 			{ id: "sellers", label: "Sellers", panelsHtml: SELLERS_PANELS, script: SELLERS_SCRIPT, reportId: "sellers" },
 			{ id: "partners", label: "Partners", panelsHtml: PARTNERS_PANELS, script: PARTNERS_SCRIPT, reportId: "partners" },
 			{ id: "funds", label: "Funds", panelsHtml: FUNDS_PANELS, script: FUNDS_SCRIPT },
+			{ id: "crm", label: "CRM", panelsHtml: CRM_PANELS, script: CRM_SCRIPT },
+			{ id: "grants", label: "Grants", panelsHtml: GRANTS_PANELS, script: GRANTS_SCRIPT },
+			{ id: "budgets", label: "Budgets", panelsHtml: BUDGETS_PANELS, script: BUDGETS_SCRIPT },
 			{ id: "igf", label: "Instructor Growth Fund", panelsHtml: IGF_PANELS, script: IGF_SCRIPT + GRO_VIEW_SCRIPT },
 		],
 	});

@@ -208,7 +208,7 @@ const ACTIVITY_SCRIPT = OPS_SHARED_SCRIPT + `
 				:'<div class="unavailable">No recent activity.</div>';
 		}catch(err){reading.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>';fresh.innerHTML=''}
 	}
-` + ocViewScript("ops", ["activity", "system", "exceptions"]);
+` + ocViewScript("ops", ["activity", "system", "exceptions", "readiness"]);
 
 // ---------------------------------------------------------------------------
 // 2. system
@@ -382,6 +382,60 @@ const EXCEPTIONS_SCRIPT = `
 	}
 `;
 
+// ---------------------------------------------------------------------------
+// 4. readiness
+// ---------------------------------------------------------------------------
+
+const READINESS_SUMMARY_HTML = `<section class="panel"><h2>Safety and compliance - lane gates</h2><div id="ops-rdy-gates">Loading…</div></section>
+	<section class="panel"><h2>Equipment</h2>
+	<p class="unavailable">No equipment registry exists in the Engine yet. Equipment is owned by NWANA and assigned to territories; records appear here when the Deployment Engine starts assigning kits.</p></section>`;
+
+const READINESS_ACTIONS_HTML = `<section class="panel"><h2>Insurance and waivers</h2>
+	<p class="unavailable">No insurance coverage records in the Engine yet. Group activation stays blocked until required coverage is recorded (TZ 5.14).</p>
+	<p class="meta">Waivers follow the same rule: no waiver records exist in the Engine yet, and a group is not activated until its required coverage and waivers are recorded.</p></section>`;
+
+const READINESS_DETAILS_HTML = `<section class="panel"><h2>Lane gates - full basis</h2><div id="ops-rdy-det">Loading…</div></section>`;
+
+const READINESS_PANELS = ocFunction(
+	"readiness",
+	"Whether the network is safe and legal to run: funding lane gates, equipment, insurance and waivers. Empty states here are honest - nothing is recorded until the records exist.",
+	READINESS_SUMMARY_HTML,
+	READINESS_ACTIONS_HTML,
+	READINESS_DETAILS_HTML,
+);
+
+const READINESS_SCRIPT = `
+	function ops_gateBadge(status){
+		const s=String(status||'');
+		const cls=s==='OPEN'?'badge-ok':(s==='CLOSED'||s==='OWNER_STOP')?'badge-warn':'badge';
+		return '<span class="'+cls+'">'+esc(s||'unknown')+'</span>';
+	}
+	async function ops_fetchLaneGates(){
+		const data=await api('/api/operating-center/money/lane-gates');
+		if(Array.isArray(data))return data;
+		return data.gates||data.lane_gates||[];
+	}
+	async function boot_readiness_summary(){
+		const box=document.querySelector('#ops-rdy-gates');
+		try{
+			const gates=await ops_fetchLaneGates();
+			if(!gates.length){box.innerHTML='<div class="unavailable">No lane gates recorded.</div>';return}
+			box.innerHTML='<table class="data"><thead><tr><th>Lane</th><th>Scope</th><th>Status</th><th>Source</th><th>Updated</th></tr></thead><tbody>'+
+				gates.map(g=>'<tr><td>'+esc(g.lane)+'</td><td>'+esc(g.scope)+'</td><td>'+ops_gateBadge(g.status)+'</td><td>'+esc(g.source||'-')+'</td><td>'+esc(g.updated_at?humanDate(g.updated_at):'-')+'</td></tr>').join('')+'</tbody></table>'+
+				'<p class="meta">Full gate basis texts are in Details.</p>';
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+	async function boot_readiness_actions(){ /* static panel: honest empty states, nothing to load */ }
+	async function boot_readiness_details(){
+		const box=document.querySelector('#ops-rdy-det');
+		try{
+			const gates=await ops_fetchLaneGates();
+			if(!gates.length){box.innerHTML='<div class="unavailable">No lane gates recorded.</div>';return}
+			box.innerHTML=gates.map(g=>'<div class="item"><strong>'+esc(g.lane)+' · '+esc(g.scope)+' '+ops_gateBadge(g.status)+'</strong><div class="detail">'+esc(g.basis||'')+'</div><div class="meta">Source: '+esc(g.source||'-')+' · Updated: '+esc(g.updated_at?humanDate(g.updated_at):'-')+'</div></div>').join('');
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
+`;
+
 export function renderOperationsSectionHtml(): string {
 	return ocSectionShell({
 		section: "operations",
@@ -398,6 +452,7 @@ export function renderOperationsSectionHtml(): string {
 				reportId: "operations",
 			},
 			{ id: "exceptions", label: "Exceptions", panelsHtml: EXCEPTIONS_PANELS, script: EXCEPTIONS_SCRIPT },
+			{ id: "readiness", label: "Readiness", panelsHtml: READINESS_PANELS, script: READINESS_SCRIPT },
 		],
 	});
 }

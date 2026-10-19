@@ -647,67 +647,154 @@ const CHALLENGES_PANELS = ocFunction(
 
 const GROUPS_SUMMARY_HTML = `<section class="panel"><h2>Groups summary</h2><div id="groups-sum">Loading…</div></section>`;
 
-const GROUPS_ACTIONS_HTML = `<section class="panel"><h2>Groups actions</h2>
-	<p class="meta"><strong>Machine (automatic):</strong> shows the public ladder and funnel below. <strong>Owner (manual):</strong> there are no group mutations in the API — groups register themselves through the public funnel. The buttons below open the funnel pages.</p>
-	<div id="groups-act">Loading…</div></section>`;
+const GROUPS_ACTIONS_HTML = `<section class="panel"><h2>Territory explorer</h2>
+	<p class="meta"><strong>Machine (automatic):</strong> reads the live territory registry and shows the chain, child territories, groups, programs, prospects and prescribed roles for one territory. <strong>Owner (manual):</strong> open Florida or enter a territory id and load it. Groups themselves are created by NWANA decision; there is no public self-service creation step here.</p>
+	<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:8px"><button type="button" class="secondary" id="groups-florida-btn">Florida</button><div style="flex:1;min-width:180px"><label for="groups-territory-id">Territory id</label><input id="groups-territory-id" type="text" placeholder="e.g. terr-st-12"></div><button type="button" id="groups-load-btn">Load</button></div>
+	<div id="groups-act"><div class="unavailable">Choose Florida or enter a territory id to explore the registry.</div></div></section>`;
 
-const GROUPS_DETAILS_HTML = `<section class="panel"><h2>Ladder detail</h2><div id="groups-det-ladder">Loading…</div></section>
-	<section class="panel"><h2>Public funnel</h2><div id="groups-det-funnel">Loading…</div></section>`;
+const GROUPS_DETAILS_HTML = `<section class="panel"><h2>Registry detail</h2><div id="groups-det-territories">Loading…</div><div id="groups-det-groups"></div></section>
+	<section class="panel"><h2>Florida detail</h2><div id="groups-det-florida">Loading…</div></section>
+	<section class="panel"><h2>Group categories</h2><div id="groups-det-categories">Loading…</div></section>
+	<section class="panel"><h2>Participants and the Individual License</h2><p class="meta">Individual licenses are sold through the single NWANA license club in RunSignup (club 3335). License counts appear in the Money view (MemberOrgs). A license is participation in a home group, portable across groups, and never creates a group or ownership rights.</p></section>
+	<section class="panel"><h2>Public site</h2><p class="meta"><a href="https://groups.nwaofna.org" target="_blank" rel="noopener">https://groups.nwaofna.org</a></p></section>`;
 
 const GROUPS_SCRIPT = `
 	async function groups_fetchOverview(){
 		return await api('/api/operating-center/groups/overview');
 	}
+	function groups_fmt(v){
+		return Number(v||0).toLocaleString('en-US');
+	}
+	function groups_statusBadge(status){
+		if(status==='ACTIVE')return '<span class="badge-ok">ACTIVE</span>';
+		if(status==='FORMING')return '<span class="badge-warn">FORMING</span>';
+		return '<span class="badge">'+esc(status||'')+'</span>';
+	}
+	async function groups_loadTerritory(id){
+		const box=document.querySelector('#groups-act');
+		const tid=String(id||'').trim();
+		if(!tid){box.innerHTML='<div class="unavailable">Enter a territory id first.</div>';return}
+		box.innerHTML='<div class="unavailable">Loading territory…</div>';
+		try{
+			const data=await api('/api/operating-center/groups/territory?id='+encodeURIComponent(tid));
+			const t=data.territory||{};
+			let html='<div class="item"><strong>'+esc(t.name||tid)+'</strong><div class="detail"><b>Type:</b> '+esc(t.type||'')+' · <b>Id:</b> '+esc(t.territory_id||tid)+'</div></div>';
+			const chain=data.chain||[];
+			if(chain.length){
+				html+='<div class="item"><strong>Chain</strong><div class="detail">'+chain.map(function(c){return '<a href="#" class="groups-terr-link" data-tid="'+esc(c.territory_id)+'">'+esc(c.name)+'</a> ('+esc(c.type)+')'}).join(' / ')+'</div></div>';
+			}
+			const children=(data.children&&data.children.list)||[];
+			html+='<h3>Child territories</h3>';
+			if(children.length){
+				const byType={};
+				for(const c of children){const k=c.type||'Other';if(!byType[k])byType[k]=[];byType[k].push(c)}
+				for(const k of Object.keys(byType)){
+					html+='<div class="item"><strong>'+esc(k)+'</strong>'+byType[k].map(function(c){return '<div class="detail">&bull; <a href="#" class="groups-terr-link" data-tid="'+esc(c.territory_id)+'">'+esc(c.name)+'</a> · '+esc(c.territory_id)+'</div>'}).join('')+'</div>';
+				}
+			}else{
+				html+='<div class="unavailable">No child territories recorded for this territory.</div>';
+			}
+			const groups=data.groups||[];
+			html+='<h3>NW Groups in this territory</h3>';
+			if(groups.length){
+				html+='<table class="data"><thead><tr><th>Group</th><th>Number</th><th>Status</th><th>Category</th><th>Leader</th></tr></thead><tbody>'+
+					groups.map(function(g){
+						const leader=g.leader_name?esc(g.leader_name)+(g.leader_role?' ('+esc(g.leader_role)+')':''):'Not appointed yet';
+						return '<tr><td>'+esc(g.name)+(g.is_default?' <span class="badge">default</span>':'')+'</td><td>'+esc(g.group_number||'')+'</td><td>'+groups_statusBadge(g.status)+'</td><td>'+esc(g.category_key||'')+'</td><td>'+leader+'</td></tr>';
+					}).join('')+'</tbody></table>';
+			}else{
+				html+='<div class="unavailable">No groups recorded for this territory yet.</div>';
+			}
+			const programs=data.programs||[];
+			html+='<h3>Programs</h3>';
+			if(programs.length){
+				html+=programs.map(function(p){
+					const label=p.name||p.title||p.program_name||'Program';
+					const extra=[p.type,p.status].filter(Boolean).map(function(x){return esc(x)}).join(' · ');
+					return '<div class="item"><strong>'+esc(label)+'</strong>'+(extra?'<div class="detail">'+extra+'</div>':'')+'</div>';
+				}).join('');
+			}else{
+				html+='<div class="unavailable">No programs recorded for this territory yet</div>';
+			}
+			html+='<div class="item"><strong>Prospects and prescribed roles</strong><div class="detail"><b>Prospects:</b> '+groups_fmt(data.prospects_count)+' · <b>Prescribed roles:</b> '+groups_fmt(data.roles_count)+'</div></div>';
+			box.innerHTML=html;
+			const links=box.querySelectorAll('.groups-terr-link');
+			links.forEach(function(el){el.addEventListener('click',function(ev){ev.preventDefault();const next=el.getAttribute('data-tid');const input=document.querySelector('#groups-territory-id');if(input)input.value=next;groups_loadTerritory(next)})});
+		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+	}
 	async function boot_groups_summary(){
 		const box=document.querySelector('#groups-sum');
 		try{
 			const data=await groups_fetchOverview();
-			let html='<div class="item"><strong>Growth ladder</strong>';
-			for(const s of (data.ladder||[])){
-				html+='<div class="detail">&bull; <b>'+esc(s.step)+'</b> — '+esc(s.description)+'</div>';
-			}
-			html+='</div>';
-			const f=data.funnel||{};
-			html+='<div class="item"><strong>Public funnel</strong><div class="detail"><a href="'+esc(f.member_org)+'" target="_blank" rel="noopener">'+esc(f.member_org)+'</a><br><a href="'+esc(f.register)+'" target="_blank" rel="noopener">'+esc(f.register)+'</a></div></div>';
-			html+='<div class="item"><strong>Group counts <span class="badge-warn">not yet tracked</span></strong><div class="detail">'+esc(data.stats&&data.stats.note||'No group statistics are tracked yet.')+'</div></div>';
-			html+='<div class="item"><strong>Needs attention</strong><div class="detail">Group counts are not tracked yet — the next step is to start counting registered groups so the network size is visible here.</div></div>';
-			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Keeps this overview from the live groups configuration. Groups register through the public funnel; the Machine does not create them.</div></div>';
+			const g=data.groups||{};
+			const byStatus=g.by_status||{};
+			const fl=data.florida||{};
+			const flByStatus=fl.groups_by_status||{};
+			let html='<div class="stats">'+
+				'<div class="stat"><strong>'+groups_fmt(data.territories_total)+'</strong><span>Territories</span></div>'+
+				'<div class="stat"><strong>'+groups_fmt(g.total)+'</strong><span>NW Groups</span></div>'+
+				'<div class="stat"><strong>'+groups_fmt(byStatus.FORMING)+'</strong><span>FORMING groups</span></div>'+
+				'<div class="stat"><strong>'+groups_fmt(byStatus.ACTIVE)+'</strong><span>ACTIVE groups</span></div>'+
+				'</div>';
+			html+='<div class="item"><strong>The territory-first model</strong><div class="detail">'+esc(data.model_note||'')+'</div>'+
+				'<div class="detail">Territory is the entry point: funding, participants, organizations, facilities and sponsors attach to a territory first.</div>'+
+				'<div class="detail">Groups are NWANA\\'s own units inside a territory, created by NWANA decision. They are not founded or owned by a local person.</div>'+
+				'<div class="detail">FORMING means the group is created, its leader may be unappointed, and it has no sessions yet. ACTIVE applies only after the real launch conditions are met.</div>'+
+				'<div class="detail">The Individual License is participation in a home group, portable across groups, and never creates a group or ownership rights.</div></div>';
+			html+='<div class="item"><strong>Florida</strong><div class="detail"><b>Territories:</b> '+groups_fmt(fl.territories_total)+' · <b>Groups:</b> '+groups_fmt(fl.groups_total)+' · <b>FORMING:</b> '+groups_fmt(flByStatus.FORMING)+' · <b>ACTIVE:</b> '+groups_fmt(flByStatus.ACTIVE)+'</div></div>';
+			html+='<div class="item"><strong>What the Machine did</strong><div class="detail">Read the live territory and group registry for the counts above. Nothing here is entered by hand.</div></div>';
 			box.innerHTML=html;
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
 	async function boot_groups_actions(){
-		const box=document.querySelector('#groups-act');
-		try{
-			const data=await groups_fetchOverview();
-			const f=data.funnel||{};
-			box.innerHTML='<div class="item"><strong>Member organization page</strong><div class="detail">Public page groups use to join the network.</div><div style="margin-top:8px"><a class="oc-view-btn" style="text-decoration:none;display:inline-block" href="'+esc(f.member_org)+'" target="_blank" rel="noopener">Open member page</a></div></div>'+
-				'<div class="item"><strong>Group registration</strong><div class="detail">Public registration funnel for new groups.</div><div style="margin-top:8px"><a class="oc-view-btn" style="text-decoration:none;display:inline-block" href="'+esc(f.register)+'" target="_blank" rel="noopener">Open registration</a></div></div>'+
-				'<div class="item"><strong>No other group actions exist</strong><div class="detail">The API has no group create/update/delete operations. If a mutation is needed, it happens manually on the public site — nothing here is wired to a fake endpoint.</div></div>';
-		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
+		const flBtn=document.querySelector('#groups-florida-btn');
+		const loadBtn=document.querySelector('#groups-load-btn');
+		const input=document.querySelector('#groups-territory-id');
+		if(flBtn)flBtn.onclick=function(){const id='terr-st-12';if(input)input.value=id;groups_loadTerritory(id)};
+		if(loadBtn)loadBtn.onclick=function(){groups_loadTerritory(input?input.value:'')};
+		if(input)input.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();groups_loadTerritory(input.value)}});
 	}
 	async function boot_groups_details(){
+		const tb=document.querySelector('#groups-det-territories');
+		const gb=document.querySelector('#groups-det-groups');
+		const fb=document.querySelector('#groups-det-florida');
+		const cb=document.querySelector('#groups-det-categories');
 		try{
 			const data=await groups_fetchOverview();
-			const lb=document.querySelector('#groups-det-ladder');
-			lb.innerHTML=(data.ladder||[]).length?(data.ladder||[]).map(function(s){
-				return '<div class="item"><strong>'+esc(s.step)+'</strong><div class="detail">'+esc(s.description)+'</div></div>';
-			}).join(''):'<div class="unavailable">No ladder steps configured.</div>';
-			const f=data.funnel||{};
-			const fb=document.querySelector('#groups-det-funnel');
+			const byType=data.territories_by_type||{};
+			tb.innerHTML='<table class="data"><thead><tr><th>Territory type</th><th>Count</th></tr></thead><tbody>'+
+				Object.keys(byType).map(function(k){return '<tr><td>'+esc(k)+'</td><td>'+groups_fmt(byType[k])+'</td></tr>'}).join('')+
+				'<tr><th>Total territories</th><td>'+groups_fmt(data.territories_total)+'</td></tr></tbody></table>';
+			const g=data.groups||{};
+			const byStatus=g.by_status||{};
+			gb.innerHTML='<table class="data"><thead><tr><th>Groups by status</th><th>Count</th></tr></thead><tbody>'+
+				Object.keys(byStatus).map(function(k){return '<tr><td>'+esc(k)+'</td><td>'+groups_fmt(byStatus[k])+'</td></tr>'}).join('')+
+				'<tr><th>Total groups</th><td>'+groups_fmt(g.total)+'</td></tr>'+
+				'<tr><td>Default groups</td><td>'+groups_fmt(g.defaults)+'</td></tr></tbody></table>';
+			const fl=data.florida||{};
+			const flByType=fl.territories_by_type||{};
+			const flByStatus=fl.groups_by_status||{};
 			fb.innerHTML='<table class="data"><tbody>'+
-				'<tr><th>Member organization page</th><td><a href="'+esc(f.member_org)+'" target="_blank" rel="noopener">'+esc(f.member_org)+'</a></td></tr>'+
-				'<tr><th>Group registration</th><td><a href="'+esc(f.register)+'" target="_blank" rel="noopener">'+esc(f.register)+'</a></td></tr>'+
+				'<tr><th>Florida territories</th><td>'+groups_fmt(fl.territories_total)+'</td></tr>'+
+				Object.keys(flByType).map(function(k){return '<tr><td>'+esc(k)+'</td><td>'+groups_fmt(flByType[k])+'</td></tr>'}).join('')+
+				'<tr><th>Florida groups</th><td>'+groups_fmt(fl.groups_total)+'</td></tr>'+
+				Object.keys(flByStatus).map(function(k){return '<tr><td>'+esc(k)+'</td><td>'+groups_fmt(flByStatus[k])+'</td></tr>'}).join('')+
 				'</tbody></table>';
+			const cats=data.categories||{};
+			cb.innerHTML='<div class="item"><strong>Group categories</strong><div class="detail">'+groups_fmt(cats.count)+' categories are an informational taxonomy and a request channel only. Choosing a category does not create a group.</div>'+(cats.note?'<div class="detail">'+esc(cats.note)+'</div>':'')+'</div>';
 		}catch(err){
-			const m=document.querySelector('#tabpanel-groups .oc-tab-error');
-			if(m)m.textContent='Error: '+(err.message||err);
+			const msg='<div class="unavailable">'+esc(err.message)+'</div>';
+			if(tb)tb.innerHTML=msg;
+			if(gb)gb.innerHTML='';
+			if(fb)fb.innerHTML=msg;
+			if(cb)cb.innerHTML=msg;
 		}
 	}
 `;
 
 const GROUPS_PANELS = ocFunction(
 	"groups",
-	"NW Groups — the public ladder, the registration funnel, and what the network needs next. Groups register themselves; group counts are not tracked yet.",
+	"NW Groups - the territory registry, FORMING and ACTIVE groups, and the territory explorer. Territories are the entry point; groups are NWANA units created by NWANA decision.",
 	GROUPS_SUMMARY_HTML,
 	GROUPS_ACTIONS_HTML,
 	GROUPS_DETAILS_HTML,

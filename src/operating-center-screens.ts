@@ -844,45 +844,52 @@ export function renderFundraisingHtml(): string {
 // 7. NW Groups
 // ---------------------------------------------------------------------------
 
-export interface GroupsOverview {
-	ok: true;
-	generated_at: string;
-	ladder: Array<{ step: string; description: string }>;
-	funnel: { member_org: string; register: string };
-	stats: { connected: false; note: string };
+export interface GroupsRegistryTerritoryCounts {
+	CONTINENTAL: number;
+	NATIONAL: number;
+	STATE: number;
+	COUNTY: number;
+	CITY: number;
+	LOCAL_COMMUNITY: number;
 }
 
-export function getGroupsOverview(): GroupsOverview {
-	return {
-		ok: true,
-		generated_at: new Date().toISOString(),
-		ladder: [
-			{ step: "Individual license", description: "A walker takes an individual license." },
-			{ step: "Free group creation", description: "NWANA creates the group and issues the initial Group License free, with a group page." },
-			{ step: "RECOGNIZED Group — $200/year", description: "A voluntary later application. Deliberately manual: human evaluation and live contact." },
-		],
-		funnel: {
-			member_org: "https://runsignup.com/MemberOrg/NWANANWGroups",
-			register: "https://runsignup.com/MemberOrg/NWANANWGroups/Register",
-		},
-		stats: {
-			connected: false,
-			note: "Group and member counts are not tracked yet. The funnel above is the public entry point; counts will appear here once the machine reads them from RunSignup.",
-		},
+export interface GroupsRegistryData {
+	ok: true;
+	generated_at: string;
+	model_note: string;
+	territories_by_type: GroupsRegistryTerritoryCounts;
+	territories_total: number;
+	groups: {
+		total: number;
+		by_status: { FORMING: number; ACTIVE: number };
+		defaults: number;
 	};
+	florida: {
+		territories_total: number;
+		territories_by_type: GroupsRegistryTerritoryCounts;
+		groups_total: number;
+		groups_by_status: { FORMING: number; ACTIVE: number };
+	};
+	categories: { count: number; note: string };
 }
+
+// Phase 3 (TZ 12): the groups overview is served by getGroupsRegistryView in operating-center-cabinet.ts; the old hardcoded ladder was removed.
 
 const GROUPS_SCRIPT = `
 	async function boot(){
 		const box=document.querySelector('#groups-list');
 		try{
 			const data=await api('/api/operating-center/groups/overview');
-			let html='<h3>How groups scale the federation</h3>';
-			for(const s of (data.ladder||[])){
-				html+='<div class="item"><strong>'+esc(s.step)+'</strong><div class="detail">'+esc(s.description)+'</div></div>';
-			}
-			html+='<h3>Public funnel</h3><div class="detail"><a href="'+esc(data.funnel.member_org)+'" target="_blank" rel="noopener">'+esc(data.funnel.member_org)+'</a><br><a href="'+esc(data.funnel.register)+'" target="_blank" rel="noopener">'+esc(data.funnel.register)+'</a></div>';
-			html+='<div class="item"><strong>Group statistics<span class="badge-warn">Not yet tracked</span></strong><div class="detail">'+esc(data.stats.note)+'</div></div>';
+			const g=data.groups||{};
+			const byStatus=g.by_status||{};
+			const fl=data.florida||{};
+			const flByStatus=fl.groups_by_status||{};
+			let html='<h3>The territory-first model</h3>';
+			html+='<div class="detail">'+esc(data.model_note||'')+'</div>';
+			html+='<div class="item"><strong>Territories: '+esc(data.territories_total)+'</strong><div class="detail">Territory is the entry point. Groups are NWANA units created by NWANA decision inside a territory.</div></div>';
+			html+='<div class="item"><strong>NW Groups: '+esc(g.total)+'</strong><div class="detail">FORMING: '+esc(byStatus.FORMING)+' · ACTIVE: '+esc(byStatus.ACTIVE)+' · Default groups: '+esc(g.defaults)+'</div></div>';
+			html+='<div class="item"><strong>Florida</strong><div class="detail">Territories: '+esc(fl.territories_total)+' · Groups: '+esc(fl.groups_total)+' · FORMING: '+esc(flByStatus.FORMING)+' · ACTIVE: '+esc(flByStatus.ACTIVE)+'</div></div>';
+			html+='<div class="item"><strong>Group categories</strong><div class="detail">'+esc(data.categories&&data.categories.count)+' categories. '+esc(data.categories&&data.categories.note)+'</div></div>';
 			box.innerHTML=html;
 		}catch(err){box.innerHTML='<div class="unavailable">'+esc(err.message)+'</div>'}
 	}
@@ -892,7 +899,7 @@ export function renderGroupsHtml(): string {
 	return ocScreenShell({
 		page: "groups",
 		title: "NW Groups",
-		subtitle: "The scaling mechanism from one person to the continent: licenses, free group creation, and RECOGNIZED status.",
+		subtitle: "Territory-first registry: territories are the entry point and NW Groups are NWANA units inside them.",
 		panelsHtml: `<section class="panel">
 			<h2>Group network</h2>
 			<div id="groups-list">Loading…</div>
@@ -2071,15 +2078,52 @@ export function buildFundraisingReport(data: { generated_at: string; fund: null 
 	return reportDoc("NWANA fundraising", reportDate(data.generated_at), body);
 }
 
-export function buildGroupsReport(data: GroupsOverview): string {
-	let body = `<h2>How groups scale the federation</h2>`;
-	for (const s of data.ladder) {
-		body += `<h3>${escHtml(s.step)}</h3><p>${escHtml(s.description)}</p>`;
+export function buildGroupsReport(data: GroupsRegistryData): string {
+	let body = `<h2>The territory-first model</h2>`;
+	if (data.model_note) body += `<p>${escHtml(data.model_note)}</p>`;
+	body += `<p>Territory is the entry point. NW Groups are NWANA's own units, created by NWANA decision inside a territory. FORMING means the group is created, its leader may be unappointed, and it has no sessions yet. ACTIVE applies only after the real launch conditions are met. The Individual License is participation in a home group, portable across groups, and never creates a group or ownership rights.</p>`;
+	if (data.territories_by_type) {
+		body += `<h2>Territory registry</h2>`;
+		body += `<table><thead><tr><th>Territory type</th><th>Count</th></tr></thead><tbody>`;
+		for (const [type, n] of Object.entries(data.territories_by_type)) {
+			body += `<tr><td>${escHtml(type)}</td><td>${escHtml(n)}</td></tr>`;
+		}
+		body += `<tr><th>Total territories</th><td>${escHtml(data.territories_total)}</td></tr>`;
+		body += `</tbody></table>`;
 	}
-	body += `<h2>Public funnel</h2>`;
-	body += `<p>${escHtml(data.funnel.member_org)}<br>${escHtml(data.funnel.register)}</p>`;
-	body += `<h2>Group statistics</h2>`;
-	body += `<p><span class="tag-warn">Not yet tracked</span></p><p>${escHtml(data.stats.note)}</p>`;
+	if (data.groups) {
+		const byStatus = data.groups.by_status ?? ({} as GroupsRegistryData["groups"]["by_status"]);
+		body += `<h2>NW Groups by status</h2>`;
+		body += `<table><tbody>`;
+		body += `<tr><th>Total groups</th><td>${escHtml(data.groups.total)}</td></tr>`;
+		if (typeof byStatus.FORMING !== "undefined") body += `<tr><th>FORMING groups</th><td>${escHtml(byStatus.FORMING)}</td></tr>`;
+		if (typeof byStatus.ACTIVE !== "undefined") body += `<tr><th>ACTIVE groups</th><td>${escHtml(byStatus.ACTIVE)}</td></tr>`;
+		if (typeof data.groups.defaults !== "undefined") body += `<tr><th>Default groups</th><td>${escHtml(data.groups.defaults)}</td></tr>`;
+		body += `</tbody></table>`;
+	}
+	if (data.florida) {
+		const fl = data.florida;
+		const flByStatus = fl.groups_by_status ?? ({} as GroupsRegistryData["florida"]["groups_by_status"]);
+		body += `<h2>Florida</h2>`;
+		body += `<table><tbody>`;
+		body += `<tr><th>Florida territories</th><td>${escHtml(fl.territories_total)}</td></tr>`;
+		body += `<tr><th>Florida groups</th><td>${escHtml(fl.groups_total)}</td></tr>`;
+		if (typeof flByStatus.FORMING !== "undefined") body += `<tr><th>Florida FORMING groups</th><td>${escHtml(flByStatus.FORMING)}</td></tr>`;
+		if (typeof flByStatus.ACTIVE !== "undefined") body += `<tr><th>Florida ACTIVE groups</th><td>${escHtml(flByStatus.ACTIVE)}</td></tr>`;
+		body += `</tbody></table>`;
+		if (fl.territories_by_type) {
+			body += `<table><thead><tr><th>Florida territory type</th><th>Count</th></tr></thead><tbody>`;
+			for (const [type, n] of Object.entries(fl.territories_by_type)) {
+				body += `<tr><td>${escHtml(type)}</td><td>${escHtml(n)}</td></tr>`;
+			}
+			body += `</tbody></table>`;
+		}
+	}
+	if (data.categories) {
+		body += `<h2>Group categories</h2>`;
+		body += `<p>${escHtml(data.categories.count)} categories. ${escHtml(data.categories.note)}</p>`;
+	}
+	body += `<p class="note">Public site: <a href="https://groups.nwaofna.org">https://groups.nwaofna.org</a></p>`;
 	return reportDoc("NWANA group network", reportDate(data.generated_at), body);
 }
 

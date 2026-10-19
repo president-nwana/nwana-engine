@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { renderOverviewSectionHtml } from "../src/oc-overview";
 
-// Overview contract: 4 functions (state, money, work, blockers), each with
-// a short description and three separate Summary / Actions / Details views
-// (one visible at a time), deep-linkable via
+// Overview contract: 6 functions (florida, state, money, work, people,
+// blockers), each with a short description and three separate Summary /
+// Actions / Details views (one visible at a time), deep-linkable via
 // ?tab=<function>&view=<summary|actions|details>.
+// Phase 3 (TZ 13) added the florida cabinet tab (first) and the people tab.
 
-const FUNCTIONS = ["state", "money", "work", "blockers"];
+const FUNCTIONS = ["florida", "state", "money", "work", "people", "blockers"];
 
 describe("operating center overview: Summary/Actions/Details", () => {
 	const html = renderOverviewSectionHtml();
 
-	it("renders four function tabs", () => {
+	it("renders six function tabs", () => {
 		for (const f of FUNCTIONS) {
 			expect(html).toContain(`data-tab="${f}"`);
 		}
