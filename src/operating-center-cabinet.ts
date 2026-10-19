@@ -316,10 +316,18 @@ export interface TodayCounts {
 	unattributed_receipts: number;
 }
 
+export interface NextFollowup {
+	step: number;
+	due_at: string;
+	cohort_sent_at: string;
+	count: number;
+}
+
 interface TodayQueueData {
 	items: TodayQueueItem[];
 	counts: TodayCounts;
 	note: string;
+	next_followup: NextFollowup | null;
 }
 
 async function computeTodayQueue(db: D1Database, nowIso?: string): Promise<TodayQueueData> {
@@ -386,7 +394,10 @@ async function computeTodayQueue(db: D1Database, nowIso?: string): Promise<Today
 	// c. Follow-ups due: last sent step s, next step s+1 configured for the
 	// track, due_at = last sent_at + delay_days(next step) <= now.
 	// Replied / bounced prospects and suppressed emails never appear.
+	// The same in-memory pass also finds the next future follow-up (the
+	// next automatic machine step) for the plain-language summary.
 	let followupsDue = 0;
+	let nextFollowup: NextFollowup | null = null;
 	try {
 		const sendRows = await allRows<{ prospect_id: number; sequence_step: number; sent_at: string | null }>(
 			db,
@@ -424,6 +435,7 @@ async function computeTodayQueue(db: D1Database, nowIso?: string): Promise<Today
 			}
 		}
 		const due: Array<{ item: TodayQueueItem; dueMs: number }> = [];
+		const future: Array<{ dueMs: number; step: number; sent_at: string }> = [];
 		for (const p of prospectRows) {
 			const pid = num(p.id);
 			const last = lastSendByProspect.get(pid);
@@ -435,7 +447,10 @@ async function computeTodayQueue(db: D1Database, nowIso?: string): Promise<Today
 			const sentMs = Date.parse(last.sent_at);
 			if (!Number.isFinite(sentMs)) continue;
 			const dueMs = sentMs + delay * 24 * 60 * 60 * 1000;
-			if (dueMs > nowMs) continue;
+			if (dueMs > nowMs) {
+				future.push({ dueMs, step: nextStep, sent_at: last.sent_at });
+				continue;
+			}
 			const org = p.org_name ? String(p.org_name) : "Unknown organization";
 			due.push({
 				dueMs,
@@ -453,6 +468,17 @@ async function computeTodayQueue(db: D1Database, nowIso?: string): Promise<Today
 		for (const d of due) {
 			items.push(d.item);
 			followupsDue += 1;
+		}
+		if (future.length) {
+			future.sort((a, b) => a.dueMs - b.dueMs || a.step - b.step);
+			const first = future[0];
+			const sameDay = future.filter((f) => f.dueMs === first.dueMs);
+			nextFollowup = {
+				step: first.step,
+				due_at: new Date(first.dueMs).toISOString(),
+				cohort_sent_at: first.sent_at,
+				count: sameDay.length,
+			};
 		}
 	} catch {
 		// Degrades as above.
@@ -528,7 +554,7 @@ async function computeTodayQueue(db: D1Database, nowIso?: string): Promise<Today
 		items.length === 0
 			? "No queue items: no reply decisions, substantive replies, due follow-ups, new applications, queued step 1 sends or unattributed receipts were found."
 			: "Ordered by closeness to real money: reply decisions first, then substantive replies, due follow-ups, new applications, queued step 1 sends and unattributed receipts. Empty categories produce no items.";
-	return { items, counts, note };
+	return { items, counts, note, next_followup: nextFollowup };
 }
 
 export interface TodayQueue {
@@ -537,6 +563,7 @@ export interface TodayQueue {
 	items: TodayQueueItem[];
 	counts: TodayCounts;
 	note: string;
+	next_followup: NextFollowup | null;
 }
 
 export async function getTodayQueue(db: D1Database, nowIso?: string): Promise<TodayQueue> {
@@ -547,7 +574,89 @@ export async function getTodayQueue(db: D1Database, nowIso?: string): Promise<To
 		items: data.items,
 		counts: data.counts,
 		note: data.note,
+		next_followup: data.next_followup,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// 1b. Plain-language summary: the cabinet explains itself in short plain
+// sentences. Built ONLY from values the cabinet and today computations
+// already produced above (no new queries, no new numbers). Owner items
+// are the queue kinds that genuinely wait on the president; follow-ups
+// and queued first letters are machine work and are phrased that way.
+// ---------------------------------------------------------------------------
+
+export interface CabinetSummary {
+	sentences: string[];
+	owner_count: number;
+	owner_top: string | null;
+	next_automatic: string | null;
+}
+
+const OWNER_QUEUE_KINDS: ReadonlySet<TodayQueueItem["kind"]> = new Set([
+	"reply_decision",
+	"reply_substantive",
+	"application_new",
+	"receipt_unattributed",
+]);
+
+function summaryUsd(cents: number): string {
+	return "$" + (Number(cents || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function summaryDate(iso: string): string {
+	const d = new Date(iso);
+	if (!Number.isFinite(d.getTime())) return iso.slice(0, 10);
+	return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", timeZone: "UTC" }).format(d);
+}
+
+function withPeriod(s: string): string {
+	return /[.!?]$/.test(s) ? s : s + ".";
+}
+
+export function buildCabinetSummary(input: {
+	florida_prospects: { total: number; sent: number; replies: number };
+	florida_money: { donation_cents: number; sponsorship_contract_cents: number };
+	today_items: TodayQueueItem[];
+	followups_due: number;
+	unsent_step1: number;
+	next_followup: NextFollowup | null;
+}): CabinetSummary {
+	const sentences: string[] = [];
+	const fp = input.florida_prospects;
+	sentences.push(
+		`Florida: ${fp.total} organization${fp.total === 1 ? "" : "s"} in the pipeline. ` +
+			`${fp.sent} first letter${fp.sent === 1 ? "" : "s"} sent, ${fp.replies} ${fp.replies === 1 ? "reply" : "replies"} received.`,
+	);
+	sentences.push(
+		`Money received so far: ${summaryUsd(input.florida_money.donation_cents)} in donations, ` +
+			`${summaryUsd(input.florida_money.sponsorship_contract_cents)} in sponsorship.`,
+	);
+	const ownerItems = input.today_items.filter((it) => OWNER_QUEUE_KINDS.has(it.kind));
+	const ownerTop = ownerItems.length ? ownerItems[0].title : null;
+	if (ownerItems.length === 0) {
+		sentences.push("Today the system needs nothing from you. No decision is waiting.");
+	} else {
+		sentences.push(
+			`Today the system needs from you: ${ownerItems.length} ${ownerItems.length === 1 ? "item" : "items"}. ` +
+				`First on the list: ${withPeriod(ownerTop as string)}`,
+		);
+	}
+	const machineParts: string[] = [];
+	if (input.followups_due > 0) machineParts.push(`${input.followups_due} follow-up letter${input.followups_due === 1 ? "" : "s"} due`);
+	if (input.unsent_step1 > 0) machineParts.push(`${input.unsent_step1} first letter${input.unsent_step1 === 1 ? "" : "s"} queued`);
+	if (machineParts.length) {
+		sentences.push(`The machine sends letters on its own, so these are not tasks for you: ${machineParts.join(" and ")}.`);
+	}
+	let nextAutomatic: string | null = null;
+	if (input.next_followup) {
+		const nf = input.next_followup;
+		nextAutomatic =
+			`Next automatic step: step ${nf.step} follow-up letters for the group first written on ` +
+			`${summaryDate(nf.cohort_sent_at)} go out on ${summaryDate(nf.due_at)} (${nf.count} letter${nf.count === 1 ? "" : "s"}).`;
+		sentences.push(nextAutomatic);
+	}
+	return { sentences, owner_count: ownerItems.length, owner_top: ownerTop, next_automatic: nextAutomatic };
 }
 
 // ---------------------------------------------------------------------------
@@ -568,6 +677,8 @@ export interface CabinetView {
 		money: {
 			receipts_count: number;
 			receipts_cents: number;
+			donation_cents: number;
+			sponsorship_contract_cents: number;
 			sponsorship_contract_receipts: number;
 			first_case: MoneyCycleFlorida["first_case"];
 		};
@@ -592,6 +703,7 @@ export interface CabinetView {
 		unsent_step1: number;
 		unattributed_receipts: number;
 	};
+	summary: CabinetSummary;
 }
 
 export async function getCabinetView(db: D1Database): Promise<CabinetView> {
@@ -662,6 +774,8 @@ export async function getCabinetView(db: D1Database): Promise<CabinetView> {
 			money: {
 				receipts_count: flCycle ? num(flCycle.receipts_count) : 0,
 				receipts_cents: flCycle ? num(flCycle.receipts_gross_cents) : 0,
+				donation_cents: flCycle ? num(flCycle.donation_cents) : 0,
+				sponsorship_contract_cents: flCycle ? num(flCycle.sponsorship_contract_cents) : 0,
 				sponsorship_contract_receipts: flCycle ? num(flCycle.sponsorship_contract_receipts) : 0,
 				first_case: flCycle ? flCycle.first_case : null,
 			},
@@ -691,6 +805,17 @@ export async function getCabinetView(db: D1Database): Promise<CabinetView> {
 			unsent_step1: today.counts.unsent_step1,
 			unattributed_receipts: today.counts.unattributed_receipts,
 		},
+		summary: buildCabinetSummary({
+			florida_prospects: { total: flProspectsTotal, sent: flSent, replies: flReplies },
+			florida_money: {
+				donation_cents: flCycle ? num(flCycle.donation_cents) : 0,
+				sponsorship_contract_cents: flCycle ? num(flCycle.sponsorship_contract_cents) : 0,
+			},
+			today_items: today.items,
+			followups_due: today.counts.followups_due,
+			unsent_step1: today.counts.unsent_step1,
+			next_followup: today.next_followup,
+		}),
 	};
 }
 

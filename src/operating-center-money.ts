@@ -144,6 +144,8 @@ export interface MoneyCycleFlorida {
 	interested_replies: number;
 	receipts_count: number;
 	receipts_gross_cents: number;
+	donation_cents: number;
+	sponsorship_contract_cents: number;
 	sponsorship_contract_receipts: number;
 	first_case: {
 		prospect_id: number;
@@ -643,7 +645,13 @@ export async function getMoneyCycle(db: D1Database): Promise<MoneyCycleSection> 
 					   FROM money_events WHERE territory_id ${FL_SUBTREE}
 					   AND event_type NOT IN ('fundraiser_donation_received', 'fundraiser_created')) AS receipts_gross,
 					(SELECT COUNT(*) FROM money_events WHERE territory_id ${FL_SUBTREE}
-					   AND event_type IN ('sponsorship_received', 'contract_payment_received')) AS b2b_receipts`,
+					   AND event_type IN ('sponsorship_received', 'contract_payment_received')) AS b2b_receipts,
+					(SELECT COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0)
+					   FROM money_events WHERE territory_id ${FL_SUBTREE}
+					   AND event_type = 'donation_received') AS donation_gross,
+					(SELECT COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0)
+					   FROM money_events WHERE territory_id ${FL_SUBTREE}
+					   AND event_type IN ('sponsorship_received', 'contract_payment_received')) AS b2b_gross`,
 			)
 			.first<Record<string, number>>();
 		const fl: MoneyCycleFlorida = {
@@ -654,6 +662,8 @@ export async function getMoneyCycle(db: D1Database): Promise<MoneyCycleSection> 
 			interested_replies: num(counts?.interested),
 			receipts_count: num(counts?.receipts),
 			receipts_gross_cents: num(counts?.receipts_gross),
+			donation_cents: num(counts?.donation_gross),
+			sponsorship_contract_cents: num(counts?.b2b_gross),
 			sponsorship_contract_receipts: num(counts?.b2b_receipts),
 			first_case: null,
 		};

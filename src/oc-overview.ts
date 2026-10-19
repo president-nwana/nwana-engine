@@ -431,13 +431,15 @@ const STATE_PANELS = ocFunction(
 // 1b. florida - presidential cabinet, Florida first
 // ---------------------------------------------------------------------------
 
-const FLORIDA_SUMMARY_HTML = `<section class="stats" id="fla-stats"><div class="stat"><strong>…</strong><span>Loading Florida cabinet</span></div></section>
+const FLORIDA_SUMMARY_HTML = `<section class="panel"><h2>In plain words</h2><div id="fla-plain">Loading…</div></section>
+	<section class="stats" id="fla-stats"><div class="stat"><strong>…</strong><span>Loading Florida cabinet</span></div></section>
 	<section class="panel" style="margin-top:20px"><h2>Florida money cycle</h2><div id="fla-cycle">Loading…</div></section>
 	<section class="panel"><h2>National rollup</h2><div id="fla-national">Loading…</div></section>
 	<section class="panel"><h2>Lane gates</h2><div id="fla-gates">Loading…</div></section>`;
 
 const FLORIDA_ACTIONS_HTML = `<section class="panel"><h2>What to do today</h2>
 	<p class="meta">This queue is computed from live data and sorted by closeness to real money. Nothing here is a static list.</p>
+	<div id="fla-plain-today">Loading…</div>
 	<div id="fla-today-counts">Loading…</div>
 	<div id="fla-today">Loading…</div></section>`;
 
@@ -446,6 +448,10 @@ const FLORIDA_DETAILS_HTML = `<section class="panel"><h2>People in Florida</h2><
 	<p class="meta"><a href="/operating-center/growth?tab=budgets&view=summary">Open Growth budgets →</a></p></section>`;
 
 const FLORIDA_SCRIPT = `
+	function fla_plainHtml(summary){
+		if(!summary||!summary.sentences||!summary.sentences.length)return '<div class="unavailable">No summary available.</div>';
+		return summary.sentences.map(s=>'<p style="font-size:17px;line-height:1.6;margin:0 0 10px">'+esc(s)+'</p>').join('');
+	}
 	function fla_moneyCents(c){return '$'+(Number(c||0)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
 	function fla_gateBadge(status){
 		const s=String(status||'');
@@ -461,6 +467,7 @@ const FLORIDA_SCRIPT = `
 	async function boot_florida_summary(){
 		try{
 			const data=await api('/api/operating-center/cabinet');
+			document.querySelector('#fla-plain').innerHTML=fla_plainHtml(data.summary);
 			const fl=data.florida||{}, nat=data.national||{}, aca=data.academy||{};
 			const fm=fl.money||{}, pr=fl.prospects||{};
 			document.querySelector('#fla-stats').innerHTML=
@@ -490,6 +497,7 @@ const FLORIDA_SCRIPT = `
 		const box=document.querySelector('#fla-today');
 		try{
 			const [cab,today]=await Promise.all([api('/api/operating-center/cabinet'),api('/api/operating-center/today')]);
+			document.querySelector('#fla-plain-today').innerHTML=fla_plainHtml(cab.summary);
 			const tc=cab.today_counts||{};
 			countsBox.innerHTML='<div class="stats">'+
 				'<div class="stat"><strong>'+esc(tc.followups_due||0)+'</strong><span>Follow-ups due</span></div>'+

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	buildCabinetSummary,
 	getCabinetView,
 	getCrmProspect,
 	getCrmProspects,
@@ -104,7 +105,7 @@ function makeDb() {
 		// getMoneyCycle Florida cycle counts (checked first: its SQL embeds
 		// many prospect / money subqueries of its own).
 		if (sql.includes("AS sources")) {
-			return { sources: 3, sent: 3, replies: 2, interested: 1, receipts: 2, receipts_gross: 10000, b2b_receipts: 1 };
+			return { sources: 3, sent: 3, replies: 2, interested: 1, receipts: 2, receipts_gross: 10000, b2b_receipts: 1, donation_gross: 10000, b2b_gross: 0 };
 		}
 		if (sql.includes("money_received_cents")) {
 			return {
@@ -408,6 +409,60 @@ describe("cabinet view", () => {
 		expect(view.today_counts.unsent_step1).toBe(1);
 		expect(view.today_counts.replies_waiting).toBe(3);
 	});
+
+	it("carries the Florida donation and sponsorship split for the summary", async () => {
+		const view = await getCabinetView(makeDb());
+		expect(view.florida.money.donation_cents).toBe(10000);
+		expect(view.florida.money.sponsorship_contract_cents).toBe(0);
+		expect(view.summary.sentences[0]).toBe("Florida: 3 organizations in the pipeline. 3 first letters sent, 2 replies received.");
+		expect(view.summary.sentences[1]).toBe("Money received so far: $100.00 in donations, $0.00 in sponsorship.");
+		expect(view.summary.owner_top).toContain("Florida Org A reply is waiting for a draft decision");
+		for (const s of view.summary.sentences) expect(s).not.toContain("—");
+	});
+});
+
+describe("plain-language summary", () => {
+	it("reads in plain sentences with the owner item named and the next automatic step dated", () => {
+		const summary = buildCabinetSummary({
+			florida_prospects: { total: 53, sent: 17, replies: 1 },
+			florida_money: { donation_cents: 400, sponsorship_contract_cents: 0 },
+			today_items: [
+				{ kind: "reply_decision", title: "Orlando Health reply is waiting for a draft decision", detail: "" },
+			],
+			followups_due: 0,
+			unsent_step1: 0,
+			next_followup: { step: 2, due_at: "2026-10-20T05:34:50.000Z", cohort_sent_at: "2026-10-13T05:34:50Z", count: 5 },
+		});
+		expect(summary.sentences).toEqual([
+			"Florida: 53 organizations in the pipeline. 17 first letters sent, 1 reply received.",
+			"Money received so far: $4.00 in donations, $0.00 in sponsorship.",
+			"Today the system needs from you: 1 item. First on the list: Orlando Health reply is waiting for a draft decision.",
+			"Next automatic step: step 2 follow-up letters for the group first written on October 13 go out on October 20 (5 letters).",
+		]);
+		expect(summary.owner_count).toBe(1);
+		for (const s of summary.sentences) expect(s).not.toContain("—");
+	});
+
+	it("says plainly when nothing needs the owner and machine work is not an owner task", () => {
+		const summary = buildCabinetSummary({
+			florida_prospects: { total: 1, sent: 1, replies: 0 },
+			florida_money: { donation_cents: 0, sponsorship_contract_cents: 2500 },
+			today_items: [{ kind: "step1_queued", title: "3 enrolled prospects queued for sequence step 1", detail: "" }],
+			followups_due: 2,
+			unsent_step1: 3,
+			next_followup: null,
+		});
+		expect(summary.owner_count).toBe(0);
+		expect(summary.owner_top).toBeNull();
+		expect(summary.next_automatic).toBeNull();
+		expect(summary.sentences).toEqual([
+			"Florida: 1 organization in the pipeline. 1 first letter sent, 0 replies received.",
+			"Money received so far: $0.00 in donations, $25.00 in sponsorship.",
+			"Today the system needs nothing from you. No decision is waiting.",
+			"The machine sends letters on its own, so these are not tasks for you: 2 follow-up letters due and 3 first letters queued.",
+		]);
+		for (const s of summary.sentences) expect(s).not.toContain("—");
+	});
 });
 
 describe("today queue", () => {
@@ -444,6 +499,18 @@ describe("today queue", () => {
 		expect(queue.counts.applications_new).toBe(2);
 		expect(queue.counts.unsent_step1).toBe(1);
 		expect(queue.counts.unattributed_receipts).toBe(1);
+	});
+
+	it("finds the next future follow-up as the next automatic step", async () => {
+		const queue = await getTodayQueue(makeDb(), NOW);
+		// Prospect 1: step 1 sent 2026-10-17, step 2 delay 7 days, due
+		// 2026-10-24, the earliest follow-up still in the future.
+		expect(queue.next_followup).toEqual({
+			step: 2,
+			due_at: "2026-10-24T00:00:00.000Z",
+			cohort_sent_at: "2026-10-17T00:00:00Z",
+			count: 1,
+		});
 	});
 
 	it("aggregates new applications and step 1 queue into single items", async () => {
