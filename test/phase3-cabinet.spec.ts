@@ -105,7 +105,11 @@ function makeDb() {
 		// getMoneyCycle Florida cycle counts (checked first: its SQL embeds
 		// many prospect / money subqueries of its own).
 		if (sql.includes("AS sources")) {
-			return { sources: 3, sent: 3, replies: 2, interested: 1, receipts: 2, receipts_gross: 10000, b2b_receipts: 1, donation_gross: 10000, b2b_gross: 0 };
+			// Round 2: the counts statement also picks the first-case
+			// prospect id from the same materialized Florida subtree;
+			// the detail row is then fetched by id (the
+			// "money_received_cents" branch below).
+			return { sources: 3, sent: 3, replies: 2, interested: 1, receipts: 2, receipts_gross: 10000, b2b_receipts: 1, donation_gross: 10000, b2b_gross: 0, first_case_id: 2 };
 		}
 		if (sql.includes("money_received_cents")) {
 			return {
@@ -162,6 +166,45 @@ function makeDb() {
 	};
 
 	const all = (sql: string, binds: unknown[]): unknown[] => {
+		// Registry summary (migration 0099): payloads reproduce the seed
+		// world the cabinet assertions below were written against, in the
+		// shapes src/registry-summary.ts writes.
+		if (sql.includes("FROM registry_summary")) {
+			const computed_at = "2026-10-18T12:00:00.000Z";
+			const payloads: Record<string, unknown> = {
+				"national:territories_by_type": { total: 6, by_type: { CITY: 1, CONTINENTAL: 1, COUNTY: 1, NATIONAL: 1, STATE: 2 } },
+				"florida:territories_by_type": { total: 3, by_type: { CITY: 1, COUNTY: 1, STATE: 1 } },
+				"national:groups_by_status": { total: 3, by_status: { ACTIVE: 1, FORMING: 2 }, defaults: 2, forming: 2, active: 1 },
+				"florida:groups_by_status": { total: 2, by_status: { FORMING: 2 }, defaults: 2, forming: 2, active: 0 },
+				"national:roles": { total: 5, by_status: { PLANNED: 5 }, by_scope: { CONTINENTAL: 1, COUNTY: 1, GROUP: 1, STATE: 2 } },
+				"florida:roles": {
+					total: 3,
+					by_scope: { COUNTY: 1, GROUP: 1, STATE: 1 },
+					by_template: [
+						{ template_id: "county_coordinator", title: "County Coordinator", n: 1 },
+						{ template_id: "group_director", title: "Group Director", n: 1 },
+						{ template_id: "state_coordinator", title: "State Coordinator", n: 1 },
+					],
+				},
+				"hq:roles": { by_template: [{ template_id: "president", title: "President", scope_type: "CONTINENTAL", n: 1 }] },
+				"national:roles_planned": { roles_planned: 5, by_scope: { CONTINENTAL: 1, COUNTY: 1, GROUP: 1, STATE: 2 } },
+				"florida:roles_planned": { roles_planned: 3, by_scope: { COUNTY: 1, GROUP: 1, STATE: 1 } },
+				"hq:roles_planned": { roles_planned: 1, by_scope: { CONTINENTAL: 1 } },
+				"national:outreach": { prospects_total: 7, prospects_by_tier: { A1: 2, A2: 2, B: 2, C: 1 }, prospects_enrolled: 5 },
+				"florida:outreach": {
+					prospects_total: 3,
+					prospects_by_track: { "instructor-training": 1, "sponsor-kilometers": 2 },
+					prospects_sent: 3,
+					prospects_replies: 2,
+					prospects_qualified: 3,
+				},
+				"florida:received_by_lane": { lanes: [{ lane: "donation", events: 1, cents: 10000 }] },
+			};
+			return Object.entries(payloads).map(([key, payload]) => {
+				const [scope, metric] = key.split(":");
+				return { scope, metric, payload: JSON.stringify(payload), computed_at };
+			});
+		}
 		if (sql.includes("FROM funding_lane_gates")) return GATES;
 		// Money queries: budgets / Florida by-lane carry the VERIFIED filter;
 		// the money-cycle totals query does not.

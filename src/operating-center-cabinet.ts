@@ -12,6 +12,16 @@
 //   the money cycle already provides them.
 // - Every number comes from SQL against Engine state. Nothing is
 //   invented, estimated or carried over from a plan document.
+// - Registry totals (territories, groups, role instances) are NEVER
+//   recomputed per load: they are read from the precomputed
+//   registry_summary layer (src/registry-summary.ts, migration 0099),
+//   refreshed only by the controlled refresh operation. D1 meters rows
+//   examined, and the original per-load full-registry COUNT / GROUP BY
+//   passes (measured ~1.10M rows for one People load, ~1.33M for one
+//   Budgets load on a volume replica) exhausted the daily read budget
+//   on 2026-10-19. A missing summary metric yields that block's honest
+//   empty state, never a fallback scan. Small live tables (prospects,
+//   sends, replies, money) are still read live.
 // - Each section degrades independently: a missing table or a failed
 //   query yields that section's empty shape (with a *_note where the
 //   spec provides one), never a failed whole view.
@@ -25,6 +35,22 @@ import {
 	type MoneyCycleSection,
 } from "./operating-center-money";
 import type { LaneGate } from "./lib/money-receipts";
+import {
+	readRegistrySummary,
+	summaryMeta,
+	summaryPayload,
+	type GroupsByStatusPayload,
+	type OutreachFloridaPayload,
+	type OutreachNationalPayload,
+	type ReceivedByLanePayload,
+	type RegistrySummaryEntry,
+	type RegistrySummaryMeta,
+	type RolesFloridaPayload,
+	type RolesHqPayload,
+	type RolesNationalPayload,
+	type RolesPlannedPayload,
+	type TerritoriesByTypePayload,
+} from "./registry-summary";
 
 const num = (value: unknown): number => {
 	const n = Number(value);
@@ -37,9 +63,6 @@ const FLORIDA_TERRITORY_ID = "terr-st-12";
  * its territory_id is the Florida state territory or carries state FIPS
  * 12. Use as `territory_id ${FL_SUBTREE}` (alias the column as needed). */
 const FL_SUBTREE = `IN (SELECT territory_id FROM territories WHERE territory_id = 'terr-st-12' OR state_fips = '12')`;
-/** Direct predicate for rows OF the territories table itself. */
-const FL_TERRITORY_WHERE = `territory_id = 'terr-st-12' OR state_fips = '12'`;
-
 /** Received-money event types (migration 0098 vocabulary). The
  * fundraiser mirror type fundraiser_donation_received is deliberately
  * absent: it mirrors a donation_received row for the same money. */
@@ -139,18 +162,13 @@ interface TerritoryTypeCounts {
 	by_type: Record<string, number>;
 }
 
-async function territoriesByType(db: D1Database, florida: boolean): Promise<TerritoryTypeCounts> {
-	const rows = florida
-		? await allRows(
-				db,
-				`SELECT type, COUNT(*) AS n FROM territories WHERE ${FL_TERRITORY_WHERE} GROUP BY type ORDER BY type ASC`,
-			)
-		: await allRows(
-				db,
-				`SELECT type, COUNT(*) AS n FROM territories GROUP BY type ORDER BY type ASC`,
-			);
-	const by_type = countMap(rows, "type");
-	return { total: Object.values(by_type).reduce((a, b) => a + b, 0), by_type };
+/** Territory counts come from the registry summary, never from a
+ * per-load GROUP BY over the territories table. A missing metric yields
+ * the honest empty shape. */
+function territoriesByType(entries: Map<string, RegistrySummaryEntry>, florida: boolean): TerritoryTypeCounts {
+	const payload = summaryPayload<TerritoriesByTypePayload>(entries, florida ? "florida" : "national", "territories_by_type");
+	if (!payload) return { total: 0, by_type: {} };
+	return { total: num(payload.total), by_type: { ...payload.by_type } };
 }
 
 interface GroupsSummary {
@@ -161,23 +179,17 @@ interface GroupsSummary {
 	active: number;
 }
 
-async function groupsSummary(db: D1Database, florida: boolean): Promise<GroupsSummary> {
-	const rows = florida
-		? await allRows(
-				db,
-				`SELECT status, COUNT(*) AS n, COALESCE(SUM(CASE WHEN is_default = 1 THEN 1 ELSE 0 END), 0) AS defaults FROM nw_groups WHERE territory_id ${FL_SUBTREE} GROUP BY status ORDER BY status ASC`,
-			)
-		: await allRows(
-				db,
-				`SELECT status, COUNT(*) AS n, COALESCE(SUM(CASE WHEN is_default = 1 THEN 1 ELSE 0 END), 0) AS defaults FROM nw_groups GROUP BY status ORDER BY status ASC`,
-			);
-	const by_status = countMap(rows, "status");
+/** Group counts come from the registry summary, never from a per-load
+ * GROUP BY over the nw_groups table. */
+function groupsSummary(entries: Map<string, RegistrySummaryEntry>, florida: boolean): GroupsSummary {
+	const payload = summaryPayload<GroupsByStatusPayload>(entries, florida ? "florida" : "national", "groups_by_status");
+	if (!payload) return { total: 0, by_status: {}, defaults: 0, forming: 0, active: 0 };
 	return {
-		total: Object.values(by_status).reduce((a, b) => a + b, 0),
-		by_status,
-		defaults: rows.reduce((sum, r) => sum + num(r.defaults), 0),
-		forming: by_status["FORMING"] ?? 0,
-		active: by_status["ACTIVE"] ?? 0,
+		total: num(payload.total),
+		by_status: { ...payload.by_status },
+		defaults: num(payload.defaults),
+		forming: num(payload.forming),
+		active: num(payload.active),
 	};
 }
 
@@ -704,6 +716,7 @@ export interface CabinetView {
 		unattributed_receipts: number;
 	};
 	summary: CabinetSummary;
+	registry_summary: RegistrySummaryMeta;
 }
 
 export async function getCabinetView(db: D1Database): Promise<CabinetView> {
@@ -711,52 +724,30 @@ export async function getCabinetView(db: D1Database): Promise<CabinetView> {
 	const moneyCycle = await getMoneyCycleSafe(db);
 	const flCycle = moneyCycle.florida_cycle;
 
-	const [flTerritories, natTerritories, flGroups, natGroups, academy, today] = await Promise.all([
-		territoriesByType(db, true),
-		territoriesByType(db, false),
-		groupsSummary(db, true),
-		groupsSummary(db, false),
-		academyAggregates(db),
-		computeTodayQueue(db),
-	]);
+	// Registry totals and the outreach aggregates come from the summary
+	// layer (one small read); academy and the today queue stay live on
+	// their small tables.
+	const summary = await readRegistrySummary(db);
+	const [academy, today] = await Promise.all([academyAggregates(db), computeTodayQueue(db)]);
 
-	const flRolesPlanned = await countOne(
-		db,
-		`SELECT COUNT(*) AS n FROM role_instances WHERE status = 'PLANNED' AND territory_id ${FL_SUBTREE}`,
-	);
+	const flTerritories = territoriesByType(summary, true);
+	const natTerritories = territoriesByType(summary, false);
+	const flGroups = groupsSummary(summary, true);
+	const natGroups = groupsSummary(summary, false);
 
-	const flProspectsTotal = await countOne(
-		db,
-		`SELECT COUNT(*) AS n FROM outreach_prospects WHERE territory_id ${FL_SUBTREE}`,
-	);
-	const flByTrack = countMap(
-		await allRows(
-			db,
-			`SELECT track, COUNT(*) AS n FROM outreach_prospects WHERE territory_id ${FL_SUBTREE} GROUP BY track ORDER BY track ASC`,
-		),
-		"track",
-	);
-	const flSent = await countOne(
-		db,
-		`SELECT COUNT(DISTINCT s.prospect_id) AS n FROM outreach_sends s JOIN outreach_prospects p ON p.id = s.prospect_id WHERE p.territory_id ${FL_SUBTREE}`,
-	);
-	const flReplies = await countOne(
-		db,
-		`SELECT COUNT(DISTINCT r.prospect_id) AS n FROM outreach_replies r JOIN outreach_prospects p ON p.id = r.prospect_id WHERE p.territory_id ${FL_SUBTREE}`,
-	);
+	const flPlanned = summaryPayload<RolesPlannedPayload>(summary, "florida", "roles_planned");
+	const flRolesPlanned = flPlanned ? num(flPlanned.roles_planned) : 0;
 
-	const natProspectsTotal = await countOne(db, `SELECT COUNT(*) AS n FROM outreach_prospects`);
-	const tierMap = countMap(
-		await allRows(
-			db,
-			`SELECT contact_level, COUNT(*) AS n FROM outreach_prospects GROUP BY contact_level ORDER BY contact_level ASC`,
-		),
-		"contact_level",
-	);
-	const enrolled = await countOne(
-		db,
-		`SELECT COUNT(*) AS n FROM outreach_prospects WHERE sequence_enrolled_at IS NOT NULL`,
-	);
+	const flOutreach = summaryPayload<OutreachFloridaPayload>(summary, "florida", "outreach");
+	const flProspectsTotal = flOutreach ? num(flOutreach.prospects_total) : 0;
+	const flByTrack = flOutreach ? { ...flOutreach.prospects_by_track } : {};
+	const flSent = flOutreach ? num(flOutreach.prospects_sent) : 0;
+	const flReplies = flOutreach ? num(flOutreach.prospects_replies) : 0;
+
+	const natOutreach = summaryPayload<OutreachNationalPayload>(summary, "national", "outreach");
+	const natProspectsTotal = natOutreach ? num(natOutreach.prospects_total) : 0;
+	const tierMap = natOutreach ? { ...natOutreach.prospects_by_tier } : {};
+	const enrolled = natOutreach ? num(natOutreach.prospects_enrolled) : 0;
 	const receivedByLane = moneyCycle.received_totals_by_lane;
 	const receivedTotalCents = Object.values(receivedByLane).reduce((sum, l) => sum + num(l.gross_cents), 0);
 
@@ -816,6 +807,15 @@ export async function getCabinetView(db: D1Database): Promise<CabinetView> {
 			unsent_step1: today.counts.unsent_step1,
 			next_followup: today.next_followup,
 		}),
+		registry_summary: summaryMeta(summary, [
+			["national", "territories_by_type"],
+			["florida", "territories_by_type"],
+			["national", "groups_by_status"],
+			["florida", "groups_by_status"],
+			["florida", "roles_planned"],
+			["national", "outreach"],
+			["florida", "outreach"],
+		]),
 	};
 }
 
@@ -1019,25 +1019,24 @@ export type FundingStage =
 	| { key: "commitment"; label: string; n: number; cents: number }
 	| { key: "received"; label: string; cents: number; by_lane: MoneyCycleSection["received_totals_by_lane"] };
 
-async function fundingStages(db: D1Database, florida: boolean, moneyCycle: MoneyCycleSection): Promise<FundingStage[]> {
+async function fundingStages(
+	db: D1Database,
+	florida: boolean,
+	moneyCycle: MoneyCycleSection,
+	summary: Map<string, RegistrySummaryEntry>,
+): Promise<FundingStage[]> {
 	let found: number;
 	let qualified: number;
 	let sent: number;
 	let dialogue: number;
 	if (florida) {
-		found = await countOne(db, `SELECT COUNT(*) AS n FROM outreach_prospects WHERE territory_id ${FL_SUBTREE}`);
-		qualified = await countOne(
-			db,
-			`SELECT COUNT(*) AS n FROM outreach_prospects WHERE contact_level IN ('A1', 'A2') AND territory_id ${FL_SUBTREE}`,
-		);
-		sent = await countOne(
-			db,
-			`SELECT COUNT(DISTINCT s.prospect_id) AS n FROM outreach_sends s JOIN outreach_prospects p ON p.id = s.prospect_id WHERE p.territory_id ${FL_SUBTREE}`,
-		);
-		dialogue = await countOne(
-			db,
-			`SELECT COUNT(DISTINCT r.prospect_id) AS n FROM outreach_replies r JOIN outreach_prospects p ON p.id = r.prospect_id WHERE p.territory_id ${FL_SUBTREE}`,
-		);
+		// Florida stage counts come from the registry summary: each one
+		// used to cost a Florida-subtree pass per load.
+		const flOutreach = summaryPayload<OutreachFloridaPayload>(summary, "florida", "outreach");
+		found = flOutreach ? num(flOutreach.prospects_total) : 0;
+		qualified = flOutreach ? num(flOutreach.prospects_qualified) : 0;
+		sent = flOutreach ? num(flOutreach.prospects_sent) : 0;
+		dialogue = flOutreach ? num(flOutreach.prospects_replies) : 0;
 	} else {
 		found = await countOne(db, `SELECT COUNT(*) AS n FROM outreach_prospects`);
 		qualified = await countOne(
@@ -1070,12 +1069,14 @@ async function fundingStages(db: D1Database, florida: boolean, moneyCycle: Money
 	if (florida) {
 		const flCycle = moneyCycle.florida_cycle;
 		receivedCents = flCycle ? num(flCycle.receipts_gross_cents) : 0;
-		// The money cycle provides no per-lane Florida breakdown, so the
-		// Florida by-lane split is read with the same received convention
-		// (VERIFIED, fundraiser mirror excluded) inside the subtree.
-		const lanes = await receivedByLane(db, `AND territory_id ${FL_SUBTREE}`, []);
+		// The money cycle provides no per-lane Florida breakdown; the
+		// split is the summary's received_by_lane payload, computed by
+		// the refresh with the same received convention (VERIFIED,
+		// fundraiser mirror excluded). The stage total above stays live
+		// from the money cycle; the split refreshes with the summary.
+		const flLanes = summaryPayload<ReceivedByLanePayload>(summary, "florida", "received_by_lane");
 		byLane = {};
-		for (const l of lanes) byLane[l.lane] = { events: l.events, gross_cents: l.cents };
+		for (const l of flLanes?.lanes ?? []) byLane[l.lane] = { events: num(l.events), gross_cents: num(l.cents) };
 	} else {
 		byLane = moneyCycle.received_totals_by_lane;
 		receivedCents = Object.values(byLane).reduce((sum, l) => sum + num(l.gross_cents), 0);
@@ -1098,12 +1099,14 @@ export async function getFundingPipeline(db: D1Database): Promise<{
 	florida_stages: FundingStage[];
 	legacy_fund: { funds: Array<{ id: string; name: string }>; prospects_by_stage: Record<string, number> };
 	note: string;
+	registry_summary: RegistrySummaryMeta;
 }> {
 	const generated_at = new Date().toISOString();
 	const moneyCycle = await getMoneyCycleSafe(db);
+	const summary = await readRegistrySummary(db);
 	const [stages, floridaStages] = await Promise.all([
-		fundingStages(db, false, moneyCycle),
-		fundingStages(db, true, moneyCycle),
+		fundingStages(db, false, moneyCycle, summary),
+		fundingStages(db, true, moneyCycle, summary),
 	]);
 	const fundRows = await allRows<{ id: string; name: string }>(
 		db,
@@ -1123,6 +1126,10 @@ export async function getFundingPipeline(db: D1Database): Promise<{
 			prospects_by_stage: prospectsByStage,
 		},
 		note: "Stages are counts of organizations, not money; expected money is never added to received totals.",
+		registry_summary: summaryMeta(summary, [
+			["florida", "outreach"],
+			["florida", "received_by_lane"],
+		]),
 	};
 }
 
@@ -1187,34 +1194,27 @@ const NEED_AMOUNTS_NOTE =
 const ACTUAL_SPEND_NOTE =
 	"No expense or payout records exist in the Engine yet; spend appears here when the Deployment Engine records it.";
 
-async function budgetScope(
-	db: D1Database,
+/** One budget scope, assembled from the summary's roles_planned
+ * payload (the need register) and a coverage lane list. Coverage is
+ * live from money_events for the national and HQ scopes (36 rows) and
+ * comes from the summary for Florida, whose live form needed a
+ * Florida-subtree pass over the registry per load. */
+function budgetScope(
 	key: string,
 	label: string,
 	territoryRoot: string | null,
-	plainPredicate: string,
-	aliasedPredicate: string,
-	binds: unknown[],
-): Promise<BudgetScope> {
-	const rolesPlanned = await countOne(
-		db,
-		`SELECT COUNT(*) AS n FROM role_instances WHERE status = 'PLANNED' ${plainPredicate}`,
-		binds,
-	);
-	const byScope = countMap(
-		await allRows(
-			db,
-			`SELECT t.scope_type AS scope_type, COUNT(*) AS n FROM role_instances r JOIN role_templates t ON t.template_id = r.template_id WHERE r.status = 'PLANNED' ${aliasedPredicate} GROUP BY t.scope_type ORDER BY t.scope_type ASC LIMIT 50`,
-			binds,
-		),
-		"scope_type",
-	);
-	const coverageLanes = await receivedByLane(db, plainPredicate, binds);
+	planned: RolesPlannedPayload | null,
+	coverageLanes: Array<{ lane: string; events: number; cents: number }>,
+): BudgetScope {
 	return {
 		key,
 		label,
 		territory_root: territoryRoot,
-		need: { roles_planned: rolesPlanned, by_scope: byScope, amounts_note: NEED_AMOUNTS_NOTE },
+		need: {
+			roles_planned: planned ? num(planned.roles_planned) : 0,
+			by_scope: planned ? { ...planned.by_scope } : {},
+			amounts_note: NEED_AMOUNTS_NOTE,
+		},
 		coverage: {
 			received_by_lane: coverageLanes,
 			total_cents: coverageLanes.reduce((sum, l) => sum + l.cents, 0),
@@ -1228,26 +1228,46 @@ export async function getTerritoryBudgets(db: D1Database): Promise<{
 	generated_at: string;
 	registers_note: string;
 	scopes: BudgetScope[];
+	registry_summary: RegistrySummaryMeta;
 }> {
 	const roots = await rootTerritoryIds(db);
+	const summary = await readRegistrySummary(db);
 	const hqPlaceholders = roots.ids.map(() => "?").join(", ");
 	const hqPlain = roots.ids.length ? `AND territory_id IN (${hqPlaceholders})` : `AND 1 = 0`;
-	const hqAliased = roots.ids.length ? `AND r.territory_id IN (${hqPlaceholders})` : `AND 1 = 0`;
+
+	const flLanes = summaryPayload<ReceivedByLanePayload>(summary, "florida", "received_by_lane");
+	const floridaCoverage = (flLanes?.lanes ?? []).map((l) => ({ lane: String(l.lane), events: num(l.events), cents: num(l.cents) }));
+	const hqCoverage = await receivedByLane(db, hqPlain, roots.ids);
+	const nationalCoverage = await receivedByLane(db, "", []);
 
 	const scopes: BudgetScope[] = [];
 	scopes.push(
-		await budgetScope(db, "florida", "Florida", FLORIDA_TERRITORY_ID, `AND territory_id ${FL_SUBTREE}`, `AND r.territory_id ${FL_SUBTREE}`, []),
+		budgetScope("florida", "Florida", FLORIDA_TERRITORY_ID, summaryPayload<RolesPlannedPayload>(summary, "florida", "roles_planned"), floridaCoverage),
 	);
 	scopes.push(
-		await budgetScope(db, "headquarters", "Headquarters (NWANA Center and NWANA USA)", roots.continental ?? roots.national, hqPlain, hqAliased, roots.ids),
+		budgetScope(
+			"headquarters",
+			"Headquarters (NWANA Center and NWANA USA)",
+			roots.continental ?? roots.national,
+			summaryPayload<RolesPlannedPayload>(summary, "hq", "roles_planned"),
+			hqCoverage,
+		),
 	);
-	scopes.push(await budgetScope(db, "national", "National (all territories)", roots.continental ?? roots.national, "", "", []));
+	scopes.push(
+		budgetScope("national", "National (all territories)", roots.continental ?? roots.national, summaryPayload<RolesPlannedPayload>(summary, "national", "roles_planned"), nationalCoverage),
+	);
 	return {
 		ok: true,
 		generated_at: new Date().toISOString(),
 		registers_note:
 			"Three registers are never mixed: approved need, received coverage, actual spend. Public and management figures always name their register.",
 		scopes,
+		registry_summary: summaryMeta(summary, [
+			["national", "roles_planned"],
+			["florida", "roles_planned"],
+			["hq", "roles_planned"],
+			["florida", "received_by_lane"],
+		]),
 	};
 }
 
@@ -1283,46 +1303,29 @@ export async function getPeopleView(db: D1Database): Promise<{
 		last_sync: string | null;
 		note: string;
 	};
+	registry_summary: RegistrySummaryMeta;
 }> {
 	const generated_at = new Date().toISOString();
-	const roots = await rootTerritoryIds(db);
 
-	const rolesTotal = await countOne(db, `SELECT COUNT(*) AS n FROM role_instances`);
-	const rolesByStatus = countMap(
-		await allRows(db, `SELECT status, COUNT(*) AS n FROM role_instances GROUP BY status ORDER BY status ASC LIMIT 50`),
-		"status",
-	);
-	const rolesByScope = countMap(
-		await allRows(
-			db,
-			`SELECT t.scope_type AS scope_type, COUNT(*) AS n FROM role_instances r JOIN role_templates t ON t.template_id = r.template_id GROUP BY t.scope_type ORDER BY t.scope_type ASC LIMIT 50`,
-		),
-		"scope_type",
-	);
+	// Every role-instance aggregate comes from the registry summary:
+	// this view used to run three full passes over role_instances
+	// (265,275 rows, ~1.10M rows examined with the JOIN probes) plus
+	// three Florida-subtree passes on every load.
+	const summary = await readRegistrySummary(db);
+	const natRoles = summaryPayload<RolesNationalPayload>(summary, "national", "roles");
+	const rolesTotal = natRoles ? num(natRoles.total) : 0;
+	const rolesByStatus = natRoles ? { ...natRoles.by_status } : {};
+	const rolesByScope = natRoles ? { ...natRoles.by_scope } : {};
 
-	const flRolesTotal = await countOne(db, `SELECT COUNT(*) AS n FROM role_instances WHERE territory_id ${FL_SUBTREE}`);
-	const flByScope = countMap(
-		await allRows(
-			db,
-			`SELECT t.scope_type AS scope_type, COUNT(*) AS n FROM role_instances r JOIN role_templates t ON t.template_id = r.template_id WHERE r.territory_id ${FL_SUBTREE} GROUP BY t.scope_type ORDER BY t.scope_type ASC LIMIT 50`,
-		),
-		"scope_type",
-	);
-	const flByTemplateRows = await allRows<{ template_id: string; title: string | null; n: number }>(
-		db,
-		`SELECT r.template_id AS template_id, t.title AS title, COUNT(*) AS n FROM role_instances r LEFT JOIN role_templates t ON t.template_id = r.template_id WHERE r.territory_id ${FL_SUBTREE} GROUP BY r.template_id, t.title ORDER BY n DESC, r.template_id ASC LIMIT 15`,
-	);
+	const flRolesPayload = summaryPayload<RolesFloridaPayload>(summary, "florida", "roles");
+	const flRolesTotal = flRolesPayload ? num(flRolesPayload.total) : 0;
+	const flByScope = flRolesPayload ? { ...flRolesPayload.by_scope } : {};
+	const flByTemplateRows = flRolesPayload ? flRolesPayload.by_template : [];
 
-	let hqRoles: Array<{ template_id: string; title: string | null; scope_type: string | null; n: number }> = [];
-	if (roots.ids.length) {
-		const placeholders = roots.ids.map(() => "?").join(", ");
-		const rows = await allRows<{ template_id: string; title: string | null; scope_type: string | null; n: number }>(
-			db,
-			`SELECT r.template_id AS template_id, t.title AS title, t.scope_type AS scope_type, COUNT(*) AS n FROM role_instances r JOIN role_templates t ON t.template_id = r.template_id WHERE r.territory_id IN (${placeholders}) GROUP BY r.template_id, t.title, t.scope_type ORDER BY n DESC, r.template_id ASC LIMIT 100`,
-			roots.ids,
-		);
-		hqRoles = rows.map((r) => ({ template_id: String(r.template_id), title: r.title ?? null, scope_type: r.scope_type ?? null, n: num(r.n) }));
-	}
+	const hqPayload = summaryPayload<RolesHqPayload>(summary, "hq", "roles");
+	const hqRoles: Array<{ template_id: string; title: string | null; scope_type: string | null; n: number }> = (
+		hqPayload?.by_template ?? []
+	).map((r) => ({ template_id: String(r.template_id), title: r.title ?? null, scope_type: r.scope_type ?? null, n: num(r.n) }));
 
 	const catalogRows = await allRows<{
 		template_id: string;
@@ -1389,6 +1392,11 @@ export async function getPeopleView(db: D1Database): Promise<{
 			last_sync: academy.last_sync,
 			note: ACADEMY_NOTE,
 		},
+		registry_summary: summaryMeta(summary, [
+			["national", "roles"],
+			["florida", "roles"],
+			["hq", "roles"],
+		]),
 	};
 }
 
@@ -1410,13 +1418,13 @@ export async function getGroupsRegistryView(db: D1Database): Promise<{
 		groups_by_status: Record<string, number>;
 	};
 	categories: { count: number; note: string };
+	registry_summary: RegistrySummaryMeta;
 }> {
-	const [natTerritories, flTerritories, natGroups, flGroups] = await Promise.all([
-		territoriesByType(db, false),
-		territoriesByType(db, true),
-		groupsSummary(db, false),
-		groupsSummary(db, true),
-	]);
+	const summary = await readRegistrySummary(db);
+	const natTerritories = territoriesByType(summary, false);
+	const flTerritories = territoriesByType(summary, true);
+	const natGroups = groupsSummary(summary, false);
+	const flGroups = groupsSummary(summary, true);
 	const categoriesCount = await countOne(db, `SELECT COUNT(*) AS n FROM nw_group_categories`);
 	return {
 		ok: true,
@@ -1436,6 +1444,12 @@ export async function getGroupsRegistryView(db: D1Database): Promise<{
 			count: categoriesCount,
 			note: "The 14 categories are an informational taxonomy and a request channel only. They are not license products and create no rights to a group.",
 		},
+		registry_summary: summaryMeta(summary, [
+			["national", "territories_by_type"],
+			["florida", "territories_by_type"],
+			["national", "groups_by_status"],
+			["florida", "groups_by_status"],
+		]),
 	};
 }
 

@@ -149,6 +149,7 @@ import {
 	getTerritoryDrilldown,
 	getEducationView,
 } from "./operating-center-cabinet";
+import { refreshRegistrySummary, getRegistrySummaryStatus } from "./registry-summary";
 import {
 	getMoneySyncState,
 	inspectDonationRecordShape,
@@ -6898,6 +6899,27 @@ export default {
 			} catch {
 				return json({ ok: false, error: "funding_lane_gates not applied yet (migration 0098 pending)", gates: [] }, 503);
 			}
+		}
+		// Registry summary refresh (cabinet read-path fix, 2026-10-19):
+		// the EMERGENCY / AUDIT full recount of the big registry tables
+		// (round 2: one pass per big table, cost-labelled in the
+		// response). The NORMAL maintenance path is incremental: a
+		// controlled registry load updates the summary in the same
+		// operation as its inserts (applyRegistryDelta in
+		// src/registry-summary.ts), so this endpoint is for recovery and
+		// audits only — there is deliberately no cron and no schedule.
+		// Screens read the summary (registry_summary, migration 0099)
+		// instead of rescanning role_instances / territories / nw_groups
+		// per load; a missing metric renders an honest empty block.
+		if (request.method === "POST" && url.pathname === "/api/operating-center/registry-summary/refresh") {
+			try {
+				return json(await refreshRegistrySummary(env.nwana_engine_db));
+			} catch (e: unknown) {
+				return json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 400);
+			}
+		}
+		if (request.method === "GET" && url.pathname === "/api/operating-center/registry-summary/status") {
+			return json(await getRegistrySummaryStatus(env.nwana_engine_db));
 		}
 		// Phase 2 Money Engine: record a REAL received sponsorship/contract
 		// payment into the canonical money store with source, territory and

@@ -475,7 +475,6 @@ export function laneForEventType(eventType: string): string {
 const FLORIDA_STATE_TERRITORY_ID = "terr-st-12";
 const FLORIDA_STATE_FIPS = "12";
 /** SQL predicate: the row's territory belongs to the Florida subtree. */
-const FL_SUBTREE = `IN (SELECT territory_id FROM territories WHERE territory_id = '${FLORIDA_STATE_TERRITORY_ID}' OR state_fips = '${FLORIDA_STATE_FIPS}')`;
 
 /**
  * Phase 2 money cycle (TZ 13 Phase 2, criteria 3/7/8): gates, receipts
@@ -625,33 +624,46 @@ export async function getMoneyCycle(db: D1Database): Promise<MoneyCycleSection> 
 	}
 
 	// Florida pilot cycle (TZ 4.2): source -> outreach -> reply -> receipt.
+	// Round 2 (2026-10-19): the Florida subtree (1,024 territories at
+	// Phase 1B volumes) is materialized ONCE per call in a MATERIALIZED
+	// CTE shared by every aggregate, including the first-case pick. The
+	// previous shape embedded the subtree subquery in ten scalar
+	// subqueries across two statements and paid the materialization ten
+	// times (~10.2k of the 10,584 rows a call examined). Output is
+	// unchanged — proven byte-identical on the volume replica
+	// (research/cabinet-read-fix-2026-10-19/REPORT-ROUND2.md).
 	try {
 		const counts = await db
 			.prepare(
-				`SELECT
-					(SELECT COUNT(*) FROM outreach_prospects WHERE territory_id ${FL_SUBTREE}) AS sources,
+				`WITH fl AS MATERIALIZED (SELECT territory_id FROM territories WHERE territory_id = '${FLORIDA_STATE_TERRITORY_ID}' OR state_fips = '${FLORIDA_STATE_FIPS}')
+				SELECT
+					(SELECT COUNT(*) FROM outreach_prospects WHERE territory_id IN (SELECT territory_id FROM fl)) AS sources,
 					(SELECT COUNT(DISTINCT s.prospect_id) FROM outreach_sends s
 					   JOIN outreach_prospects p ON p.id = s.prospect_id
-					  WHERE p.territory_id ${FL_SUBTREE}) AS sent,
+					  WHERE p.territory_id IN (SELECT territory_id FROM fl)) AS sent,
 					(SELECT COUNT(DISTINCT r.prospect_id) FROM outreach_replies r
 					   JOIN outreach_prospects p ON p.id = r.prospect_id
-					  WHERE p.territory_id ${FL_SUBTREE}) AS replies,
+					  WHERE p.territory_id IN (SELECT territory_id FROM fl)) AS replies,
 					(SELECT COUNT(DISTINCT r.prospect_id) FROM outreach_replies r
 					   JOIN outreach_prospects p ON p.id = r.prospect_id
-					  WHERE p.territory_id ${FL_SUBTREE} AND r.classification = 'interested') AS interested,
-					(SELECT COUNT(*) FROM money_events WHERE territory_id ${FL_SUBTREE}
+					  WHERE p.territory_id IN (SELECT territory_id FROM fl) AND r.classification = 'interested') AS interested,
+					(SELECT COUNT(*) FROM money_events WHERE territory_id IN (SELECT territory_id FROM fl)
 					   AND event_type NOT IN ('fundraiser_donation_received', 'fundraiser_created')) AS receipts,
 					(SELECT COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0)
-					   FROM money_events WHERE territory_id ${FL_SUBTREE}
+					   FROM money_events WHERE territory_id IN (SELECT territory_id FROM fl)
 					   AND event_type NOT IN ('fundraiser_donation_received', 'fundraiser_created')) AS receipts_gross,
-					(SELECT COUNT(*) FROM money_events WHERE territory_id ${FL_SUBTREE}
+					(SELECT COUNT(*) FROM money_events WHERE territory_id IN (SELECT territory_id FROM fl)
 					   AND event_type IN ('sponsorship_received', 'contract_payment_received')) AS b2b_receipts,
 					(SELECT COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0)
-					   FROM money_events WHERE territory_id ${FL_SUBTREE}
+					   FROM money_events WHERE territory_id IN (SELECT territory_id FROM fl)
 					   AND event_type = 'donation_received') AS donation_gross,
 					(SELECT COALESCE(SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END), 0)
-					   FROM money_events WHERE territory_id ${FL_SUBTREE}
-					   AND event_type IN ('sponsorship_received', 'contract_payment_received')) AS b2b_gross`,
+					   FROM money_events WHERE territory_id IN (SELECT territory_id FROM fl)
+					   AND event_type IN ('sponsorship_received', 'contract_payment_received')) AS b2b_gross,
+					(SELECT p2.id FROM outreach_prospects p2
+					   JOIN outreach_replies r2 ON r2.prospect_id = p2.id
+					  WHERE p2.territory_id IN (SELECT territory_id FROM fl)
+					  ORDER BY r2.received_at ASC LIMIT 1) AS first_case_id`,
 			)
 			.first<Record<string, number>>();
 		const fl: MoneyCycleFlorida = {
@@ -667,38 +679,42 @@ export async function getMoneyCycle(db: D1Database): Promise<MoneyCycleSection> 
 			sponsorship_contract_receipts: num(counts?.b2b_receipts),
 			first_case: null,
 		};
-		try {
-			const fc = await db
-				.prepare(
-					`SELECT p.id AS prospect_id, p.org_name, p.track, p.city_state,
-							(SELECT MIN(s.sent_at) FROM outreach_sends s WHERE s.prospect_id = p.id) AS first_sent_at,
-							r.classification AS reply_classification, r.received_at AS reply_received_at,
-							COALESCE((SELECT SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END)
-								FROM money_events WHERE source_prospect_id = p.id), 0) AS money_received_cents
-					 FROM outreach_prospects p
-					 JOIN outreach_replies r ON r.prospect_id = p.id
-					 WHERE p.territory_id ${FL_SUBTREE}
-					 ORDER BY r.received_at ASC LIMIT 1`,
-				)
-				.first<Record<string, unknown>>();
-			if (fc) {
-				const money = num(fc.money_received_cents);
-				fl.first_case = {
-					prospect_id: num(fc.prospect_id),
-					org_name: String(fc.org_name ?? ""),
-					track: String(fc.track ?? ""),
-					city_state: (fc.city_state as string) ?? null,
-					first_sent_at: (fc.first_sent_at as string) ?? null,
-					reply_classification: (fc.reply_classification as string) ?? null,
-					reply_received_at: (fc.reply_received_at as string) ?? null,
-					money_received_cents: money,
-					stage: money > 0
-						? "full cycle: source, outreach, reply, money received and attributed"
-						: "cycle open at the reply stage: no money received from this source yet",
-				};
+		const firstCaseId = counts?.first_case_id;
+		if (firstCaseId != null) {
+			try {
+				const fc = await db
+					.prepare(
+						`SELECT p.id AS prospect_id, p.org_name, p.track, p.city_state,
+								(SELECT MIN(s.sent_at) FROM outreach_sends s WHERE s.prospect_id = p.id) AS first_sent_at,
+								r.classification AS reply_classification, r.received_at AS reply_received_at,
+								COALESCE((SELECT SUM(CASE WHEN gross_status = 'VERIFIED' THEN gross_cents ELSE 0 END)
+									FROM money_events WHERE source_prospect_id = p.id), 0) AS money_received_cents
+						 FROM outreach_prospects p
+						 JOIN outreach_replies r ON r.prospect_id = p.id
+						 WHERE p.id = ?
+						 ORDER BY r.received_at ASC LIMIT 1`,
+					)
+					.bind(firstCaseId)
+					.first<Record<string, unknown>>();
+				if (fc) {
+					const money = num(fc.money_received_cents);
+					fl.first_case = {
+						prospect_id: num(fc.prospect_id),
+						org_name: String(fc.org_name ?? ""),
+						track: String(fc.track ?? ""),
+						city_state: (fc.city_state as string) ?? null,
+						first_sent_at: (fc.first_sent_at as string) ?? null,
+						reply_classification: (fc.reply_classification as string) ?? null,
+						reply_received_at: (fc.reply_received_at as string) ?? null,
+						money_received_cents: money,
+						stage: money > 0
+							? "full cycle: source, outreach, reply, money received and attributed"
+							: "cycle open at the reply stage: no money received from this source yet",
+					};
+				}
+			} catch {
+				// First-case detail is additive; counts above already carry the cycle.
 			}
-		} catch {
-			// First-case detail is additive; counts above already carry the cycle.
 		}
 		section.florida_cycle = fl;
 	} catch {
