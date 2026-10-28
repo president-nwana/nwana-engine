@@ -19,6 +19,14 @@ Read before making changes:
 6. relevant docs/adr/
 7. AGENTS.md
 
+## DURABLE SCORED SNAPSHOT, NO RUNSIGNUP RE-VERIFICATION — ADR-0051 (2026-10-28)
+
+- Owner order 2026-10-28: once RunSignup has given the Engine scored data, the Engine never hands it back for re-verification. The daily auto-process previously re-fetched the full live preview at detect_scoring on every run; the RunSignup API answered HTTP 522 on 2026-10-27 and 2026-10-28, so the scored October 24 3K (event 1177637) and October 25 5K (event 1173957) stayed unpublished for days despite the owner's completed legacy scoring.
+- Fix in `src/series-2026-auto-process.ts` (ADR-0051): the first successful preview persists the COMPLETE scored snapshot (rows including Performance Level, Level Place, points) plus its publication key into D1 `race_event_results` (migration 0100 adds `publication_key`). Later runs detect scoring over the stored rows and publish from the stored key — zero RunSignup reads. An event with no snapshot still acquires live exactly once and still fails closed (WAITING_FOR_LEGACY_SCORING / "refusing to guess") when the one acquisition cannot complete.
+- Verified live 2026-10-28: run 1 (14:10 UTC) acquired both events once (5K: 3 rows, key ...1173957:664485; 3K: 2 rows, key ...1177637:664980). Run 2 (14:48 UTC, owner-ordered one-off schedule, reverted the same day) processed both events from D1 with zero RunSignup reads and published both PUBLISHED_COMPLETE (4 Meta destinations each; winner news + next-race promo written). Winners verified live on https://nwaofna.org/winners (Oct 25 5K: Fatikhov Elite 31:22, Otto High Performance 34:49, Blanchard Competitive 38:10; Oct 24 3K: Fatikhov Elite 18:57, Blanchard Open 23:17).
+- Deploy packaging correction (same day): the result-card rasterizer requires `src/resvg.wasm` uploaded as a SEPARATE module part named `resvg.wasm` with the bundle built `--external:./resvg.wasm` (see src/svg-raster.ts). The previous AGENTS.md recipe (`--loader:.wasm=binary`, single-file upload) inlines wasm bytes and fails at card generation with "Wasm code generation disallowed by embedder"; it has been corrected in AGENTS.md. After any Engine deploy, verify a card route returns 200 image/png.
+- Tests: 937 passed / 34 failed (documented baseline 935/34 plus 2 new ADR-0051 tests: snapshot run survives a 522 re-run with zero RunSignup calls; no snapshot plus 522 fails closed).
+
 ## SERIES RESULT LIFECYCLE — ADR-0042 (2026-09-28)
 
 - Standing rule: the owner's single reserved action is approving an athlete's result. After approval the Machine runs the full downstream lifecycle autonomously: registration check → levels/places/points → standings → website results / Winners → winner news → social distribution → next-race promotion. No per-step owner confirmations. The Machine never approves anything itself.

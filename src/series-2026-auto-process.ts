@@ -39,7 +39,7 @@ import {
 	type LifecycleResultRow,
 } from "./race-lifecycle";
 import { syncSeries2026Registrations } from "./series-2026-registrations";
-import { detectLegacyScoring, previewSeries2026ResultPublications } from "./series-2026-results";
+import { buildPublicationDraftFromD1, detectLegacyScoring, previewSeries2026ResultPublications } from "./series-2026-results";
 import { getSeries2026ResultCard } from "./series-2026-result-card";
 import { executeResultPublication } from "./result-publication-core";
 import { refreshAllAthleteStats } from "./athletes";
@@ -643,6 +643,48 @@ async function markEventLevelsComputed(
 	return updated;
 }
 
+export interface FinalizedSnapshot {
+	rows: LifecycleResultRow[];
+	publicationKey: string | null;
+}
+
+/**
+ * The event's captured scored dataset, if one exists: the canonical D1
+ * snapshot (race_event_results, finalized=1) written at first acquisition.
+ *
+ * Durable-fact rule (ADR-0051, extending the trigger-stage approval pattern
+ * and the owner's 2026-09-28 publication rule): once the complete scored
+ * dataset for an event has been captured into D1, it is an accepted fact.
+ * Downstream processing works from the snapshot and never re-queries
+ * RunSignup for the event's results, so a later RunSignup outage (522)
+ * cannot block, revoke, or force a re-verification of accepted data.
+ */
+export async function readFinalizedSnapshot(
+	db: D1Database,
+	distance: string,
+	eventId: number,
+): Promise<FinalizedSnapshot | null> {
+	const row = await db
+		.prepare(
+			`SELECT results_json, publication_key FROM race_event_results
+			 WHERE series = ? AND distance = ? AND event_id = ? AND finalized = 1`,
+		)
+		.bind(RACE_LIFECYCLE_SERIES, distance, eventId)
+		.first<{ results_json: string | null; publication_key: string | null }>();
+	if (!row?.results_json) return null;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(row.results_json);
+	} catch {
+		return null;
+	}
+	if (!Array.isArray(parsed) || parsed.length === 0) return null;
+	return {
+		rows: parsed as LifecycleResultRow[],
+		publicationKey: row.publication_key ?? null,
+	};
+}
+
 /**
  * TEMPORARY — Series 2026 completion only; Series 2027 will use incremental
  * cloud processing.
@@ -650,8 +692,14 @@ async function markEventLevelsComputed(
  * Legacy-mode canonical snapshot: the NWANA-FINAL.ps1 laptop script already
  * wrote Performance Level + Level Place to RunSignup; persist the per-event
  * rows as the canonical D1 snapshot (finalized=1) and mark the event
- * levels_computed. Read-only toward RunSignup except one lightweight race
- * metadata fetch for the event name/date.
+ * levels_computed. This write is the event's single acquisition point: the
+ * complete scored rows, the results URL, and the publication key are stored
+ * together, and every later run reads them back from D1 (ADR-0051).
+ *
+ * The one lightweight race metadata fetch (event name/date) is best-effort
+ * only: the scored rows are already captured when it runs, so a RunSignup
+ * failure there must not block persisting them. Fallbacks are the preview
+ * draft's event name and any values an earlier sync already stored.
  */
 async function upsertLegacyEventSnapshot(
 	db: D1Database,
@@ -661,32 +709,45 @@ async function upsertLegacyEventSnapshot(
 	/** Real RunSignup results URL (from the per-event preview drafts);
 	 * falls back to the existing row value, then null. */
 	resultsUrl: string | null,
+	/** The event's result-publication key (from the preview drafts), stored
+	 * on the snapshot so publication can build its draft from D1. */
+	publicationKey: string | null = null,
+	/** Event name from the preview draft, used when the metadata fetch is
+	 * unavailable. */
+	eventNameHint: string | null = null,
 ): Promise<void> {
-	let eventName: string | null = null;
+	let eventName: string | null = eventNameHint;
 	let eventDate: string | null = null;
-	const raceUrl = new URL(`https://api.runsignup.com/rest/race/${input.raceId}`);
-	raceUrl.searchParams.set("format", "json");
-	raceUrl.searchParams.set("events", "T");
-	const raceData = await runSignupGet(raceUrl, accessToken);
-	const race = raceData.race as Record<string, unknown> | undefined;
-	const events = race && Array.isArray(race.events) ? race.events : [];
-	for (const rawEvent of events) {
-		const event = rawEvent as Record<string, unknown>;
-		if (Number(event.event_id) !== input.eventId) continue;
-		eventName = typeof event.name === "string" ? event.name : null;
-		const startTime = [event.start_time, event.event_start_time].find(
-			(value): value is string => typeof value === "string" && value.length >= 4,
-		);
-		eventDate = normalizeRunSignupDate(startTime ?? null);
-		break;
+	try {
+		const raceUrl = new URL(`https://api.runsignup.com/rest/race/${input.raceId}`);
+		raceUrl.searchParams.set("format", "json");
+		raceUrl.searchParams.set("events", "T");
+		const raceData = await runSignupGet(raceUrl, accessToken);
+		const race = raceData.race as Record<string, unknown> | undefined;
+		const events = race && Array.isArray(race.events) ? race.events : [];
+		for (const rawEvent of events) {
+			const event = rawEvent as Record<string, unknown>;
+			if (Number(event.event_id) !== input.eventId) continue;
+			eventName = typeof event.name === "string" ? event.name : eventName;
+			const startTime = [event.start_time, event.event_start_time].find(
+				(value): value is string => typeof value === "string" && value.length >= 4,
+			);
+			eventDate = normalizeRunSignupDate(startTime ?? null);
+			break;
+		}
+	} catch {
+		// Best effort only (see doc comment): keep the hint/fallback values.
 	}
 	// Prefer the real RunSignup results URL from the preview drafts; keep
-	// an existing row value (e.g. from an earlier sync) as fallback.
+	// existing row values (e.g. from an earlier sync) as fallbacks for the
+	// URL and for event name/date when the metadata fetch was unavailable.
 	const existing = await db
-		.prepare(`SELECT results_url FROM race_event_results WHERE series = ? AND distance = ? AND event_id = ?`)
+		.prepare(`SELECT results_url, event_name, event_date FROM race_event_results WHERE series = ? AND distance = ? AND event_id = ?`)
 		.bind(RACE_LIFECYCLE_SERIES, input.distance, input.eventId)
-		.first<{ results_url: string | null }>();
+		.first<{ results_url: string | null; event_name: string | null; event_date: string | null }>();
 	const finalResultsUrl = resultsUrl ?? existing?.results_url ?? null;
+	eventName = eventName ?? existing?.event_name ?? null;
+	eventDate = eventDate ?? existing?.event_date ?? null;
 	// Same 13-column shape as the lifecycle sync upsert. publication_status
 	// is intentionally NOT overwritten on conflict (a re-run must not reset
 	// PUBLISHED back to PENDING).
@@ -695,8 +756,8 @@ async function upsertLegacyEventSnapshot(
 			`INSERT INTO race_event_results (
 				series, distance, race_id, event_id, event_name, event_date,
 				result_count, finalized, results_json, results_url,
-				publication_status, registration_url, synced_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				publication_status, registration_url, synced_at, publication_key
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(series, distance, event_id) DO UPDATE SET
 				event_name = excluded.event_name,
 				event_date = excluded.event_date,
@@ -705,7 +766,8 @@ async function upsertLegacyEventSnapshot(
 				results_json = excluded.results_json,
 				results_url = excluded.results_url,
 				registration_url = excluded.registration_url,
-				synced_at = excluded.synced_at`,
+				synced_at = excluded.synced_at,
+				publication_key = COALESCE(race_event_results.publication_key, excluded.publication_key)`,
 		)
 		.bind(
 			RACE_LIFECYCLE_SERIES,
@@ -721,6 +783,7 @@ async function upsertLegacyEventSnapshot(
 			"PENDING",
 			null,
 			new Date().toISOString(),
+			publicationKey,
 		)
 		.run();
 	await markEventLevelsComputed(db, input.distance, input.eventId);
@@ -773,30 +836,53 @@ export async function autoProcessEvent(
 	// Legacy completion mode detection: for the rest of Series 2026 the
 	// NWANA-FINAL.ps1 laptop script is the scoring/writeback engine
 	// (Performance Level, Level Place, points written back to RunSignup as
-	// custom fields). A cheap per-event fetch (~3-5 RunSignup calls)
-	// detects whether this event was already scored there, with an
-	// explicit two-part verification (see detectLegacyScoring). There is
-	// NO heavy Worker fallback: if the check fails, the run stops with
-	// WAITING_FOR_LEGACY_SCORING and the next cron re-checks.
-	let legacyPreview: Awaited<ReturnType<typeof previewSeries2026ResultPublications>>;
-	try {
-		legacyPreview = await previewSeries2026ResultPublications(env.accessToken, {
-			raceId: input.raceId,
-			eventId: input.eventId,
-		});
-	} catch (error) {
-		// Fail fast: a failed detection (e.g. RunSignup 522) must NOT fall
-		// through to any scoring path on a guess.
-		return fail("detect_scoring", `Legacy scoring detection failed: ${error instanceof Error ? error.message : "unknown"}; refusing to guess.`);
+	// custom fields). Detection runs the explicit two-part verification
+	// (see detectLegacyScoring) over the event's scored rows.
+	//
+	// Durable-fact rule (ADR-0051): the rows come from the D1 canonical
+	// snapshot whenever one has been captured. The live per-event fetch
+	// runs ONLY to acquire a snapshot that does not exist yet; the first
+	// complete acquisition is persisted by the sync_finalized step below
+	// and no later run asks RunSignup for this event's results again.
+	// There is NO heavy Worker fallback: if acquisition fails (e.g.
+	// RunSignup 522) and no snapshot exists, the run stops fail-closed —
+	// WAITING_FOR_LEGACY_SCORING when the fields are incomplete, a
+	// detection failure when RunSignup cannot be read at all. Refusing to
+	// guess is preserved exactly; what changed is that an accepted fact is
+	// never re-verified against the unreliable source.
+	const existingSnapshot = await readFinalizedSnapshot(db, input.distance, input.eventId);
+	let legacyPreview: Awaited<ReturnType<typeof previewSeries2026ResultPublications>> | null = null;
+	let legacyRows: LifecycleResultRow[];
+	if (existingSnapshot) {
+		legacyRows = existingSnapshot.rows;
+	} else {
+		try {
+			legacyPreview = await previewSeries2026ResultPublications(env.accessToken, {
+				raceId: input.raceId,
+				eventId: input.eventId,
+			});
+		} catch (error) {
+			// Fail fast: a failed acquisition (e.g. RunSignup 522) must NOT
+			// fall through to any scoring path on a guess.
+			return fail("detect_scoring", `Legacy scoring detection failed: ${error instanceof Error ? error.message : "unknown"}; refusing to guess.`);
+		}
+		legacyRows = flattenEventResults(legacyPreview.drafts);
 	}
-	const legacyRows = flattenEventResults(legacyPreview.drafts);
+	const snapshotPublicationKey =
+		existingSnapshot?.publicationKey ??
+		legacyPreview?.drafts.find((d) => d.source.event_id === input.eventId)?.publication_key ??
+		null;
+	const draftEventName =
+		legacyPreview?.drafts
+			.find((d) => d.source.event_id === input.eventId)
+			?.content.title.replace(/\s+— Results$/, "") ?? null;
 	const detection = detectLegacyScoring(legacyRows, input.trigger.disqualifiedResultIds);
 	if (!detection.fieldsComplete) {
 		const waiting = `WAITING_FOR_LEGACY_SCORING: ${detection.detail}`;
 		await push("legacy_scoring", "skipped", waiting);
 		return { ok: false, distance: input.distance, eventId: input.eventId, trigger: input.trigger.reason, steps, error: waiting };
 	}
-	await push("detect_scoring", "ok", `Legacy completion mode: ${detection.detail}`);
+	await push("detect_scoring", "ok", `Legacy completion mode: ${detection.detail}${existingSnapshot ? " Source: D1 canonical snapshot (zero RunSignup reads)." : ""}`);
 
 	// No RunSignup writes in legacy mode — the laptop script owns scoring.
 	await push("write_access_probe", "skipped", "Legacy mode: zero RunSignup writes.");
@@ -828,18 +914,25 @@ export async function autoProcessEvent(
 		return fail("verify_approvals", "Approvals changed mid-run; refusing to publish without a complete approval set.");
 	}
 
-	// Canonical D1 snapshot from the already-scored RunSignup rows +
-	// lifecycle stage, D1-only.
+	// Canonical D1 snapshot + lifecycle stage, D1-only. When the snapshot
+	// already exists this step only re-marks the lifecycle stage; the
+	// stored rows are the accepted fact and are not rewritten from any
+	// live source.
 	try {
-		const legacyResultsUrl = legacyPreview.drafts
-			.map((d) => d.editorial_draft.link_url)
-			.find((u): u is string => typeof u === "string" && u.length > 0) ?? null;
-		await upsertLegacyEventSnapshot(db, env.accessToken, {
-			distance: input.distance,
-			raceId: input.raceId,
-			eventId: input.eventId,
-		}, legacyRows, legacyResultsUrl);
-		await push("sync_finalized", "ok", `Legacy mode: canonical snapshot upserted with ${legacyRows.length} finalized row(s); event marked levels_computed.`);
+		if (existingSnapshot) {
+			await markEventLevelsComputed(db, input.distance, input.eventId);
+			await push("sync_finalized", "ok", `Legacy mode: canonical snapshot already persisted in D1 with ${legacyRows.length} finalized row(s); zero RunSignup reads.`);
+		} else {
+			const legacyResultsUrl = legacyPreview!.drafts
+				.map((d) => d.editorial_draft.link_url)
+				.find((u): u is string => typeof u === "string" && u.length > 0) ?? null;
+			await upsertLegacyEventSnapshot(db, env.accessToken, {
+				distance: input.distance,
+				raceId: input.raceId,
+				eventId: input.eventId,
+			}, legacyRows, legacyResultsUrl, snapshotPublicationKey, draftEventName);
+			await push("sync_finalized", "ok", `Legacy mode: canonical snapshot upserted with ${legacyRows.length} finalized row(s); event marked levels_computed.`);
+		}
 	} catch (error) {
 		return fail("sync_finalized", error instanceof Error ? error.message : "Legacy snapshot upsert failed");
 	}
@@ -859,10 +952,19 @@ export async function autoProcessEvent(
 	if (!env.metaToken) {
 		return fail("publish", "NWANA_META_TOKEN is not configured");
 	}
-	const preview = await previewSeries2026ResultPublications(env.accessToken, {
-		raceId: input.raceId,
-	});
-	const draft = preview.drafts.find((d) => d.source.event_id === input.eventId);
+	// The publication draft comes from the D1 canonical snapshot (owner
+	// rule 2026-09-28, ADR-0051) — the same source executeResultPublication
+	// uses. The live whole-race preview remains only as a fallback for a
+	// snapshot that predates the stored publication key.
+	let draft = snapshotPublicationKey
+		? await buildPublicationDraftFromD1(db, snapshotPublicationKey)
+		: null;
+	if (!draft) {
+		const preview = await previewSeries2026ResultPublications(env.accessToken, {
+			raceId: input.raceId,
+		});
+		draft = preview.drafts.find((d) => d.source.event_id === input.eventId) ?? null;
+	}
 	if (!draft) {
 		return fail("publish", `No publication draft found for event ${input.eventId}`);
 	}

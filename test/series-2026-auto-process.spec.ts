@@ -127,6 +127,7 @@ interface Snapshot {
 	event_date: string | null;
 	distance: string;
 	result_count: number;
+	publication_key: string | null;
 }
 
 function makeDb(opts: {
@@ -192,6 +193,29 @@ function makeDb(opts: {
 								return { events_json: state.lifecycle.events_json };
 							}
 							if (q.includes("FROM race_event_results")) {
+								// ADR-0051 durable snapshot read (autoProcessEvent):
+								// SELECT results_json, publication_key ... WHERE series/distance/event_id AND finalized = 1
+								if (q.includes("results_json, publication_key")) {
+									const snap = snapshotByEvent(num(2)!);
+									return snap && snap.finalized === 1
+										? {
+												results_json: snap.results_json,
+												publication_key: snap.publication_key,
+											}
+										: null;
+								}
+								// Snapshot upsert fallback read (event name/date/url):
+								// SELECT results_url, event_name, event_date ... WHERE series/distance/event_id
+								if (q.includes("SELECT results_url, event_name, event_date")) {
+									const snap = snapshotByEvent(num(2)!);
+									return snap
+										? {
+												results_url: snap.results_url,
+												event_name: snap.event_name,
+												event_date: snap.event_date,
+											}
+										: null;
+								}
 								// Card/draft read: WHERE race_id = ? AND event_id = ?
 								if (q.includes("results_url, results_json, finalized")) {
 									const snap = state.snapshots.get(snapKey(num(0)!, num(1)!));
@@ -318,7 +342,9 @@ function makeDb(opts: {
 							if (q.includes("INSERT INTO race_event_results")) {
 								// (series, distance, race_id, event_id, event_name, event_date,
 								//  result_count, finalized, results_json, results_url,
-								//  publication_status, registration_url, synced_at)
+								//  publication_status, registration_url, synced_at[, publication_key])
+								// publication_key (ADR-0051) is bound only by the
+								// auto-process upsert; other writers omit it.
 								state.snapshots.set(snapKey(num(2)!, num(3)!), {
 									results_json: str(8)!,
 									finalized: num(7) ?? 0,
@@ -327,6 +353,7 @@ function makeDb(opts: {
 									event_date: str(5),
 									distance: str(1)!,
 									result_count: num(6) ?? 0,
+									publication_key: args.length > 13 ? str(13) : null,
 								});
 								return { success: true };
 							}
@@ -1150,4 +1177,151 @@ describe("Series 2026 presence-signal approval (RUNSIGNUP)", () => {
 			]),
 		).toBe(true);
 	});
+});
+
+// ---------------------------------------------------------------------
+// ADR-0051: durable scored snapshot. The complete scored dataset is
+// captured into D1 once (rows + results URL + publication key); every
+// later run detects, finalizes, and publishes from D1 with zero RunSignup
+// reads. A RunSignup 522 after acquisition is irrelevant; a 522 before
+// any acquisition still fails closed (refusing to guess).
+// ---------------------------------------------------------------------
+describe("Durable scored snapshot (ADR-0051)", () => {
+	const EVENTS = [
+		{ id: TRIGGER_EVENT, name: "2026 NWANA Open 10K Nordic Walking Series - October 4, 2026", startTime: PAST },
+	];
+	const TRIGGER = {
+		fire: true,
+		reason: "all_approved" as const,
+		detail: "regression fixture",
+		registrations: [],
+		results: [
+			{
+				result_id: String(RESULT_ID),
+				athlete: "Elena Testwalker",
+				gender: "F",
+				time: "1:02:30",
+			},
+		],
+		approvedResultIds: [String(RESULT_ID)],
+		approvalSources: { [String(RESULT_ID)]: "ENGINE" as const },
+		disqualifiedResultIds: [] as string[],
+		missingSubmissions: [] as string[],
+		unapprovedResults: [],
+		unregisteredResults: [],
+		deadline: null,
+		deadlineSource: "test",
+	};
+	const ENV = (db: D1Database) => ({
+		db,
+		accessToken: "fake-runsignup-token",
+		metaToken: "fake-meta-token",
+		publicBaseUrl: "https://engine.example.test",
+	});
+	const INPUT = {
+		distance: "10K",
+		raceId: RACE_ID,
+		eventId: TRIGGER_EVENT,
+		trigger: TRIGGER,
+	};
+
+	it(
+		"acquisition persists rows + publication key; a later run with RunSignup at 522 completes from D1 with zero RunSignup calls and no duplicate publication",
+		async () => {
+			const capture = newCapture();
+			const { db, state } = makeDb();
+			const healthy = makeFakeFetch(capture, EVENTS, {
+				legacyScored: true,
+				rowsForEvent: () => [FEMALE_ROW_SCORED],
+			});
+			vi.stubGlobal("fetch", healthy);
+
+			// Run 1: no snapshot yet — the one live acquisition happens and
+			// the full chain completes.
+			const first = await autoProcessEvent(ENV(db), INPUT);
+			expect(first.ok).toBe(true);
+			const snap = state.snapshots.get(`${RACE_ID}:${TRIGGER_EVENT}`);
+			expect(snap).toBeDefined();
+			expect(snap!.finalized).toBe(1);
+			expect(snap!.publication_key).toBe(
+				`runsignup:series-2026:${RACE_ID}:${TRIGGER_EVENT}:${SET_ID}`,
+			);
+			expect(state.deliveries).toHaveLength(4);
+			expect(
+				state.siteNews.filter((n) => n.kind === "winner_announcement"),
+			).toHaveLength(1);
+
+			// Run 2: RunSignup answers 522 to everything and counts calls.
+			let runsignupCalls = 0;
+			vi.stubGlobal(
+				"fetch",
+				async (input: string | URL | Request, init?: RequestInit) => {
+					const url = new URL(
+						typeof input === "string"
+							? input
+							: input instanceof URL
+								? input.href
+								: input.url,
+					);
+					if (url.hostname === "api.runsignup.com") {
+						runsignupCalls++;
+						return new Response("error code: 522", { status: 522 });
+					}
+					return healthy(input, init);
+				},
+			);
+			const second = await autoProcessEvent(ENV(db), INPUT);
+			expect(second.ok).toBe(true);
+			expect(runsignupCalls).toBe(0);
+			const detect2 = second.steps.find((s) => s.step === "detect_scoring");
+			expect(detect2?.status).toBe("ok");
+			expect(detect2?.detail).toContain("D1 canonical snapshot");
+			const publish2 = second.steps.find((s) => s.step === "publish");
+			expect(publish2?.status).toBe("ok");
+			expect(publish2?.detail).toContain("Already published");
+			// Idempotent: no duplicate deliveries, no duplicate news.
+			expect(state.deliveries).toHaveLength(4);
+			expect(
+				state.siteNews.filter((n) => n.kind === "winner_announcement"),
+			).toHaveLength(1);
+		},
+		120000,
+	);
+
+	it(
+		"no snapshot and RunSignup at 522: detect_scoring fails closed (refusing to guess), nothing is persisted or published",
+		async () => {
+			const capture = newCapture();
+			const { db, state } = makeDb();
+			const healthy = makeFakeFetch(capture, EVENTS, {
+				legacyScored: true,
+				rowsForEvent: () => [FEMALE_ROW_SCORED],
+			});
+			vi.stubGlobal(
+				"fetch",
+				async (input: string | URL | Request, init?: RequestInit) => {
+					const url = new URL(
+						typeof input === "string"
+							? input
+							: input instanceof URL
+								? input.href
+								: input.url,
+					);
+					if (url.hostname === "api.runsignup.com") {
+						return new Response("error code: 522", { status: 522 });
+					}
+					return healthy(input, init);
+				},
+			);
+			const result = await autoProcessEvent(ENV(db), INPUT);
+			expect(result.ok).toBe(false);
+			const detect = result.steps.find((s) => s.step === "detect_scoring");
+			expect(detect?.status).toBe("failed");
+			expect(detect?.detail).toContain("refusing to guess");
+			expect(state.snapshots.size).toBe(0);
+			expect(state.deliveries).toHaveLength(0);
+			expect(state.siteNews).toHaveLength(0);
+		},
+		120000,
+	);
 });

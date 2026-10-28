@@ -1,5 +1,13 @@
 # NWANA Engine Changelog
 
+## 2026-10-28 — Durable scored snapshot: no RunSignup re-verification (ADR-0051)
+
+- Problem: the daily auto-process re-fetched the full live RunSignup preview at detect_scoring on every run. RunSignup answered HTTP 522 on Oct 27 and Oct 28, fail-stopping both runs; the owner-scored Oct 24 3K (event 1177637) and Oct 25 5K (event 1173957) stayed unpublished for days.
+- Fix (`src/series-2026-auto-process.ts`, migration 0100): the first successful preview persists the complete scored snapshot (rows with Performance Level, Level Place, points) and its publication key into `race_event_results.publication_key`. Detection and publication then run from D1 with zero RunSignup reads; the snapshot upsert treats the race-metadata fetch as best-effort; a snapshot that already exists is never rewritten. First acquisition still fails closed when RunSignup cannot be read once.
+- Proof in production 2026-10-28: acquisition run persisted both events; a second run processed both entirely from D1 and published PUBLISHED_COMPLETE (4 destinations each; winner news and next-race promo written); winners verified live on nwaofna.org/winners.
+- Deploy note: the card rasterizer requires resvg.wasm as a separate module part (bundle built with `--external:./resvg.wasm`); the AGENTS.md build recipe was corrected after a single-file deploy broke card generation with "Wasm code generation disallowed by embedder" (fixed and re-verified the same day; a card route returns 200 image/png).
+- Tests: 937 passed / 34 failed (baseline 935/34 + 2 new ADR-0051 tests).
+
 ## 2026-10-11 — Owner decision: Google Workspace / Gmail allowed for B2B outreach automation
 
 - Owner decision 2026-10-11 supersedes the 2026-09-19 email integration restriction: Google Workspace / Gmail integration with the NWANA Engine is allowed for corporate B2B outreach automation and reply handling (three tracks: Sponsor Every Kilometer, Corporate Umbrella Teams, Instructor Training Organizations) via the dedicated outreach mailbox (`partnerships@nwaofna.org`).

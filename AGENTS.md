@@ -109,6 +109,14 @@ d1 `nwana_engine_db` (id b3a8f158-185c-4a37-a61d-a29eb758de7e),
 plain_text OPERATING_CENTER_ENABLED=true,
 plain_text PUBLIC_BASE_URL=https://nwana-engine.nwana-engine.workers.dev.
 Secrets are preserved when omitted from metadata — never send secret values.
-Build: `npx esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --loader:.wasm=binary`.
+Build: `npx esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --external:./resvg.wasm`.
+Deploy: upload as a MODULES worker with TWO parts — the bundle as main module
+`worker.js` and `src/resvg.wasm` as a separate part named `resvg.wasm`
+(content-type application/wasm) — plus the metadata bindings below. The result
+card rasterizer (src/svg-raster.ts) requires the wasm as a pre-compiled module;
+inlining it as bytes (`--loader:.wasm=binary`, single-file upload) deploys
+cleanly but breaks card generation in production ("Wasm code generation
+disallowed by embedder", learned 2026-10-28, ADR-0051). After any deploy,
+verify a `/result-publications/card/<key>.png` route returns 200 image/png.
 Precedent 2026-10-02: version 214 uploaded without bindings (1101), version
 215 re-uploaded with d1+plain_text bindings — all 17 bindings verified intact.
