@@ -7,16 +7,18 @@
 	"name": "nwana-engine",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-09-07",
-	// ADR-0042: one daily trigger evaluates the Series 2026 result-processing
-	// trigger for every event (deadline wake-up). 1 execution = 1 request
-	// against the 100k/day Workers Free allowance: VERIFIED $0.
-	// ADR-0043: the */5 trigger was removed. History (resolved 2026-09-28):
-	// Sep 9 it was added for the Trust Engine automation; Sep 18 Albert
-	// removed it as "unnecessary"; ADR-0042 re-added it conservatively
-	// ("origin unknown"). Origin is now known, so the removal stands.
-	// scheduled() additionally ignores any schedule except 17 6 * * *.
+	// NO AUTOMATIC SCHEDULES (owner decision, 2026-10-29): the Engine
+	// runs on events and on concrete dated operations only. Both
+	// historical crons, the daily 06:17 UTC publication run
+	// ("17 6 * * *", ADR-0042) and the every-10-minutes Charity
+	// Challenges sync ("3,13,23,33,43,53 * * * *"), were deleted from
+	// production on 2026-10-29 and verified absent. Results publish on
+	// the owner's command through the per-event processing endpoint.
+	// Do not add a cron without the three governance answers recorded
+	// first: what triggers it, why it exists, and what happens if it
+	// does not exist.
 	"triggers": {
-		"crons": ["17 6 * * *", "3,13,23,33,43,53 * * * *"]
+		"crons": []
 	},
 	"observability": {
 		"enabled": true
