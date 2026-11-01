@@ -1,3 +1,7 @@
+## CURRENT OWNER DECISIONS — READ FIRST (2026-11-01)
+
+**Mandatory:** Read [CURRENT_DECISIONS_2026-11-01.md](CURRENT_DECISIONS_2026-11-01.md) before using this file or any older ADR/operating plan as evidence of today's NW Groups model. The 2026-10-31 owner decision supersedes the earlier pre-created groups / D1 registration architecture described in historical files; its implementation is still pending. Differentiate live production from repo source, which may be behind. Do not restart old D1 enrollment, scheduled scans, mass seeding, or test runs. Documentation sync is not authorization to change production.
+
 # NWANA Engine — Mandatory Project Context
 
 Before changing code, Registry data, D1, adapters, processing logic, distribution rules, or architecture:
