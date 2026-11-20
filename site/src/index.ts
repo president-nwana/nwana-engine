@@ -2,6 +2,7 @@
 // Server-rendered pages, read-only access to the engine D1.
 
 import { aboutPage, calendarPage, challengesPage, homePage, newsArticlePage, newsPage, resultsPage, sellersPage, seriesPage, winnersPage } from "./pages";
+import { cabinetAthletePage, cabinetIndexPage, championshipsPage, institutionalCommunityPage, institutionalHealthPage, institutionalParksPage, institutionalProgramsPage, institutionalSchoolsPage, institutionalSportsPage, licensesPage, series2027Page } from "./pages-restored";
 import {
 	albertTazetdinovPage,
 	antiDopingPage,
@@ -202,7 +203,10 @@ export default {
 				return html(await sponsorsPage());
 			}
 			if (request.method === "GET" && path === "/umbrella-groups") {
-				return html(await groupsPage());
+				return new Response(null, {
+					status: 301,
+					headers: { location: "https://groups.nwaofna.org/organizations" },
+				});
 			}
 			if (request.method === "GET" && path === "/groups") {
 				return new Response(null, {
@@ -297,12 +301,47 @@ export default {
 			if (request.method === "GET" && path === "/partners/become-a-partner") {
 				return html(await becomePartnerPage());
 			}
+			if (request.method === "GET" && path === "/championships") {
+				return html(await championshipsPage());
+			}
+			if (request.method === "GET" && path === "/licenses") {
+				return html(await licensesPage());
+			}
+			if (request.method === "GET" && path === "/series/2027") {
+				return html(await series2027Page());
+			}
+			if (request.method === "GET" && path === "/institutional-programs") {
+				return html(await institutionalProgramsPage());
+			}
+			if (request.method === "GET" && path === "/institutional-programs/parks-recreation") {
+				return html(await institutionalParksPage());
+			}
+			if (request.method === "GET" && path === "/institutional-programs/schools-universities") {
+				return html(await institutionalSchoolsPage());
+			}
+			if (request.method === "GET" && path === "/institutional-programs/health-active-aging") {
+				return html(await institutionalHealthPage());
+			}
+			if (request.method === "GET" && path === "/institutional-programs/sports-associations") {
+				return html(await institutionalSportsPage());
+			}
+			if (request.method === "GET" && path === "/institutional-programs/community-networks") {
+				return html(await institutionalCommunityPage());
+			}
+			if (request.method === "GET" && path === "/cabinet") {
+				return html(await cabinetIndexPage(env.nwana_site_db, url.searchParams.get("q") ?? ""));
+			}
+			const cabinetMatch = /^\/cabinet\/([a-z0-9-]+)$/.exec(path);
+			if (request.method === "GET" && cabinetMatch) {
+				const page = await cabinetAthletePage(env.nwana_site_db, cabinetMatch[1]);
+				return page ? html(page) : notFound();
+			}
 			if (request.method === "GET" && path === "/sitemap.xml") {
 				let slugs: string[] = [];
 				try {
 					slugs = (await getNews(env.nwana_site_db, 100)).map((n) => n.slug);
 				} catch {}
-				const staticPaths = ["/", "/about", "/results", "/calendar", "/challenges", "/series", "/winners", "/news", "/elite", "/elite/tommy-aunan", "/elite/sven-thorslund", "/board/liene-visocka", "/board/maris-vainovskis", "/board/leonids-reinholds", "/board/albert-tazetdinov", "/choose-your-path", "/events", "/faq", "/governance", "/privacy", "/terms", "/terms-conditions", "/code-of-conduct", "/safesport", "/anti-doping", "/safety", "/documents", "/forms", "/forms/general-inquiry", "/forms/instructor-coach-inquiry", "/forms/event-program-proposal", "/forms/sponsor-partner-inquiry", "/forms/volunteer-interest", "/forms/safety-incident-report", "/forms/media-request", "/forms/document-brand-asset-request", "/forms/correction-request", "/brand", "/press", "/media-contact", "/sponsors", "/partners", "/partner-network", "/partners/become-a-partner", "/sellers", "/umbrella-groups", "/support", "/ways-to-give", "/contact"];
+				const staticPaths = ["/", "/about", "/results", "/calendar", "/challenges", "/series", "/series/2027", "/championships", "/winners", "/licenses", "/news", "/elite", "/elite/tommy-aunan", "/elite/sven-thorslund", "/board/liene-visocka", "/board/maris-vainovskis", "/board/leonids-reinholds", "/board/albert-tazetdinov", "/choose-your-path", "/events", "/faq", "/governance", "/privacy", "/terms", "/terms-conditions", "/code-of-conduct", "/safesport", "/anti-doping", "/safety", "/documents", "/forms", "/forms/general-inquiry", "/forms/instructor-coach-inquiry", "/forms/event-program-proposal", "/forms/sponsor-partner-inquiry", "/forms/volunteer-interest", "/forms/safety-incident-report", "/forms/media-request", "/forms/document-brand-asset-request", "/forms/correction-request", "/brand", "/press", "/media-contact", "/sponsors", "/partners", "/partner-network", "/institutional-programs", "/institutional-programs/parks-recreation", "/institutional-programs/schools-universities", "/institutional-programs/community-networks", "/institutional-programs/health-active-aging", "/institutional-programs/sports-associations", "/partners/become-a-partner", "/sellers", "/support", "/ways-to-give", "/contact"];
 				const urls = staticPaths.concat(slugs.map((s) => "/news/" + s));
 				const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls.map((u) => "<url><loc>https://nwaofna.org" + u + "</loc></url>").join("\n") + "\n</urlset>";
 				return new Response(xml, {

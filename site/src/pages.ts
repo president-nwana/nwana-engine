@@ -143,8 +143,7 @@ export async function homePage(db: D1Database): Promise<string> {
 	// Homepage "next races" block: competition only. Merges the legacy race
 	// results table with the canonical public calendar (objects created once
 	// in the Machine); challenges never appear here.
-	const [stats, upcoming, competition, latest, news] = await Promise.all([
-		getSeasonStats(db),
+	const [upcoming, competition, latest, news] = await Promise.all([
 		getUpcoming(db, 60),
 		getCompetitionCalendar(db, 60),
 		getPastResults(db, undefined, 1),
@@ -160,7 +159,7 @@ export async function homePage(db: D1Database): Promise<string> {
 
 	const nextRaces = upcomingEntries.length > 0
 		? `<div class="grid cols-3">${upcomingEntries.map(upcomingCardFromEntry).join("")}</div>
-       <p style="margin-top:18px"><a class="card-link" href="/calendar">See the full calendar →</a></p>`
+       <p style="margin-top:18px"><a class="card-link" href="/calendar">See the full calendar →</a> <a class="card-link" href="/series" style="margin-left:14px">About the 2026 Series →</a></p>`
 		: emptyState("The next race dates are being finalized. Check back soon, the calendar never stays empty for long.");
 
 	const spotlight = latest.length > 0 && winnersOf(latest[0]).length > 0
@@ -190,42 +189,90 @@ export async function homePage(db: D1Database): Promise<string> {
 
 	const content = `
   <div class="hero hero-photo"><div class="wrap">
-    <span class="eyebrow">Nordic Walking Association of North America</span>
-    <h1>Every generation gets its fitness movement.<br><span class="gold">Nordic walking is next.</span></h1>
-    <p class="lead">NWANA is building Nordic walking as a continental sport: weekly verified races across North America, fair performance levels where every pace has its own podium, and a path from your first kilometer to the world stage.</p>
+    <span class="eyebrow">Competitions open · 2026</span>
+    <h1>2026 NWANA Open<br><span class="gold">Nordic Walking Series</span></h1>
+    <p class="lead">Compete from anywhere. Six distances. Official results and standings.<br><span class="gold">1K · 3K · 5K · 10K · 15K · 20K</span></p>
     <div class="cta-row">
-      <a class="btn btn-gold" href="/calendar">Join a Race</a>
-      <a class="btn btn-outline" href="${DONATE_URL}">Donate</a>
-      <a class="btn btn-outline" href="https://academy.nwaofna.org">Explore the Academy</a>
+      <a class="btn btn-gold" href="https://series.nwaofna.org">Explore Series 2026</a>
+      <a class="btn btn-outline" href="/calendar">Register for a Race</a>
     </div>
   </div></div>
-  ${statBand(stats)}
+  <div class="stats"><div class="wrap">
+    <div class="stat"><div class="n">3</div><div class="l">World and European Championship medalists lead the federation</div></div>
+    <div class="stat"><div class="n">6</div><div class="l">Series distances, 1K to 20K, in the official competition system</div></div>
+    <div class="stat"><div class="n">5</div><div class="l">Parts to the 2027 season, closing with the December NWANA Cup</div></div>
+    <div class="stat"><div class="n">501(c)(3)</div><div class="l">U.S. nonprofit public charity, Platinum Transparency with Candid</div></div>
+  </div></div>
   <div class="section"><div class="wrap">
-    <div class="kicker">How it works</div>
-    <h2>One sport, three doors</h2>
-    <div class="grid cols-3">
-      <div class="card">
-        <h3>Compete</h3>
-        <p>Weekly Series races from 1K to 20K, all virtual and verified. Submit your result with poles, get placed in your performance level, climb the standings.</p>
-        <a class="card-link" href="/results?view=standings">See the standings →</a>
-      </div>
-      <div class="card">
-        <h3>Learn</h3>
-        <p>The NWANA Academy takes you from a free intro course to certified instructor, coach, and judge. Technique first, credentials that mean something.</p>
-        <a class="card-link" href="https://academy.nwaofna.org">Visit the Academy →</a>
-      </div>
-      <div class="card">
-        <h3>Belong</h3>
-        <p>Start or join a local NWANA Group, train together, enter team competitions, and grow the sport in your city. The federation scales through its groups.</p>
-        <a class="card-link" href="https://groups.nwaofna.org/">Explore NW Groups →</a>
-      </div>
+    <div class="kicker">NWANA Open Series 2026 · Racing now</div>
+    <h2>Next races in the 2026 Series</h2>
+    ${nextRaces}
+    ${spotlight}
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">The NWANA system</div>
+    <h2>One federation, one system</h2>
+    <p style="font-size:19px;color:var(--navy)"><strong>Every generation finds its sport. Nordic walking is next.</strong></p>
+    <p>Every part of NWANA feeds the next: competitions develop athletes, the Academy prepares instructors, coaches, judges and organizers, local groups carry the sport into communities, and institutional programs bring whole organizations into the system.</p>
+    <div class="grid cols-3" style="margin-top:22px">
+      <div class="card"><div class="meta">Series 2026 races weekly</div><h3>Sport & Competitions</h3><p>Official competitions, rules, officiating and athlete development: the center of the federation.</p><p style="margin-top:12px"><a class="card-link" href="/series">The sport system →</a></p></div>
+      <div class="card"><div class="meta">In development · TBD</div><h3>Championships</h3><p>U.S. and North American titles, built as the destination of the sport system.</p><p style="margin-top:12px"><a class="card-link" href="/championships">Championship development →</a></p></div>
+      <div class="card"><div class="meta">Operating</div><h3>NWANA Academy</h3><p>Education for athletes, instructors, coaches, judges and organizers, from a free introduction to certification.</p><p style="margin-top:12px"><a class="card-link" href="https://academy.nwaofna.org">Visit the Academy →</a></p></div>
+      <div class="card"><div class="meta">Joining open · Free</div><h3>NW Groups</h3><p>Local groups across the continent: residents join free, organizations connect their communities.</p><p style="margin-top:12px"><a class="card-link" href="https://groups.nwaofna.org/">Explore NW Groups →</a></p></div>
+      <div class="card"><div class="meta">For organizations</div><h3>Institutional Programs</h3><p>Complete Nordic Walking programs for agencies, schools, universities, community networks, health organizations and sports associations.</p><p style="margin-top:12px"><a class="card-link" href="/institutional-programs">Programs for organizations →</a></p></div>
+      <div class="card"><div class="meta">Run by organizations</div><h3>Community Events</h3><p>Discovery walks, sports days and community events that local organizations run on NWANA methodology.</p><p style="margin-top:12px"><a class="card-link" href="/events">Community Events →</a></p></div>
+      <div class="card"><div class="meta">Open to everyone</div><h3>Charity Challenges</h3><p>Mass participation, teams and fundraising: the open door of the federation, welcoming every participant.</p><p style="margin-top:12px"><a class="card-link" href="/challenges">Explore Challenges →</a></p></div>
+    </div>
+  </div></div>
+  <div class="section"><div class="wrap">
+    <div class="kicker">Sport & Competitions</div>
+    <h2>The sport system at the center</h2>
+    <p>NWANA runs Nordic Walking as a sport: official rules, verified results, trained officials and a pathway that carries an athlete from a first start to national titles.</p>
+    <div class="grid cols-3" style="margin-top:22px">
+      <div class="card"><div class="meta">Racing now</div><h3>2026 NWANA Open Series</h3><p>Weekly verified virtual races across six distances, with open registration, official results and standings.</p><p style="margin-top:12px"><a class="card-link" href="/calendar">Race calendar →</a> <a class="card-link" href="/results" style="margin-left:14px">Results →</a></p></div>
+      <div class="card"><div class="meta">Season in preparation</div><h3>2027 NWANA Open Series</h3><p>One annual season in five parts: Winter, Spring, Summer and Fall Series, closing with the NWANA Cup in December. Official competition for Athlete License holders, with categories, points and rankings.</p><p style="margin-top:12px"><a class="card-link" href="/series/2027">Explore the 2027 season →</a></p></div>
+      <div class="card"><div class="meta">In development · TBD</div><h3>Championships</h3><p>The U.S. and North American Championships are in development, with locations and dates published as host agreements are confirmed.</p><p style="margin-top:12px"><a class="card-link" href="/championships">Championship development →</a></p></div>
+      <div class="card"><h3>Rules, officiating, people</h3><p>Competition rules, judges, race directors and technical officials, and an elite roster that proves the level of the sport.</p><p style="margin-top:12px"><a class="card-link" href="/elite">Elite Athletes →</a> <a class="card-link" href="https://academy.nwaofna.org" style="margin-left:14px">Train with the Academy →</a></p></div>
+      <div class="card"><h3>Athlete License</h3><p>Race in the official standings. The Athlete License carries your season points, titles and championship standings.</p><p style="margin-top:12px"><a class="card-link" href="/licenses">NWANA Licenses →</a></p></div>
+      <div class="card"><div class="meta">Open to everyone</div><h3>Charity Challenges</h3><p>The federation's open program: virtual challenges, teams and fundraising for participants of every level. Enthusiasm is the only entry requirement.</p><p style="margin-top:12px"><a class="card-link" href="/challenges">Explore Challenges →</a></p></div>
+    </div>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">NW Groups</div>
+    <h2>Local groups, continental network</h2>
+    <p>NW Groups is NWANA's geographic network of local groups. Residents join their territory group free and receive updates as the group builds toward regular activity; FORMING is a normal stage of every new group. Organizations connect their communities, members and locations through the same registry and open groups where their people live.</p>
+    <div class="cta-row" style="margin-top:22px">
+      <a class="btn btn-navy" href="https://groups.nwaofna.org/find-a-group">Find your group</a>
+      <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="https://groups.nwaofna.org/organizations">Connect your organization</a>
+    </div>
+  </div></div>
+  <div class="section"><div class="wrap">
+    <div class="kicker">NWANA Academy</div>
+    <h2>Education inside the sport system</h2>
+    <p>The Academy prepares the people the sport runs on: athletes, instructors, coaches, judges, race directors and officials. The catalog opens with a free Introduction; Instructor Beginner enrolls openly; higher levels open step by step as each level is completed. Academy certificates unlock the federation's professional licenses: the Instructor License follows the corresponding Academy certificate.</p>
+    <div class="cta-row" style="margin-top:22px">
+      <a class="btn btn-navy" href="https://academy.nwaofna.org">Visit the Academy</a>
+      <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="https://license.nwaofna.org">NWANA licenses</a>
+    </div>
+  </div></div>
+  <div class="section alt"><div class="wrap">
+    <div class="kicker">Institutional Programs</div>
+    <h2>Programs for organizations and networks</h2>
+    <p>NWANA builds complete Nordic Walking programs together with park agencies, schools and universities, community networks, health organizations and sports associations: program design, staff training, on-site masterclasses, local groups, events and competition pathways. Each sector enters the system through its own door.</p>
+    <div class="grid cols-3" style="margin-top:22px">
+      <div class="card"><h3>Parks & Recreation</h3><p>Healthy Aging programs, trained agency staff and local groups at parks and recreation centers.</p><p style="margin-top:12px"><a class="card-link" href="/institutional-programs/parks-recreation">For agencies →</a></p></div>
+      <div class="card"><h3>Schools & Universities</h3><p>Staff wellness, physical education, sports sections and instructor training for employees.</p><p style="margin-top:12px"><a class="card-link" href="/institutional-programs/schools-universities">For education →</a></p></div>
+      <div class="card"><h3>Community & Fitness Networks</h3><p>A complete program that community, sport and education networks adopt across their locations.</p><p style="margin-top:12px"><a class="card-link" href="/institutional-programs/community-networks">For networks →</a></p></div>
+      <div class="card"><h3>Health & Active Aging</h3><p>Instructor-led programs for health systems and active aging organizations.</p><p style="margin-top:12px"><a class="card-link" href="/institutional-programs/health-active-aging">For health organizations →</a></p></div>
+      <div class="card"><h3>Sports Associations & Event Organizers</h3><p>Nordic Walking inside existing competitions: rules, sanctioning, officiating and organizer education.</p><p style="margin-top:12px"><a class="card-link" href="/institutional-programs/sports-associations">For the sport →</a></p></div>
+      <div class="card"><h3>All Institutional Programs</h3><p>The full program architecture: composition, ways to start and the first step for your organization.</p><p style="margin-top:12px"><a class="card-link" href="/institutional-programs">Explore the programs →</a></p></div>
     </div>
   </div></div>
   <div class="section"><div class="wrap">
     <div class="kicker">Free instructor education</div>
     <h2>Free Instructor Education for Participating Organizations</h2>
     <p>Your organization chooses the people. NWANA provides their Nordic Walking instructor education at no cost to them.</p>
-    <p>Senior programs, health and rehabilitation organizations, community groups, veterans programs, youth programs, parks and recreation departments, schools, universities and other participating organizations can nominate their own people.</p>
+    <p>Senior programs, health and rehabilitation organizations, community groups, veterans programs, youth programs, parks and recreation departments, schools, universities and other participating organizations can nominate their own people. Participating organizations enroll their own nominees with a dedicated enrollment code. Individual sponsored seats are awarded separately through the NWANA Instructor Growth Fund, as donations fund them.</p>
     <p>Donations, grants, sponsors, fundraising and workplace giving help NWANA operate and scale the program.</p>
     <div class="cta-row" style="margin-top:22px">
       <a class="btn" href="https://challenges.nwaofna.org/organizations">For Organizations</a>
@@ -234,12 +281,15 @@ export async function homePage(db: D1Database): Promise<string> {
     </div>
   </div></div>
   <div class="section alt"><div class="wrap">
-    <div class="kicker">Race calendar</div>
-    <h2>Next on the start line</h2>
-    ${nextRaces}
+    <div class="kicker">Community Events</div>
+    <h2>Events that organizations run</h2>
+    <p>Community Events are NWANA's national event format: parks, universities, community networks, clubs and other organizations hold Discovery walks, sports days and themed gatherings for their own audiences, on the federation's methodology. NWANA supplies the sport component, training for organizers and the national calendar; the host brings its place and its people. A South Florida Discovery Series is in preparation as a first example, together with local co-organizers.</p>
+    <div class="cta-row" style="margin-top:22px">
+      <a class="btn btn-navy" href="/events">Community Events</a>
+      <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="/institutional-programs">Programs for organizations</a>
+    </div>
   </div></div>
   <div class="section"><div class="wrap">
-    ${spotlight}
     <div class="kicker">Federation news</div>
     <h2>Latest updates</h2>
     ${newsTeaser}
@@ -249,8 +299,9 @@ export async function homePage(db: D1Database): Promise<string> {
     <h2>Built like a federation, from day one</h2>
     <p>NWANA is a 501(c)(3) public charity on a simple mission: make Nordic walking a recognized, professionally run sport across North America. Verified competitions, transparent standings, trained instructors, and local groups in every region. Your support helps NWANA provide free instructor education, grow local groups, and power verified competitions.</p>
     <div class="cta-row" style="margin-top:22px">
-      <a class="btn btn-navy" href="${DONATE_URL}">Donate to NWANA</a>
+      <a class="btn btn-navy" href="/ways-to-give">Donate to NWANA</a>
       <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="/calendar">Find your race</a>
+      <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="/about">About the federation</a>
     </div>
   </div></div>`;
 
@@ -277,8 +328,8 @@ export async function aboutPage(): Promise<string> {
     <div class="grid cols-3">
       <div class="card"><h3>Governance</h3><p>Develop rules, standards, policies, integrity protections, and long-term direction for Nordic walking across North America.</p></div>
       <div class="card"><h3>Education</h3><p>Provide progressive education and qualification pathways for instructors, coaches, judges, Race Directors, technical officials, and leaders through NWANA Academy.</p></div>
-      <div class="card"><h3>Licensing</h3><p>Operate licensing pathways for athletes, professionals, individual NW Group participants, and eligible organizations.</p></div>
-      <div class="card"><h3>Community</h3><p>Help people join existing NW Groups or begin establishing new groups for communities, workplaces, schools, healthcare organizations, and municipalities.</p><p style="margin-top:14px"><a class="card-link" href="https://groups.nwaofna.org/find-a-group">Find an NW Group →</a> <a class="card-link" href="https://groups.nwaofna.org/start-a-group" style="margin-left:18px">Start an NW Group →</a></p></div>
+      <div class="card"><h3>Licensing</h3><p>Operate licensing pathways for athletes, professionals, and eligible organizations, with a voluntary license for members. Joining an NW Group is free.</p></div>
+      <div class="card"><h3>Community</h3><p>Help people join existing NW Groups or begin establishing new groups for communities, workplaces, schools, healthcare organizations, and municipalities.</p><p style="margin-top:14px"><a class="card-link" href="https://groups.nwaofna.org/find-a-group">Find an NW Group →</a> <a class="card-link" href="https://groups.nwaofna.org/" style="margin-left:18px">Join an NW Group →</a></p></div>
       <div class="card"><h3>Competitions</h3><p>Develop and operate Nordic walking competitions, publish official results and standings, maintain competition rules, and expand opportunities for athletes.</p></div>
       <div class="card"><h3>Sport development</h3><p>Continue building the people, organizations, events, technical standards, sanctioning capacity, and ranking structures for a sustainable continental sport system.</p></div>
     </div>
@@ -288,8 +339,8 @@ export async function aboutPage(): Promise<string> {
     <h2>One system, five steps</h2>
     <div class="grid cols-2">
       <div class="card"><h3>1. Learn and develop</h3><p>Begin with Nordic walking education and continue through the appropriate participant or professional pathway.</p></div>
-      <div class="card"><h3>2. Connect locally</h3><p>Join an existing NW Group or help establish a new group in your community or organization.</p><p style="margin-top:14px"><a class="card-link" href="https://groups.nwaofna.org/find-a-group">Find an NW Group →</a> <a class="card-link" href="https://groups.nwaofna.org/start-a-group" style="margin-left:18px">Start an NW Group →</a></p></div>
-      <div class="card"><h3>3. Obtain the appropriate license</h3><p>Select the license that corresponds to your role, activity, organization, or level of professional responsibility.</p></div>
+      <div class="card"><h3>2. Connect locally</h3><p>Join an existing NW Group or help establish a new group in your community or organization.</p><p style="margin-top:14px"><a class="card-link" href="https://groups.nwaofna.org/find-a-group">Find an NW Group →</a> <a class="card-link" href="https://groups.nwaofna.org/" style="margin-left:18px">Join an NW Group →</a></p></div>
+      <div class="card"><h3>3. Join free</h3><p>Join an NW Group free on the NW Groups site. Licenses belong to defined sport and professional roles: athlete licenses for competitions that require them, and professional licenses for instructors, coaches, judges, and officials.</p></div>
       <div class="card"><h3>4. Participate and compete</h3><p>Take part in NWANA activities, challenges, competitions, and other published opportunities.</p></div>
       <div class="card"><h3>5. Lead, organize, or support</h3><p>Continue developing as a professional, establish an NW Group, organize activities or competitions, volunteer, partner with NWANA, sponsor a program, or support a designated fund.</p></div>
     </div>
@@ -300,7 +351,7 @@ export async function aboutPage(): Promise<string> {
     <div class="grid cols-2">
       <div class="card">
         <div class="board-photo"><img src="https://d2mkojm4rk40ta.cloudfront.net/us-east-1-src/prod/clientUploads/2026-06/21/13/824/efade10b-4183-42c3-8549-bdcfaed4b27c-bQoiOp.png" alt="Albert Fatikhov"></div>
-        <p>NWANA was founded by Albert Fatikhov to build a full continental federation for Nordic walking in the United States: verified competitions, fair performance levels, instructor education, and local groups, all running as one machine.</p>
+        <p>NWANA was founded by Albert Fatikhov to build a full continental federation for Nordic walking in North America: verified competitions, fair performance levels, instructor education, and local groups, all running as one machine.</p>
         <p>As an athlete, he is a World Championship medalist: silver in the 4x5K relay and bronze in the 5K at Lahti 2024. He leads the federation the way he races, from the front.</p>
         <div class="cta-row" style="margin-top:18px">
           <a class="btn btn-navy" href="https://albertfatikhov.nwaofna.org/">Visit Albert Fatikhov's page</a>
@@ -344,7 +395,7 @@ export async function aboutPage(): Promise<string> {
       <div class="card board-card">
         <div class="board-photo"><img src="/board/albert-tazetdinov-sq.jpg" alt="Albert Tazetdinov"></div>
         <h3>Albert Tazetdinov</h3>
-        <p class="role">CEO, NWANA</p>
+        <p class="role">Secretary, NWANA</p>
         <p class="email"><a href="mailto:albert.tazetdinov@nwaofna.org">albert.tazetdinov@nwaofna.org</a></p>
         <p><a href="/board/albert-tazetdinov">Full profile</a></p>
       </div>
@@ -356,7 +407,6 @@ export async function aboutPage(): Promise<string> {
     <p>As a 501(c)(3) public charity, NWANA is committed to transparency, public benefit, fair access, participant safety, and responsible sport development. We believe Nordic walking can grow into a strong and respected competitive sport across North America when its development is supported by real education, technical knowledge, community access, fair competition, clear standards, and accountable leadership.</p>
     <p style="margin-top:16px"><a aria-label="Nordic Walking Association of North America Inc NWANA" href="https://app.candid.org/profile/16510915/nordic-walking-association-of-north-america-inc-nwana-33-2444142/?pkId=31facfb4-fd0b-404a-9f53-147e33297404" target="_blank" rel="noopener" style="display:inline-block"><img alt="Candid transparency seal" src="https://widgets.guidestar.org/prod/v1/pdp/transparency-seal/16510915/svg" style="max-width:150px"></a></p>
   </div></div>`;
-
 	return layout("About NWANA", "about", content, "About the Nordic Walking Association of North America: the federation story, founder Albert Fatikhov, elite athletes, and the board of directors.");
 }
 
@@ -501,6 +551,7 @@ export async function resultsPage(
     <div class="tabs" style="margin-bottom:6px">
       <a href="/results?distance=${activeDistance}" class="${!standingsView ? "active" : ""}">Race results</a>
       <a href="/results?view=standings&distance=${activeDistance}" class="${standingsView ? "active" : ""}">Season standings</a>
+      <a href="/cabinet">Athlete cabinet</a>
     </div>`;
 
 	let body: string;
@@ -590,7 +641,15 @@ export async function challengesPage(db: D1Database): Promise<string> {
 
 	let body: string;
 	if (entries.length === 0) {
-		body = emptyState("No challenges are open right now. Check back soon, new challenges are announced regularly.");
+		body = `
+  <div class="card" style="margin-bottom:28px">
+    <div class="kicker">Program update</div>
+    <h2>NWANA Charity Challenge Series</h2>
+    <p style="font-size:15px">Free virtual challenges in Nordic Walking, Walking, Race Walking, Running, and Cycling, plus an Open Challenge for any activity. NWANA is rebuilding the challenge participation model; results and participant records stay published on the challenge site.</p>
+    <p style="margin-top:16px">
+      <a class="btn btn-navy" href="https://challenges.nwaofna.org/">View Challenges</a>
+    </p>
+  </div>`;
 	} else {
 		body = calMonthSections(entries);
 	}
@@ -610,7 +669,31 @@ export async function seriesPage(db: D1Database): Promise<string> {
 
 	let body: string;
 	if (seriesList.length === 0) {
-		body = emptyState("Series and championship pages are being prepared. Check back soon.");
+		body = `
+  <div class="card" style="margin-bottom:28px">
+    <div class="kicker">Active now</div>
+    <h2>2026 NWANA Open Nordic Walking Series</h2>
+    <p style="font-size:15px">Ongoing virtual competition &mdash; 1K / 3K / 5K / 10K / 15K / 20K. Recurring races with open registration and official standings.</p>
+    <p style="margin-top:16px">
+      <a class="btn btn-navy" href="https://series.nwaofna.org" target="_blank" rel="noopener">View Series</a>
+      <a class="btn btn-gold" href="/calendar" style="margin-left:12px">Competition Calendar</a>
+      <a class="btn btn-gold" href="/results" style="margin-left:12px">Results</a>
+    </p>
+  </div>
+  <div class="grid cols-2" style="margin-bottom:28px">
+    <div class="card">
+      <div class="kicker">Season 2027</div>
+      <h3>2027 NWANA Open Nordic Walking Series</h3>
+      <p style="font-size:15px">One annual season in five parts: Winter, Spring, Summer and Fall Series, closing with the NWANA Cup in December. Official competition for Athlete License holders, with categories, points and rankings.</p>
+      <p style="margin-top:14px"><a class="card-link" href="/series/2027">Explore the 2027 season →</a></p>
+    </div>
+    <div class="card">
+      <div class="kicker">Championships</div>
+      <h3>U.S. & North American Championships</h3>
+      <p style="font-size:15px">NWANA's championship titles are in development, with locations and dates published as host agreements are confirmed.</p>
+      <p style="margin-top:14px"><a class="card-link" href="/championships">Championship development →</a></p>
+    </div>
+  </div><div class="card"><div class="kicker">Competition rules</div><h3>Open participation, official standings</h3><p style="font-size:15px">Participation in NWANA competitions is open to every athlete. The official standings of the Series and the Championships, with season points, ratings, titles and awards, are maintained for athletes holding an active NWANA Athlete License, and championship titles are awarded within the official standings under the championship regulations.</p></div>`;
 	} else {
 		const sections = await Promise.all(
 			seriesList.map(async (s) => {
@@ -720,21 +803,6 @@ export async function newsArticlePage(db: D1Database, slug: string): Promise<str
 }
 
 export async function sellersPage(): Promise<string> {
-	const inventory = [
-		{ t: "Series 2027 naming and series partnerships", d: "Four seasonal virtual race series, about two races per week year round. Title and presenting partnerships, brand presence across all race communications, results pages, and standings." },
-		{ t: "Distance partnerships", d: "1K, 3K, 5K, 10K, 15K, 20K. Official Distance Partner designation for one distance across the season, with branding on distance-specific results and communications." },
-		{ t: "Free challenges", d: "About 15 planned challenges in virtual, monthly, and team formats. Presenting partnerships at the top of the participation funnel, the first touch with new audiences entering the NWANA system." },
-		{ t: "U.S. and Continental Championships", d: "Live flagship events planned for 2027 to 2028. Founding championship partner positions with on-site brand presence, naming rights, and hospitality as the events launch." },
-		{ t: "Academy", d: "Education ladder from a free intro course through instructor, coach, and judge certification to professional license. Education partner designation with reach into instructor, coach, and organizer communities." },
-		{ t: "NW Groups network", d: "Local groups licensing community, employer, school, healthcare, parks, fitness, military, and municipal audiences. Community-level brand presence replicated city by city as the network grows." },
-		{ t: "Licenses", d: "Recurring annual licenses that keep participants inside the NWANA system. Sustained brand visibility to a renewing licensed base, a membership-style asset." },
-		{ t: "Results, rankings, Winners Circle", d: "Official results, standings, rankings, and the emerging elite athlete roster. Credibility and media value, athlete storytelling, and athlete sponsorship pathways." },
-		{ t: "Prize partnerships", d: "In-kind product and digital prizes supplied by partners for series and challenge winners. Product trial and sampling with an active participant base; digital engagement through prize codes and offers." },
-		{ t: "Media and digital assets", d: "Press kit, media contacts, safe sport and anti-doping credibility materials, volunteer network, and Google Ad Grant traffic driving search visitors to NWANA pages where partners are featured." },
-		{ t: "Funds and donor campaigns", d: "Donation campaigns including the Instructor Growth Fund, which converts donations into academy credits and new instructors. Social impact association with workforce development in sport." },
-	];
-	const cards = inventory.map((a) => `<div class="card"><h3>${esc(a.t)}</h3><p>${esc(a.d)}</p></div>`).join("");
-
 	const content = `
   <div class="page-head"><div class="wrap">
     <div class="kicker">For sponsorship sellers</div>
@@ -745,20 +813,14 @@ export async function sellersPage(): Promise<string> {
     <div class="kicker">The inventory</div>
     <h2>Eleven asset groups, one system</h2>
     <p>Every NWANA object feeds the next: the Series leads participants to results and rankings, the Academy leads students to certification and group creation, groups lead to programs and events. Each new group, event, and championship adds new inventory. Renewal and cross-sell are built into the model, so the book of business compounds instead of resetting.</p>
-    <div class="grid cols-3" style="margin-top:22px">${cards}</div>
+    <div class="grid cols-3" style="margin-top:22px"><div class="card"><h3>Series 2027 naming and series partnerships</h3><p>The NWANA competition series runs weekly verified races across six distances, with the 2027 season in planning. Title and presenting partnerships with brand presence across all race communications, results pages, and standings.</p></div><div class="card"><h3>Distance partnerships</h3><p>1K, 3K, 5K, 10K, 15K, 20K. Official Distance Partner designation for one distance across the season, with branding on distance-specific results and communications.</p></div><div class="card"><h3>U.S. and Continental Championships</h3><p>NWANA is building the road to its first U.S. and Continental Championships. Founding championship partner positions open as the championship program is confirmed.</p></div><div class="card"><h3>Academy</h3><p>Education ladder from a free intro course through instructor, coach, and judge certification to professional license. Education partner designation with reach into instructor, coach, and organizer communities.</p></div><div class="card"><h3>NW Groups network</h3><p>Local groups connect community, employer, school, healthcare, parks, fitness, military, and municipal audiences. Community-level brand presence replicated city by city as the network grows.</p></div><div class="card"><h3>Licenses</h3><p>Athlete and professional licenses across the NWANA system. Sustained brand visibility to a renewing licensed base.</p></div><div class="card"><h3>Results, rankings, Winners Circle</h3><p>Official results, standings, rankings, and the emerging elite athlete roster. Credibility and media value, athlete storytelling, and athlete sponsorship pathways.</p></div><div class="card"><h3>Prize partnerships</h3><p>In-kind product and digital prizes supplied by partners for series and challenge winners. Product trial and sampling with an active participant base; digital engagement through prize codes and offers.</p></div><div class="card"><h3>Media and digital assets</h3><p>Press kit, media contacts, safe sport and anti-doping credibility materials, volunteer network, and Google Ad Grant traffic driving search visitors to NWANA pages where partners are featured.</p></div><div class="card"><h3>Funds and donor campaigns</h3><p>Donation campaigns including the Instructor Growth Fund, which converts donations into academy credits and new instructors. Social impact association with workforce development in sport.</p></div></div>
   </div></div>
   <div class="section alt"><div class="wrap">
     <div class="kicker">How we work with sellers</div>
-    <h2>Commercial terms, stated plainly</h2>
+    <h2>Real products, stated plainly</h2>
     <div class="grid cols-3">
-      <div class="card"><h3>Commission</h3><p>We offer market-rate commissions, with enhanced rates for founding partnerships closed in the first year. We are open to retainer-plus-commission structures. Specific numbers are negotiated per deal, not dictated in outreach.</p></div>
-      <div class="card"><h3>Real products</h3><p>What you sell exists. Series 2026 is live now, Series 2027 is a built pipeline, and the Academy and group licensing are operating systems, not slideware. You never have to invent what the federation delivers.</p></div>
+      <div class="card"><h3>Real products</h3><p>What you sell exists. Series 2026 is live now, Series 2027 is in planning, and the Academy and NW Groups operate today. You sell what the federation delivers.</p></div>
     </div>
-  </div></div>
-  <div class="section"><div class="wrap">
-    <div class="kicker">Reference pricing</div>
-    <h2>Where the 2026 grid stood</h2>
-    <p>For orientation: Founding Series Partner $25,000, Premier Series Partner $10,000, Official Series Partner $5,000, Official Distance Partner $3,000 per distance, prize partnerships in kind. These terms cover the 2026 Series only. Series 2027 inventory and pricing are finalized with the sales partner, so founding partners of 2027 help shape the packages they buy into.</p>
   </div></div>
   <div class="section alt"><div class="wrap">
     <div class="kicker">Next step</div>
@@ -769,6 +831,5 @@ export async function sellersPage(): Promise<string> {
       <a class="btn btn-outline" style="border-color:var(--navy);color:var(--navy)" href="/about">About NWANA</a>
     </div>
   </div></div>`;
-
 	return layout("For Sellers", "sellers", content, "Sell NWANA sponsorship inventory: series partnerships, championships, academy, groups network, and eleven asset groups across a continental sport system.");
 }

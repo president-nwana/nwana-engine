@@ -15,8 +15,8 @@ export const NETWORK_LINKS: NetworkLink[] = [
 	{ label: "Race Registration", url: "https://sport.nwaofna.org", note: "Enter a race" },
 	{ label: "Tickets and Fundraising", url: "https://ticketsignup.io/w/nwaofna", note: "Support the mission" },
 	{ label: "NWANA Academy", url: "https://academy.nwaofna.org", note: "Learn and get certified" },
-	{ label: "NWANA Health", url: "https://nwaofna.com", note: "Health and science" },
-	{ label: "Federation Home", url: "https://federation.nwaofna.org", note: "Launching soon" },
+	{ label: "NWANA Health", url: "https://health.nwaofna.org", note: "Health and science" },
+	{ label: "Federation Home", url: "https://federation.nwaofna.org", note: "RunSignup platform" },
 ];
 
 export function esc(value: unknown): string {
@@ -81,7 +81,7 @@ a{color:var(--navy-2)}
 .dropdown>button{background:none;border:0;padding:9px 13px;border-radius:9px;color:var(--navy);font-weight:600;font-size:16px;cursor:pointer;font-family:inherit}
 .dropdown>button:hover{background:var(--gold-soft)}
 .dropdown>button.active{background:var(--navy);color:#fff}
-.dropdown-menu{display:none;position:absolute;right:0;top:110%;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 40px rgba(10,31,61,.16);min-width:280px;padding:8px;z-index:60}
+.dropdown-menu{display:none;position:absolute;right:0;top:110%;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 40px rgba(10,31,61,.16);min-width:280px;padding:8px;z-index:60;max-height:calc(100vh - 130px);overflow-y:auto}
 .dropdown:hover .dropdown-menu,.dropdown:focus-within .dropdown-menu{display:block}
 .dropdown-menu a{display:block;padding:10px 12px;border-radius:8px;text-decoration:none}
 .dropdown-menu a:hover{background:var(--gold-soft)}
@@ -130,7 +130,7 @@ a{color:var(--navy-2)}
 .board-card h3{margin:0 0 4px}
 .board-card .role{color:var(--navy);font-weight:700;margin:0 0 10px}
 .board-card .email{font-size:15px;word-break:break-all}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px;box-shadow:0 6px 18px rgba(10,31,61,.05)}
+.card{background:var(--card);border:1px solid var(--navy);border-radius:10px;padding:20px}
 .card h3{font-size:20px;margin-bottom:8px}
 .card .meta{font-size:15px;color:var(--muted);margin-bottom:10px}
 .badge{display:inline-block;font-size:13px;font-weight:700;letter-spacing:.6px;padding:4px 11px;border-radius:999px;background:var(--navy);color:#fff;text-transform:uppercase}
@@ -148,12 +148,12 @@ table.results tr:last-child td{border-bottom:0}
 .threshold{font-size:13.5px;font-weight:700;color:#7a5f14;background:var(--gold-soft);padding:4px 12px;border-radius:999px}
 .record-tag{font-size:12.5px;font-weight:800;color:#1a1405;background:var(--gold-2);padding:3px 10px;border-radius:999px;letter-spacing:.4px;text-transform:uppercase}
 .empty-level{background:#fff;border:1px dashed #c9bfa8;border-radius:10px;padding:16px 18px;color:var(--muted);font-style:italic}
-.event-card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:26px;margin-bottom:28px;box-shadow:0 6px 18px rgba(10,31,61,.05)}
+.event-card{background:#fff;border:1px solid var(--navy);border-radius:10px;padding:20px;margin-bottom:28px}
 .event-card .event-title{font-size:23px;margin-bottom:4px}
 .event-card .event-meta{color:var(--muted);font-size:15px;margin-bottom:6px}
 /* calendar */
 .month{font-family:Georgia,serif;font-size:24px;color:var(--navy);margin:34px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--gold)}
-.cal-row{display:flex;gap:18px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin-bottom:12px}
+.cal-row{display:flex;gap:18px;align-items:center;background:#fff;border:1px solid var(--navy);border-radius:10px;padding:16px 20px;margin-bottom:12px}
 .cal-date{min-width:64px;text-align:center}
 .cal-date .d{font-family:Georgia,serif;font-size:30px;color:var(--navy);line-height:1}
 .cal-date .m{font-size:12.5px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
@@ -177,7 +177,7 @@ table.results tr:last-child td{border-bottom:0}
 .winner-line .who{flex:1}
 /* footer */
 footer{background:var(--navy);color:#c6d2e8;margin-top:0}
-footer .wrap{display:grid;grid-template-columns:1.25fr 1fr 1fr 1fr 1fr;gap:30px;padding-top:44px;padding-bottom:30px}
+footer .wrap{display:block;padding-bottom:30px}
 @media(max-width:1100px){footer .wrap{grid-template-columns:1fr 1fr}}
 @media(max-width:820px){footer .wrap{grid-template-columns:1fr}}
 .donate-band{background:linear-gradient(120deg,var(--navy) 0%,var(--navy-3) 100%);color:#fff;padding:44px 0}
@@ -208,7 +208,7 @@ footer p{font-size:15px;color:#9fb0cc}
   .mainnav .dropdown{display:block}
   .mainnav .dropdown>button{display:block;width:100%;text-align:left;color:var(--gold-2);font-weight:700;padding:16px 20px 4px;font-size:13.5px;letter-spacing:1.6px;text-transform:uppercase;cursor:default}
   .mainnav .dropdown>button.active{background:none;color:var(--gold-2)}
-  .mainnav .dropdown-menu{display:block;position:static;background:transparent;border:0;border-radius:0;box-shadow:none;min-width:0;padding:0}
+  .mainnav .dropdown-menu{display:block;position:static;background:transparent;border:0;border-radius:0;box-shadow:none;min-width:0;padding:0;max-height:none;overflow:visible}
   .mainnav .dropdown-menu a{padding:10px 20px}
   .mainnav .dropdown-menu a:hover{background:rgba(255,255,255,.08)}
   .mainnav .dropdown-menu .dl{color:#fff;font-size:16px}
@@ -218,7 +218,7 @@ footer p{font-size:15px;color:#9fb0cc}
   body.nav-open{overflow:hidden}body.nav-open .sitehead{z-index:300}
 }
 /* faq accordion */
-.faq details{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;padding:16px 20px}
+.faq details{background:#fff;border:1px solid var(--navy);border-radius:10px;margin-bottom:10px;padding:16px 20px}
 .faq summary{cursor:pointer;font-weight:700;color:var(--navy);font-size:17.5px}
 .faq summary:hover{color:var(--navy-2)}
 .faq details[open] summary{margin-bottom:10px}
@@ -230,6 +230,16 @@ footer p{font-size:15px;color:#9fb0cc}
 .tabs a{padding:9px 18px;border-radius:999px;border:1.5px solid var(--navy);color:var(--navy);text-decoration:none;font-weight:700;font-size:16px}
 .tabs a:hover{background:var(--gold-soft)}
 .tabs a.active{background:var(--navy);color:#fff}
+
+.footer-brand{display:flex;gap:30px;align-items:flex-start;padding-top:44px}
+.footer-brand .footer-logo{margin-bottom:0;flex:none}
+.footer-brand-text{max-width:520px}
+.footer-brand-text p{margin:0 0 10px}
+.footer-brand-side{margin-left:auto;flex:none}
+.footer-cols{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:30px;padding-top:34px}
+.footer-legal{margin-top:28px;max-width:920px}
+@media(max-width:1100px){.footer-cols{grid-template-columns:1fr 1fr}.footer-brand{flex-wrap:wrap}.footer-brand-side{margin-left:0}}
+@media(max-width:820px){.footer-cols{grid-template-columns:1fr}}
 `;
 
 function networkMenu(): string {
@@ -248,28 +258,35 @@ export function header(active: string): string {
 		}</div></div>`;
 	const nav = [
 		link("/", "Home", "home"),
+		link("/series", "Series 2026", "series"),
 		link("/about", "About", "about"),
 		link("/elite", "Elite Athletes", "elite"),
 		`<a href="https://groups.nwaofna.org/" target="_blank" rel="noopener">NW Groups</a>`,
-		drop("Compete", ["results", "calendar", "challenges", "series", "winners"], [
+		`<a href="https://health.nwaofna.org" target="_blank" rel="noopener">Health</a>`,
+		drop("Compete", ["series", "results", "cabinet", "calendar", "challenges", "series-2027", "championships", "winners", "licenses"], [
+			{ href: "/series", l: "Series 2026", n: "Six distances, weekly races, official results and standings" },
 			{ href: "/results", l: "Results", n: "Verified results and standings" },
+			{ href: "/cabinet", l: "Athlete Cabinet", n: "Your results, points and personal bests" },
 			{ href: "/calendar", l: "Calendar", n: "Competition calendar: series, championships, events" },
 			{ href: "/challenges", l: "Challenges", n: "Challenges, separate from competitions" },
-			{ href: "/series", l: "Series & Championships", n: "Series and championship pages" },
+			{ href: "/series/2027", l: "Series 2027", n: "The five-part 2027 season and the NWANA Cup" },
+			{ href: "/championships", l: "Championships", n: "U.S. and North American championships" },
 			{ href: "/winners", l: "Winners", n: "Congratulations to level winners" },
+			{ href: "/licenses", l: "Licenses", n: "Athlete and professional licenses" },
 		]),
-		drop("Learn", ["choose-your-path", "events"], [
+		drop("Learn", ["choose-your-path", "events", "licenses"], [
 			{ href: "https://academy.nwaofna.org", l: "Academy", n: "Learn and get certified" },
 			{ href: "/choose-your-path", l: "Choose Your Path", n: "Find your role in NWANA" },
 			{ href: "/events", l: "Events", n: "Forums, clinics, fundraisers, gatherings" },
+			{ href: "/licenses", l: "Licenses", n: "Athlete and professional licenses" },
 		]),
-		drop("Get Involved", ["support", "ways-to-give", "sponsors", "partners", "partner-network", "umbrella-groups", "contact", "sellers"], [
+		drop("Get Involved", ["support", "ways-to-give", "sponsors", "partners", "institutional-programs", "partner-network", "contact", "sellers"], [
 			{ href: "/support", l: "Support / Funds", n: "Donations and fundraising" },
 			{ href: "/ways-to-give", l: "Ways to Give", n: "DAF, checks, matching gifts" },
 			{ href: "/sponsors", l: "Sponsors", n: "Sponsor the growth of the sport" },
 			{ href: "/partners", l: "Partnerships", n: "Founding and strategic partnerships" },
+			{ href: "/institutional-programs", l: "Institutional Programs", n: "Programs for agencies, schools, networks and associations" },
 			{ href: "/partner-network", l: "Partner Network", n: "Organizations collaborating with NWANA" },
-			{ href: "/umbrella-groups", l: "Umbrella NW Groups", n: "Organize groups under one structure" },
 			{ href: "/sellers", l: "For Sellers", n: "Sell the sponsorship inventory" },
 			{ href: "/contact", l: "Contact", n: "Reach the federation office" },
 		]),
@@ -278,7 +295,7 @@ export function header(active: string): string {
 	return `
 <div class="topbar"><div class="wrap">
   <span class="nonprofit">NWANA is a 501(c)(3) nonprofit public charity. EIN 33-2444142.</span>
-  <span><a href="${DONATE_URL}">Donate</a><a href="https://academy.nwaofna.org">Academy</a></span>
+  <span><a href="/ways-to-give">Donate</a><a href="https://academy.nwaofna.org">Academy</a></span>
 </div></div>
 <header class="sitehead"><div class="wrap">
   <a class="brand" href="/"><img class="brand-logo" src="/logo.jpg" alt="NWANA, Nordic Walking Association of North America, logo"><span><span class="brand-name">NWANA</span><br><span class="brand-sub">Nordic Walking Association of North America</span></span></a>
@@ -290,14 +307,17 @@ export function footer(): string {
 	return `
 <div class="donate-band"><div class="wrap">
   <div><div class="kicker" style="color:var(--gold-2)">Support the mission</div><h2>Help build Nordic walking across North America</h2><p style="color:#cfd9ec;margin:6px 0 0">Your donation trains instructors, grows local groups, and powers verified competitions.</p></div>
-  <a class="btn btn-gold" href="${DONATE_URL}">Donate to NWANA</a>
+  <a class="btn btn-gold" href="/ways-to-give">Donate to NWANA</a>
 </div></div>
 <footer><div class="wrap">
-  <div>
+  <div class="footer-brand">
     <img class="footer-logo" src="/logo.jpg" alt="NWANA logo">
+    <div class="footer-brand-text">
     <h4>NWANA</h4>
     <p>The Nordic Walking Association of North America is building Nordic walking as a continental sport: weekly verified competitions, fair performance levels, instructor education, and a path from a first kilometer to the world stage.</p>
     <p>A 501(c)(3) public charity. Contributions are tax-deductible.</p>
+    </div>
+    <div class="footer-brand-side">
     <a aria-label="Nordic Walking Association of North America Inc NWANA" href="https://app.candid.org/profile/16510915/nordic-walking-association-of-north-america-inc-nwana-33-2444142/?pkId=31facfb4-fd0b-404a-9f53-147e33297404" target="_blank" rel="noopener" style="display:inline-block;margin-top:12px"><img alt="Candid transparency seal" src="https://widgets.guidestar.org/prod/v1/pdp/transparency-seal/16510915/svg" style="max-width:150px"></a>
     <h4 style="margin-top:20px">Follow NWANA</h4>
     <div class="social-row">
@@ -308,7 +328,9 @@ export function footer(): string {
       <a href="https://www.youtube.com/@NWANA.Official" target="_blank" rel="noopener">YouTube</a>
       <a href="https://www.strava.com/clubs/nwaofna" target="_blank" rel="noopener">Strava</a>
     </div>
+    </div>
   </div>
+  <div class="footer-cols">
   <div>
     <h4>Governance</h4>
     <a href="/governance">Governance & Policies</a>
@@ -336,8 +358,8 @@ export function footer(): string {
     <a href="/sponsors">Sponsors</a>
     <a href="/partners">Partnerships</a>
     <a href="/partner-network">Partner Network</a>
+    <a href="/institutional-programs">Institutional Programs</a>
     <a href="https://groups.nwaofna.org/">NW Groups</a>
-    <a href="/umbrella-groups">Umbrella NW Groups</a>
     <a href="/sellers">For Sellers</a>
   </div>
   <div>
@@ -350,6 +372,8 @@ export function footer(): string {
     <a href="/challenges">Challenges</a>
     <a href="/series">Series &amp; Championships</a>
   </div>
+</div>
+  <p class="footer-legal">Florida solicitation registration #CH85825. A COPY OF THE OFFICIAL REGISTRATION AND FINANCIAL INFORMATION MAY BE OBTAINED FROM THE DIVISION OF CONSUMER SERVICES BY CALLING TOLL-FREE (800-4357352) WITHIN THE STATE. REGISTRATION DOES NOT IMPLY ENDORSEMENT, APPROVAL, OR RECOMMENDATION BY THE STATE.</p>
 </div></footer>
 <div class="copyright"><div class="wrap">© ${new Date().getFullYear()} Nordic Walking Association of North America, Inc. All rights reserved.</div></div>`;
 }
@@ -360,6 +384,7 @@ export function layout(title: string, active: string, content: string, descripti
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="format-detection" content="telephone=no">
 <title>${esc(title)} | NWANA</title>
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -383,7 +408,6 @@ document.addEventListener('click',function(e){
 },true);
 </script>
 <script>
-// Mobile navigation drawer (hamburger). Desktop navigation is unchanged.
 (function(){
   function init(){
   var nav=document.querySelector('.mainnav'),toggle=document.querySelector('.nav-toggle'),scrim=document.querySelector('.nav-scrim');
