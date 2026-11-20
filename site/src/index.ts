@@ -59,20 +59,6 @@ function notFound(): Response {
 	});
 }
 
-let CANONICAL_PATH = "/";
-
-function html(body: string, status = 200): Response {
-	if (status === 200 && typeof body === "string" && body.includes("</head>")) {
-		body = body.replace("</head>", `<link rel="canonical" href="https://nwaofna.org${CANONICAL_PATH === "/" ? "/" : CANONICAL_PATH}"></head>`);
-	}
-	return new Response(body, {
-		status,
-		headers: {
-			"content-type": "text/html; charset=utf-8",
-			"cache-control": "public, max-age=60",
-		},
-	});
-}
 
 function errorPage(error: unknown): Response {
 	console.error(error);
@@ -109,7 +95,22 @@ export default {
 			});
 		}
 		const path = url.pathname.replace(/\/+$/, "") || "/";
-		CANONICAL_PATH = path;
+		// Per-request page response builder. The canonical URL is derived
+		// from THIS request's path: a module-level variable here is shared
+		// across concurrent requests and can leak another request's path
+		// into the canonical link.
+		const html = (body: string, status = 200): Response => {
+			if (status === 200 && typeof body === "string" && body.includes("</head>")) {
+				body = body.replace("</head>", `<link rel="canonical" href="https://nwaofna.org${path === "/" ? "/" : path}"></head>`);
+			}
+			return new Response(body, {
+				status,
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "public, max-age=60",
+				},
+			});
+		};
 
 		try {
 			// Serve embedded static assets (logo, favicon) directly from the
