@@ -3,6 +3,7 @@
 
 import { aboutPage, calendarPage, challengesPage, homePage, newsArticlePage, newsPage, resultsPage, sellersPage, seriesPage, winnersPage } from "./pages";
 import { cabinetAthletePage, cabinetIndexPage, championshipsPage, institutionalCommunityPage, institutionalHealthPage, institutionalParksPage, institutionalProgramsPage, institutionalSchoolsPage, institutionalSportsPage, licensesPage, series2027Page } from "./pages-restored";
+import { nationalProgramPage } from "./pages-program";
 import {
 	albertTazetdinovPage,
 	antiDopingPage,
@@ -293,6 +294,9 @@ export default {
 			if (request.method === "GET" && path === "/contact") {
 				return html(await contactPage());
 			}
+			if (request.method === "GET" && path === "/national-program") {
+				return html(await nationalProgramPage());
+			}
 			if (request.method === "GET" && path === "/partners") {
 				return html(await partnersPage());
 			}
@@ -342,7 +346,7 @@ export default {
 				try {
 					slugs = (await getNews(env.nwana_site_db, 100)).map((n) => n.slug);
 				} catch {}
-				const staticPaths = ["/", "/about", "/results", "/calendar", "/challenges", "/series", "/series/2027", "/championships", "/winners", "/licenses", "/news", "/elite", "/elite/tommy-aunan", "/elite/sven-thorslund", "/board/liene-visocka", "/board/maris-vainovskis", "/board/leonids-reinholds", "/board/albert-tazetdinov", "/choose-your-path", "/events", "/faq", "/governance", "/privacy", "/terms", "/terms-conditions", "/code-of-conduct", "/safesport", "/anti-doping", "/safety", "/documents", "/forms", "/forms/general-inquiry", "/forms/instructor-coach-inquiry", "/forms/event-program-proposal", "/forms/sponsor-partner-inquiry", "/forms/volunteer-interest", "/forms/safety-incident-report", "/forms/media-request", "/forms/document-brand-asset-request", "/forms/correction-request", "/brand", "/press", "/media-contact", "/sponsors", "/partners", "/partner-network", "/institutional-programs", "/institutional-programs/parks-recreation", "/institutional-programs/schools-universities", "/institutional-programs/community-networks", "/institutional-programs/health-active-aging", "/institutional-programs/sports-associations", "/partners/become-a-partner", "/sellers", "/support", "/ways-to-give", "/contact"];
+				const staticPaths = ["/", "/about", "/results", "/calendar", "/challenges", "/series", "/series/2027", "/championships", "/winners", "/licenses", "/news", "/elite", "/elite/tommy-aunan", "/elite/sven-thorslund", "/board/liene-visocka", "/board/maris-vainovskis", "/board/leonids-reinholds", "/board/albert-tazetdinov", "/choose-your-path", "/events", "/faq", "/governance", "/privacy", "/terms", "/terms-conditions", "/code-of-conduct", "/safesport", "/anti-doping", "/safety", "/documents", "/forms", "/forms/general-inquiry", "/forms/instructor-coach-inquiry", "/forms/event-program-proposal", "/forms/sponsor-partner-inquiry", "/forms/volunteer-interest", "/forms/safety-incident-report", "/forms/media-request", "/forms/document-brand-asset-request", "/forms/correction-request", "/brand", "/press", "/media-contact", "/sponsors", "/partners", "/partner-network", "/institutional-programs", "/institutional-programs/parks-recreation", "/institutional-programs/schools-universities", "/institutional-programs/community-networks", "/institutional-programs/health-active-aging", "/institutional-programs/sports-associations", "/partners/become-a-partner", "/sellers", "/support", "/ways-to-give", "/contact", "/national-program"];
 				const urls = staticPaths.concat(slugs.map((s) => "/news/" + s));
 				const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls.map((u) => "<url><loc>https://nwaofna.org" + u + "</loc></url>").join("\n") + "\n</urlset>";
 				return new Response(xml, {

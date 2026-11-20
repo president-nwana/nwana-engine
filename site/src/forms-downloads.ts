@@ -27,6 +27,7 @@ import {
 	termsPage,
 } from "./pages-migration";
 import { FAVICON_PNG_BASE64, LOGO_JPG_BASE64 } from "./assets-embedded";
+import { NATIONAL_PROGRAM_PDF_BASE64, STRATEGIC_PLAN_PDF_BASE64 } from "./program-docs";
 
 // ---------- shared helpers ----------
 export function sfNyDate(): string {
@@ -426,6 +427,12 @@ export async function dlServe(name: string, db: D1Database): Promise<Response | 
 	}
 	if (name === "nwana-favicon.png") {
 		return new Response(sfB64ToBytes(FAVICON_PNG_BASE64), { headers: { "content-type": "image/png", "content-disposition": 'attachment; filename="nwana-favicon.png"', "cache-control": "public, max-age=86400" } });
+	}
+	if (name === "nwana-national-program-2027-2030.pdf") {
+		return new Response(sfB64ToBytes(NATIONAL_PROGRAM_PDF_BASE64), { headers: { "content-type": "application/pdf", "content-disposition": 'attachment; filename="nwana-national-program-2027-2030.pdf"', "cache-control": "public, max-age=86400" } });
+	}
+	if (name === "nwana-strategic-plan-2027-2030.pdf") {
+		return new Response(sfB64ToBytes(STRATEGIC_PLAN_PDF_BASE64), { headers: { "content-type": "application/pdf", "content-disposition": 'attachment; filename="nwana-strategic-plan-2027-2030.pdf"', "cache-control": "public, max-age=86400" } });
 	}
 	const def = DL_ROUTES[name];
 	if (!def) return null;
