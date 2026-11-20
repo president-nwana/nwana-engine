@@ -721,7 +721,7 @@ export async function newsArticlePage(db: D1Database, slug: string): Promise<str
 
 export async function sellersPage(): Promise<string> {
 	const inventory = [
-		{ t: "Series 2027 naming and series partnerships", d: "Four seasonal virtual race series, about two races per week year round. Title and presenting partnerships with category exclusivity options, brand presence across all race communications, results pages, and standings." },
+		{ t: "Series 2027 naming and series partnerships", d: "Four seasonal virtual race series, about two races per week year round. Title and presenting partnerships, brand presence across all race communications, results pages, and standings." },
 		{ t: "Distance partnerships", d: "1K, 3K, 5K, 10K, 15K, 20K. Official Distance Partner designation for one distance across the season, with branding on distance-specific results and communications." },
 		{ t: "Free challenges", d: "About 15 planned challenges in virtual, monthly, and team formats. Presenting partnerships at the top of the participation funnel, the first touch with new audiences entering the NWANA system." },
 		{ t: "U.S. and Continental Championships", d: "Live flagship events planned for 2027 to 2028. Founding championship partner positions with on-site brand presence, naming rights, and hospitality as the events launch." },
@@ -752,7 +752,6 @@ export async function sellersPage(): Promise<string> {
     <h2>Commercial terms, stated plainly</h2>
     <div class="grid cols-3">
       <div class="card"><h3>Commission</h3><p>We offer market-rate commissions, with enhanced rates for founding partnerships closed in the first year. We are open to retainer-plus-commission structures. Specific numbers are negotiated per deal, not dictated in outreach.</p></div>
-      <div class="card"><h3>Exclusivity</h3><p>All intermediary activity is coordinated through an exclusive seller, with no parallel approaches without agreement. Exclusivity is granted against minimum sales commitments, performance milestones, and termination rights.</p></div>
       <div class="card"><h3>Real products</h3><p>What you sell exists. Series 2026 is live now, Series 2027 is a built pipeline, and the Academy and group licensing are operating systems, not slideware. You never have to invent what the federation delivers.</p></div>
     </div>
   </div></div>
